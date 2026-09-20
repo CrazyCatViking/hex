@@ -35,7 +35,7 @@ Successful setup sets the saved profile as the default. Then:
 hex init my-app
 ```
 
-Run `hex publish` from the app directory. Plain sites need only index.html and assets; build bundled apps first. For Azure Files, Hex installs its publishing tool automatically if needed, reuses the cached storage session, and starts Microsoft sign-in when necessary. No separate login command is required. AzCopy owns credential caching; Hex does not implement OAuth or copy tokens. Storage permissions and network connectivity are supplied by the operator. Filesystem publishing needs no login.
+Run `hex publish` from the app directory. Plain sites need only index.html and assets; build bundled apps first. Azure publishers need Azure CLI installed once. Hex prepares AzCopy, reuses the Azure CLI storage session, and invokes Entra web sign-in with MFA support when necessary. No separate login command is required. Azure CLI owns credential caching; Hex does not implement OAuth or copy tokens. Storage permissions and network connectivity are supplied by the operator. Filesystem publishing needs no login.
 
 ## Claude Code and other agents
 

@@ -104,7 +104,7 @@ func TestAzurePublishingManagesLogin(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("provider fixture uses a POSIX shell")
 	}
-	for _, mode := range []string{"interactive", "cached", "sas", "automation", "noninteractive", "login-failure", "publish-failure"} {
+	for _, mode := range []string{"interactive", "cached", "sas", "automation", "azcli", "noninteractive", "login-failure", "publish-failure", "device", "headless"} {
 		t.Run(mode, func(t *testing.T) {
 			directory := t.TempDir()
 			binary := filepath.Join(directory, "azcopy")
@@ -116,14 +116,22 @@ func TestAzurePublishingManagesLogin(t *testing.T) {
 			t.Setenv("HEX_TEST_MODE", mode)
 			t.Setenv("HEX_PUBLISH_SAS", "")
 			t.Setenv("AZCOPY_AUTO_LOGIN_TYPE", "")
+			t.Setenv("AZCOPY_TENANT_ID", "")
+			t.Setenv("DISPLAY", ":fixture")
+			t.Setenv("CODESPACES", "")
+			t.Setenv("PATH", directory+string(os.PathListSeparator)+os.Getenv("PATH"))
 			script := `#!/bin/sh
 printf '%s\n' "$*" >> "$HEX_TEST_CALLS"
-if [ "$1 ${2-}" = 'login status' ]; then
+if [ "$1" = account ]; then
     test -f "$HEX_TEST_SESSION"
 elif [ "$1" = login ]; then
+    test "$AZURE_CORE_ENABLE_BROKER_ON_WINDOWS" = false || exit 9
     if [ "$HEX_TEST_MODE" = login-failure ]; then exit 1; fi
     : > "$HEX_TEST_SESSION"
 elif [ "$1" = sync ]; then
+    if [ "$HEX_TEST_MODE" != sas ] && [ "$HEX_TEST_MODE" != automation ]; then
+        test "$AZCOPY_AUTO_LOGIN_TYPE" = AZCLI || exit 9
+    fi
     printf '%s\n' 'provider progress'
     if [ "$HEX_TEST_MODE" = publish-failure ]; then exit 1; fi
 fi
@@ -131,7 +139,10 @@ fi
 			if err := os.WriteFile(binary, []byte(script), 0700); err != nil {
 				t.Fatal(err)
 			}
-			if mode == "cached" {
+			if err := os.WriteFile(filepath.Join(directory, "az"), []byte(script), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if mode == "cached" || mode == "azcli" {
 				if err := os.WriteFile(session, nil, 0600); err != nil {
 					t.Fatal(err)
 				}
@@ -140,38 +151,46 @@ fi
 				t.Setenv("HEX_PUBLISH_SAS", "fixture")
 			}
 			if mode == "automation" {
+				t.Setenv("AZCOPY_AUTO_LOGIN_TYPE", "SPN")
+			}
+			if mode == "azcli" {
 				t.Setenv("AZCOPY_AUTO_LOGIN_TYPE", "AZCLI")
+			}
+			if mode == "device" {
+				t.Setenv("AZCOPY_AUTO_LOGIN_TYPE", "DEVICE")
+			}
+			if mode == "headless" {
+				t.Setenv("CODESPACES", "true")
 			}
 			app, output := testApp(t, directory)
 			app.Interactive = mode != "noninteractive"
-			opened := false
 			app.OpenBrowser = func(location string) error {
-				opened = location == "https://microsoft.com/devicelogin"
+				t.Fatal("Hex must not open the device-code page")
 				return nil
 			}
 			err := app.storageCommand(context.Background(), "sync", "source", "destination")
 			calls, readError := os.ReadFile(log)
-			if readError != nil {
+			if readError != nil && !(mode == "device" && os.IsNotExist(readError)) {
 				t.Fatal(readError)
 			}
-			failure := mode == "noninteractive" || mode == "login-failure" || mode == "publish-failure"
+			failure := mode == "noninteractive" || mode == "login-failure" || mode == "publish-failure" || mode == "device" || mode == "headless"
 			if (err != nil) != failure {
 				t.Fatalf("mode %s: %v", mode, err)
 			}
-			if mode == "noninteractive" || mode == "login-failure" {
+			if failure && mode != "publish-failure" {
 				if strings.Contains(string(calls), "sync") {
 					t.Fatal("transfer started before successful authentication")
 				}
 			} else if !strings.Contains(output.String(), "provider progress") {
 				t.Fatal("provider progress is hidden")
 			}
-			if mode == "interactive" && (!opened || string(calls) != "login status\nlogin\nsync source destination\n") {
+			if mode == "interactive" && string(calls) != "account get-access-token --resource https://storage.azure.com/ --output none\nlogin --allow-no-subscriptions --scope https://storage.azure.com/.default --output none\nsync source destination\n" {
 				t.Fatalf("unexpected login flow: %s", calls)
 			}
 			if (mode == "sas" || mode == "automation") && strings.Contains(string(calls), "login") {
 				t.Fatal("explicit automation credentials triggered login")
 			}
-			if mode == "cached" && opened {
+			if mode == "cached" && strings.Contains(string(calls), "login") {
 				t.Fatal("cached session triggered browser login")
 			}
 		})

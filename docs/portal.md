@@ -58,7 +58,7 @@ The browser download is intentional: terminal `curl`/PowerShell requests cannot 
 
 Unix scripts require Bash, curl, base64, and sha256sum or shasum. They add the bin directory to common shell startup files idempotently. The Windows script uses PowerShell and adds its bin directory to the user's PATH. Neither requires administrator privileges. The displayed PowerShell command sets execution policy only for that installation process.
 
-The installer verifies SHA-256 before installing the CLI, imports settings without network access to the platform, and removes temporary files. After installation, `hex update` installs newer binaries while preserving profiles. Rerunning a newly downloaded installer also refreshes platform settings. `hex publish` automatically prepares AzCopy and starts Microsoft storage sign-in when required, so employees do not need separate tool installation or login commands.
+The installer verifies SHA-256 before installing the CLI, imports settings without network access to the platform, and removes temporary files. After installation, `hex update` installs newer binaries while preserving profiles. Rerunning a newly downloaded installer also refreshes platform settings. Azure publishers need Azure CLI installed once; `hex publish` then prepares AzCopy and invokes Azure CLI's Entra browser sign-in with MFA support. Employees do not need separate AzCopy installation or login commands.
 
 ## Release source
 

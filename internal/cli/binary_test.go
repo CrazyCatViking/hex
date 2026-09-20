@@ -81,6 +81,12 @@ func TestAzureToolsAreDelegatedWithoutHexRequests(t *testing.T) {
 	t.Setenv("HEX_METADATA_LOG", metadataLog)
 	t.Setenv("HEX_TOOL_LOG", logFile)
 	t.Setenv("PATH", tools+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("DISPLAY", ":fixture")
+	t.Setenv("CODESPACES", "")
+	t.Setenv("AZCOPY_TENANT_ID", "")
+	if err := os.WriteFile(filepath.Join(tools, "az"), []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$HEX_TOOL_LOG\"\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
 	script := `#!/bin/sh
 set -eu
 printf '%s\n' "$@" > "$HEX_TOOL_LOG"
@@ -116,7 +122,7 @@ fi
 	}
 	run(t, project, "login")
 	args, err = os.ReadFile(logFile)
-	if err != nil || string(args) != "login\n" {
+	if err != nil || !strings.HasPrefix(string(args), "login\n--allow-no-subscriptions\n") {
 		t.Fatalf("%s %v", args, err)
 	}
 	run(t, project, "delete", "--yes")

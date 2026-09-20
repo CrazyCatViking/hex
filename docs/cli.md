@@ -16,7 +16,7 @@ Or build an executable without installing it:
 just build
 ```
 
-A compiled CLI does not need Go, Node.js, npm, or .NET installed to run. Go is needed to build source code, NGINX to serve local websites, and Docker Compose only for explicitly selected local integration services. Hex downloads and caches AzCopy automatically for Azure publishing if it is not already available. Frontend projects may have their own build-tool requirements; plain static sites need no build.
+A compiled CLI does not need Go, Node.js, npm, or .NET installed to run. Go is needed to build source code, NGINX to serve local websites, and Docker Compose only for explicitly selected local integration services. Azure browser sign-in requires Azure CLI; Hex invokes its Entra web flow with MFA support and downloads AzCopy automatically if needed. Frontend projects may have their own build-tool requirements; plain static sites need no build.
 
 Build versioned release binaries for macOS ARM64 and x86-64, Windows x86-64, and Linux x86-64:
 

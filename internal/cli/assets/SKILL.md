@@ -7,6 +7,8 @@ description: Build and publish web apps on Hex using its file storage, JSON docu
 
 ## Platform setup with an agent
 
+Azure publishing uses Azure CLI's Entra browser sign-in, including MFA. Azure CLI must be installed once; Hex invokes it automatically during publishing and gives AzCopy `AZCOPY_AUTO_LOGIN_TYPE=AZCLI`. Do not use device-code login or ask the user to run AzCopy separately. A missing browser session requires the user to run the Hex command in a desktop terminal. `AZCOPY_TENANT_ID` selects the organization tenant when needed.
+
 Employees normally install Hex from their company's main-domain landing page. Its OS-specific installer saves the default platform profile automatically. After installation, start with `hex init` or `hex capabilities`; another setup step is not needed. Use the workflow below only when connecting an unconfigured CLI or adding another platform.
 
 If a user needs to connect to a platform, run `hex setup <platform-url> --json`. This command never blocks on a prompt or opens a browser in JSON mode. Exit code 0 with `status: "ready"` means the profile is configured. Exit code 2 with `status: "download_required"` includes a `downloadURL`: ask the user to open it, sign in through their company's hosting provider, and download the JSON file. When they provide or drop the file into the conversation, run `hex setup --file "/actual/local/path.json" --server <platform-url> --json`. If you only receive file contents, save the JSON to a local file first. Do not ask for passwords, browser cookies, client IDs, or access tokens.

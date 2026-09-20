@@ -127,11 +127,7 @@ func (a *App) loginCommand() *cobra.Command {
 				fmt.Fprintln(a.Out, "Filesystem publishing does not require a storage login.")
 				return nil
 			}
-			binary, err := a.azCopyExecutable(cmd.Context())
-			if err != nil {
-				return err
-			}
-			return a.azureLogin(cmd.Context(), binary)
+			return a.azureLogin(cmd.Context())
 		},
 	}
 	command.Flags().StringVar(&profile, "platform", "", "Saved platform profile")
