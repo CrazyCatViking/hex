@@ -45,8 +45,9 @@ func TestStandaloneBinaryNeedsNeitherNodeNorGoAtRuntime(t *testing.T) {
 		return string(output)
 	}
 	call("init", "demo", "--publish-root", filepath.Join(directory, "sites"))
-	if data, err := os.ReadFile(filepath.Join(directory, "demo", "public", "hex-client.js")); err != nil || !strings.Contains(string(data), "createHexClient") {
-		t.Fatalf("missing embedded browser client: %v", err)
+	entries, err := os.ReadDir(filepath.Join(directory, "demo"))
+	if err != nil || len(entries) != 2 || entries[0].Name() != ".agents" || entries[1].Name() != "hex.json" {
+		t.Fatalf("init must create only configuration and skills: %v %v", entries, err)
 	}
 	if data, err := os.ReadFile(filepath.Join(directory, "demo", ".agents", "skills", "hex", "SKILL.md")); err != nil || !strings.Contains(string(data), "hex publish") {
 		t.Fatalf("missing embedded skill: %v", err)
@@ -75,14 +76,17 @@ func TestAzureToolsAreDelegatedWithoutHexRequests(t *testing.T) {
 		t.Fatal(err)
 	}
 	logFile := filepath.Join(directory, "tool-args")
+	metadataLog := filepath.Join(directory, "metadata.json")
+	t.Setenv("HEX_METADATA_LOG", metadataLog)
 	t.Setenv("HEX_TOOL_LOG", logFile)
 	t.Setenv("PATH", tools+string(os.PathListSeparator)+os.Getenv("PATH"))
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$HEX_TOOL_LOG\"\n"
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$HEX_TOOL_LOG\"\nif [ \"$1\" = sync ]; then cp \"$2/.hex-site.json\" \"$HEX_METADATA_LOG\"; fi\n"
 	if err := os.WriteFile(filepath.Join(tools, "azcopy"), []byte(script), 0755); err != nil {
 		t.Fatal(err)
 	}
 	project := filepath.Join(directory, "demo")
 	run(t, directory, "init", project, "--publish-url", "https://account.file.core.windows.net/sites/public/sites")
+	createBuild(t, project)
 	run(t, project, "publish")
 	args, err := os.ReadFile(logFile)
 	if err != nil {
@@ -94,6 +98,10 @@ func TestAzureToolsAreDelegatedWithoutHexRequests(t *testing.T) {
 	}
 	if _, err := os.Stat(lines[1]); !os.IsNotExist(err) {
 		t.Fatal("publishing snapshot was not removed")
+	}
+	metadata, err := os.ReadFile(metadataLog)
+	if err != nil || !strings.Contains(string(metadata), `"publishedAt"`) {
+		t.Fatalf("Azure snapshot is missing metadata: %s %v", metadata, err)
 	}
 	run(t, project, "login")
 	args, err = os.ReadFile(logFile)

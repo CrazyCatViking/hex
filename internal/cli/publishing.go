@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,7 +13,9 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
+	hex "github.com/crazycatviking/hex/server"
 	"github.com/spf13/cobra"
 )
 
@@ -279,11 +282,32 @@ func (a *App) publish(ctx context.Context, project Project, name string) error {
 	if err != nil {
 		return err
 	}
+	temporary, err := os.MkdirTemp("", "hex-publish-*")
+	if err != nil {
+		return err
+	}
+	defer a.removeTemporary(temporary)
+	metadata := hex.SiteMetadata{
+		Title: project.Title, Description: project.Description, Author: project.Author,
+		PublishedAt: time.Now().UTC(),
+	}
+	data, err := json.MarshalIndent(metadata, "", "  ")
+	if err != nil {
+		return err
+	}
+	if len(data)+1 > maxConfigBytes {
+		return errors.New("site metadata exceeds 64 KiB")
+	}
+	metadataPath := filepath.Join(temporary, ".hex-site.json")
+	if err := os.WriteFile(metadataPath, append(data, '\n'), 0644); err != nil {
+		return fmt.Errorf("prepare site metadata: %w", err)
+	}
 	if project.Publishing.Provider == "filesystem" {
 		destination, err := filesystemDestination(a.Dir, project.Publishing.Root, name, true)
 		if err != nil {
 			return err
 		}
+		source.Files = append(source.Files, sourceFile{Key: ".hex-site.json", Path: metadataPath})
 		return syncFilesystem(ctx, source, destination)
 	}
 
@@ -291,15 +315,6 @@ func (a *App) publish(ctx context.Context, project Project, name string) error {
 	if err != nil {
 		return err
 	}
-	temporary, err := os.MkdirTemp("", "hex-publish-*")
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := os.RemoveAll(temporary); err != nil {
-			fmt.Fprintln(a.Err, "Remove publishing snapshot:", err)
-		}
-	}()
 	for _, file := range source.Files {
 		if err := ctx.Err(); err != nil {
 			return err

@@ -86,7 +86,7 @@ Set `site_base_url = "https://hex.example.com"` for the parent site origin. It c
 
 Before browsing a site such as `demo.hex.example.com`, configure its DNS, certificate and Container Apps hostname binding. The `custom_domains` input accepts `{ name, certificate_id }` objects referring to certificates in this environment; `environment_id` is output for certificate provisioning. Add the corresponding `custom_domain_redirect_uris` to the Entra registration. DNS and certificates are operator-managed. Initially deploying with no bindings is allowed, but custom site URLs will not yet work.
 
-This example uses explicit domain bindings/callbacks; it does not assume a wildcard DNS record enables wildcard Container Apps routing or Entra redirects. See [Subdomain hosting](../../../../docs/subdomains.md) for setup and the distinction between hosting configuration and metadata-free publishing.
+This example uses explicit domain bindings/callbacks; it does not assume a wildcard DNS record enables wildcard Container Apps routing or Entra redirects. See [Subdomain hosting](../../../../docs/subdomains.md) for setup and the distinction between hosting configuration and direct-to-storage publishing.
 
 For CLI access, configure an exposed API scope and appropriate consent on the Entra registration. Use v2 access tokens to match the issuer. Projects can set `resource: "api://<client-id>"` after authorizing Azure CLI as a client, or supply an appropriate token through `HEX_TOKEN`. Hex does not implement identity or claims APIs.
 

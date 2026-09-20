@@ -33,7 +33,7 @@ public/sites/my-app/index.html
 public/sites/my-app/assets/app.js
 ```
 
-The site directory is authoritative. The server reads immediate directories under `public/sites/`, checks for a regular root `index.html`, and derives each site's name and subdomain URL. No site metadata is persisted. Listing is a fresh enumeration, not a catalogue lookup. NGINX selects `public/sites/<site>/` as the document root from a validated hostname; hidden paths and symlinks are not served.
+The site directory is authoritative. The server reads immediate directories under `public/sites/`, checks for a regular root `index.html`, and derives each site's name and subdomain URL. The CLI writes optional descriptive fields and a publication timestamp to `.hex-site.json`, which discovery exposes as `metadata`. Sites without metadata remain valid. Listing is a fresh enumeration, not a catalogue lookup. NGINX selects `public/sites/<site>/` as the document root from a validated hostname; hidden paths and symlinks are not served.
 
 The CLI's filesystem publisher writes temporary files and renames them, with root `index.html` replaced last. The Azure Files publisher delegates synchronization to AzCopy. Neither provides an atomic whole-site deployment or coordinates concurrent publishers. Failed synchronization can leave a partial update; republish to recover.
 

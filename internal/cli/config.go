@@ -70,7 +70,10 @@ type Connection struct {
 
 type Project struct {
 	Name         string        `json:"name"`
-	Directory    string        `json:"directory"`
+	Title        string        `json:"title,omitempty"`
+	Description  string        `json:"description,omitempty"`
+	Author       string        `json:"author,omitempty"`
+	Directory    string        `json:"directory,omitempty"`
 	Platform     string        `json:"platform,omitempty"`
 	Server       string        `json:"server,omitempty"`
 	SiteBaseURL  string        `json:"siteBaseURL,omitempty"`

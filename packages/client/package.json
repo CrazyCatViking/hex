@@ -1,7 +1,11 @@
 {
-  "name": "@hex-platform/client",
+  "name": "@crazycatviking/hex",
   "version": "0.1.0",
   "type": "module",
+  "description": "Browser client for Hex file storage, documents, and realtime channels",
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/crazycatviking/hex.git",
@@ -18,6 +22,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build",
     "test": "node --test test/*.test.mjs"
   },
   "devDependencies": {

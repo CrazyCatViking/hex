@@ -282,8 +282,8 @@
         <ul>
           <li><code>ObjectStore</code> supplies uploaded application files.</li>
           <li>
-            <code>SiteDirectory</code> enumerates published directories without
-            metadata.
+            <code>SiteDirectory</code> enumerates published directories;
+            <code>SiteMetadataReader</code> optionally supplies attribution and publication timestamps.
           </li>
           <li><code>Database</code> supplies JSON document storage.</li>
           <li><code>Realtime</code> supplies subscriptions and broadcasts.</li>
@@ -303,8 +303,8 @@ Browser → site subdomain → NGINX → that site's files directly</code></pre>
           The CLI synchronizes directly to a local directory or Azure Files
           using AzCopy. It does not request credentials, upload, register, or
           notify completion through Hex. The server only enumerates directories
-          containing a root index.html. There are no site manifests, release
-          archives, or metadata records. Folder synchronization is not
+          containing a root index.html and reads optional descriptive metadata
+          from <code>.hex-site.json</code>. Folder synchronization is not
           transactional.
         </p>
         <p>
@@ -318,7 +318,7 @@ Browser → site subdomain → NGINX → that site's files directly</code></pre>
         <h3>Client, CLI, and hosting</h3>
         <ul>
           <li>
-            <code>@hex-platform/client</code> exposes file operations, document
+            <code>@crazycatviking/hex</code> exposes file operations, document
             CRUD, realtime channels, and capability discovery.
           </li>
           <li>
@@ -364,7 +364,12 @@ hex dev --package ./examples/custom-server --data-dir .hex-data</code></pre>
         <p>In another terminal, initialize an app:</p>
         <pre><code>hex setup http://localhost:8080 --name local
 hex init my-app</code></pre>
-        <p>From the generated app directory, publish it:</p>
+        <p>
+          Initialization creates configuration and agent skills. Build the app
+          with your preferred tooling, install <code>@crazycatviking/hex</code>
+          through its package manager, and produce <code>dist/index.html</code>.
+          Then publish from the app directory:
+        </p>
         <pre><code>hex publish</code></pre>
         <p>
           Open
@@ -504,9 +509,9 @@ my-hex-app/
         </p>
         <pre><code>npm install ../hex/packages/client</code></pre>
         <p>
-          The static starter receives a <strong>copy</strong> of the built
-          client JavaScript during initialization. That copy does not
-          automatically track later changes to the client package.
+          Initialization creates only Hex configuration and agent skills.
+          Install <code>@crazycatviking/hex</code> using the app's package
+          manager and track its version in the lockfile. Build the app before publishing.
         </p>
         <p class="callout">
           Keep the platform executable the same between local and hosted

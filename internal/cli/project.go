@@ -1,11 +1,9 @@
 package cli
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -16,7 +14,7 @@ func (a *App) initCommand() *cobra.Command {
 	var name, server, profile, resource, baseURL, publishingRoot, publishingURL string
 	command := &cobra.Command{
 		Use:   "init [directory]",
-		Short: "Create a static site project and agent skill",
+		Short: "Initialize Hex configuration and the agent skill",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			directory := a.Dir
@@ -33,19 +31,16 @@ func (a *App) initCommand() *cobra.Command {
 				return errors.New("choose either --publish-root or --publish-url")
 			}
 
-			project := Project{Name: name, Directory: "public", Resource: resource}
-			var connection *Connection
-			var err error
+			project := Project{Name: name, Resource: resource}
 			if profile != "" {
-				connection, project.Platform, err = loadProfile(profile, false)
-			} else if server == "" && publishingRoot == "" && publishingURL == "" {
-				connection, project.Platform, err = loadProfile("", true)
-			}
-			if err != nil {
-				return err
+				_, selected, err := loadProfile(profile, false)
+				if err != nil {
+					return err
+				}
+				project.Platform = selected
 			}
 
-			if connection == nil || server != "" {
+			if server != "" || publishingRoot != "" || publishingURL != "" {
 				if server == "" {
 					server = "http://localhost:8080"
 				}
@@ -102,26 +97,6 @@ func (a *App) initializeProject(directory string, project Project) error {
 		return fmt.Errorf("create project configuration: %w", err)
 	}
 
-	public := filepath.Join(directory, "public")
-	if err := os.MkdirAll(public, 0755); err != nil {
-		return err
-	}
-	for _, name := range []string{"index.html", "app.js", "hex-client.js"} {
-		content, err := assets.ReadFile("assets/" + name)
-		if err != nil {
-			return err
-		}
-		if name == "app.js" {
-			encodedName, err := json.Marshal(project.Name)
-			if err != nil {
-				return err
-			}
-			content = bytes.ReplaceAll(content, []byte(`"__HEX_SITE_NAME__"`), encodedName)
-		}
-		if err := writeNewFile(filepath.Join(public, name), content); err != nil && !errors.Is(err, fs.ErrExist) {
-			return fmt.Errorf("create starter file %s: %w", name, err)
-		}
-	}
 	return installSkills(directory)
 }
 

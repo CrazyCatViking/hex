@@ -74,17 +74,15 @@ If the agent receives an attachment's contents rather than an accessible local p
 
 Profiles live in `profiles.json` under `HEX_CONFIG_DIR`, or by default under the user's configuration directory (`$XDG_CONFIG_HOME/hex`, `%LOCALAPPDATA%/hex`, or `~/.config/hex`). They contain only the versioned non-secret connection document. Unknown fields, credential-bearing URLs and unsupported providers are rejected. File imports/downloads are limited to 64 KiB.
 
-An initialized project pins the profile name rather than copying the platform settings:
+By default, initialization creates only the site name and commands use the current default profile:
 
 ```json
 {
-  "name": "my-app",
-  "platform": "company",
-  "directory": "public"
+  "name": "my-app"
 }
 ```
 
-`hex init other-app --platform staging` selects another saved profile. Explicit legacy `server`, `siteBaseURL` and `publishing` project settings still work. Rerun setup to refresh a profile after the operator changes the platform configuration. Profiles are per user; another developer imports the same company profile under the project's expected name.
+`hex init other-app --platform staging` writes `platform: "staging"` to pin a saved profile. Without a pin, changing the default with `hex setup` changes the destination used by subsequent commands. `hex publish --platform staging` selects a profile for that invocation. Publishing defaults to the `dist` directory; an optional `directory` field selects another build output. Explicit legacy `server`, `siteBaseURL` and `publishing` settings still work. Rerun setup to refresh a profile after the operator changes its configuration. Profiles are per user; for a pinned project, another developer imports the profile under the project's expected name.
 
 Publishing and unpublishing only read the cached profile. They do not contact the Hex API for discovery, credentials, registration or completion. `hex capabilities` uses cached capabilities when a profile supplies them; `--refresh` explicitly requests the current API response.
 

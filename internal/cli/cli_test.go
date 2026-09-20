@@ -86,10 +86,11 @@ func TestSetupProfilesAndOfflinePublishing(t *testing.T) {
 	if err := json.Unmarshal(data, &config); err != nil {
 		t.Fatal(err)
 	}
-	if config.Platform != "company" || config.Server != "" || config.Name != "demo" {
+	if config.Platform != "" || config.Directory != "" || config.Server != "" || config.Name != "demo" {
 		t.Fatalf("unexpected project: %+v", config)
 	}
 	blocked.Store(true)
+	createBuild(t, project)
 	if output := run(t, project, "publish"); strings.TrimSpace(output) != "http://demo.localhost:8080/" {
 		t.Fatal(output)
 	}
@@ -231,6 +232,7 @@ func TestPublishingMirrorsOnlyOneSite(t *testing.T) {
 	project := filepath.Join(directory, "project")
 	destination := filepath.Join(directory, "sites")
 	run(t, directory, "init", project, "--name", "demo", "--publish-root", destination)
+	createBuild(t, project)
 	write := func(path, value string) {
 		t.Helper()
 		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
@@ -240,7 +242,7 @@ func TestPublishingMirrorsOnlyOneSite(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	source := filepath.Join(project, "public")
+	source := filepath.Join(project, "dist")
 	write(filepath.Join(source, ".env"), "secret")
 	write(filepath.Join(source, "node_modules", "package.js"), "dependency")
 	write(filepath.Join(source, "asset"), "file")
@@ -277,7 +279,8 @@ func TestPublishingRejectsSymlinksAndOverlap(t *testing.T) {
 	project := filepath.Join(directory, "project")
 	destination := filepath.Join(directory, "sites")
 	run(t, directory, "init", project, "--name", "demo", "--publish-root", destination)
-	source := filepath.Join(project, "public")
+	createBuild(t, project)
+	source := filepath.Join(project, "dist")
 	if err := os.Symlink(filepath.Join(source, "index.html"), filepath.Join(source, "leak")); err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +300,7 @@ func TestPublishingRejectsSymlinksAndOverlap(t *testing.T) {
 	if err := app.Execute(context.Background(), []string{"publish"}, "test"); err == nil {
 		t.Fatal("destination symlink accepted")
 	}
-	config := Project{Name: "demo", Server: "http://localhost:8080", Directory: "public", Publishing: &Publishing{Provider: "filesystem", Root: source}}
+	config := Project{Name: "demo", Server: "http://localhost:8080", Directory: "dist", Publishing: &Publishing{Provider: "filesystem", Root: source}}
 	if err := writeJSONFile(filepath.Join(project, "hex.json"), config); err != nil {
 		t.Fatal(err)
 	}

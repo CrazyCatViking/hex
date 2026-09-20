@@ -150,7 +150,8 @@ replace github.com/crazycatviking/hex => ${JSON.stringify(root)}
     await exec(cli, ["init", app, "--name", "demo"], {
       env: cliEnvironment,
     });
-    await writeFile(join(app, "public/index.html"), "consumer website");
+    await mkdir(join(app, "dist"));
+    await writeFile(join(app, "dist/index.html"), "consumer website");
     await exec(cli, ["publish"], {
       cwd: app,
       env: cliEnvironment,

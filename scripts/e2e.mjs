@@ -9,7 +9,7 @@ import { createServer } from "node:net";
 import { once } from "node:events";
 import WebSocket from "ws";
 import { Agent } from "undici";
-import { createHexClient } from "../packages/client/dist/index.js";
+import { createHexClient } from "@crazycatviking/hex";
 import { startNginx, waitForHTTP, stopProcess } from "./nginx.mjs";
 import { buildCLI } from "./build-cli.mjs";
 
@@ -68,7 +68,7 @@ async function readSiteText(origin, path = "/", site = "demo") {
 
 async function verifyStaticServing(origin, backend) {
   assert.match(await readSiteText(origin), /Welcome to Hex/);
-  assert.match(await readSiteText(origin, "/hex-client.js"), /createHexClient/);
+  assert.match(await readSiteText(origin, "/app.js"), /console.log/);
   assert.equal((await fetch(`${backend}/sites/demo/`)).status, 404);
 
   assert.equal((await fetch(`${origin}/sites/demo/`)).status, 404);
@@ -82,12 +82,12 @@ async function verifyStaticServing(origin, backend) {
     404,
   );
 
-  const asset = await siteRequest(origin, "/hex-client.js");
+  const asset = await siteRequest(origin, "/app.js");
   assert.match(asset.headers.get("content-type"), /javascript/);
   assert.equal(asset.headers.get("x-content-type-options"), "nosniff");
   assert.equal((await siteRequest(origin, "/missing.js")).status, 404);
   assert.equal(
-    (await siteRequest(origin, "/hex-client.js", "missing-site")).status,
+    (await siteRequest(origin, "/app.js", "missing-site")).status,
     404,
   );
 }
@@ -162,17 +162,17 @@ async function verifyRealtime(client) {
 }
 
 async function verifyPublishing(origin, projectDirectory, invoke) {
-  await mkdir(join(projectDirectory, "public/nested"));
+  await mkdir(join(projectDirectory, "dist/nested"));
   await writeFile(
-    join(projectDirectory, "public/nested/index.html"),
+    join(projectDirectory, "dist/nested/index.html"),
     "nested page",
   );
-  await writeFile(join(projectDirectory, "public/old.js"), "old asset");
+  await writeFile(join(projectDirectory, "dist/old.js"), "old asset");
   await invoke(["publish"]);
   assert.equal(await readSiteText(origin, "/nested/"), "nested page");
 
-  await writeFile(join(projectDirectory, "public/index.html"), "updated site");
-  await rm(join(projectDirectory, "public/old.js"));
+  await writeFile(join(projectDirectory, "dist/index.html"), "updated site");
+  await rm(join(projectDirectory, "dist/old.js"));
   await invoke(["publish"]);
   assert.equal(await readSiteText(origin), "updated site");
   assert.equal((await siteRequest(origin, "/old.js")).status, 404);
@@ -240,6 +240,15 @@ async function main() {
       join(sitesDirectory, "public/sites"),
     ]);
 
+    await mkdir(join(projectDirectory, "dist"));
+    await writeFile(
+      join(projectDirectory, "dist/index.html"),
+      "<!doctype html><title>Welcome to Hex</title>",
+    );
+    await writeFile(
+      join(projectDirectory, "dist/app.js"),
+      "console.log('test asset');",
+    );
     const invoke = (args) => exec(cli, args, { cwd: projectDirectory });
     const published = await invoke(["publish"]);
     assert.equal(published.stdout.trim(), `http://demo.localhost:${port}/`);
@@ -247,10 +256,10 @@ async function main() {
     await verifyStaticServing(origin, backend);
     const siteList = await invoke(["sites"]);
     const site = JSON.parse(siteList.stdout)[0];
-    assert.deepEqual(site, {
-      name: "demo",
-      url: `http://demo.localhost:${port}/`,
-    });
+    assert.equal(site.name, "demo");
+    assert.equal(site.url, `http://demo.localhost:${port}/`);
+    assert.ok(Number.isFinite(Date.parse(site.metadata.publishedAt)));
+    assert.equal((await siteRequest(origin, "/.hex-site.json")).status, 404);
     await verifyPrivateFiles(origin, directory, sitesDirectory);
 
     const client = createHexClient({
@@ -285,16 +294,13 @@ async function main() {
     await stopProcess(server);
     assert.equal((await fetch(`${origin}/api/hex/capabilities`)).status, 502);
     await writeFile(
-      join(projectDirectory, "public/index.html"),
+      join(projectDirectory, "dist/index.html"),
       "published without an API",
     );
     await invoke(["publish"]);
     assert.equal((await fetch(`${origin}/healthz`)).status, 200);
     assert.equal(await readSiteText(origin), "published without an API");
-    assert.match(
-      await readSiteText(origin, "/hex-client.js"),
-      /createHexClient/,
-    );
+    assert.match(await readSiteText(origin, "/app.js"), /console.log/);
 
     await invoke(["delete", "--yes"]);
     assert.equal((await siteRequest(origin)).status, 404);

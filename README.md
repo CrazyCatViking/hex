@@ -12,9 +12,9 @@ This is the [github.com/crazycatviking/hex](https://github.com/crazycatviking/he
 | `server/providers/` | Local storage, Azure Blob Storage, PostgreSQL and in-memory providers |
 | `server/dev/` | Optional local provider adapter for consuming Go applications |
 | `cmd/hex-server/` | Configurable reference server executable |
-| `packages/client/` | `@hex-platform/client`, a dependency-free browser JS/TS client |
+| `packages/client/` | `@crazycatviking/hex`, a dependency-free browser JS/TS client |
 | `cmd/hex/` | Standalone Go CLI entry point |
-| `internal/cli/` | CLI implementation and embedded starter, client, skill and development assets |
+| `internal/cli/` | CLI implementation and embedded skill and development assets |
 | `deploy/` | Container images, NGINX configuration and composable OpenTofu deployment examples |
 | `examples/custom-server/` | Example consuming executable with its own API endpoint |
 
@@ -22,7 +22,7 @@ This is the [github.com/crazycatviking/hex](https://github.com/crazycatviking/he
 
 Build/install the CLI from this checkout with `go install ./cmd/hex`, or use a prebuilt executable when available. Running the CLI requires neither Go nor Node.js. Building a consuming Go server still requires Go; `hex dev --binary` does not. Put your Go installation's bin directory on PATH. If you previously linked the Node CLI, remove that old global npm installation/link so `hex` resolves to the Go executable.
 
-See [CLI build, distribution and migration](docs/cli.md) for cross-compilation and embedded-client maintenance.
+See [CLI build, distribution and migration](docs/cli.md), [the client package](packages/client/README.md), and [Just release recipes](docs/releases.md) for cross-platform binaries and npm distribution.
 
 Your executable can import `server/` and use `server/dev` for its local configuration. Start that repository with:
 
@@ -36,7 +36,7 @@ You can also run your executable directly with `go run .` or from an IDE: the `d
 
 ## Run locally
 
-Building from source requires Go 1.25+. Local website hosting also requires NGINX. Node.js is only needed to develop/build the browser client or run JavaScript/browser integration tests, not to use the CLI or generate a starter site.
+Building from source requires Go 1.25+. Local website hosting also requires NGINX. Node.js is needed for npm-based app tooling, developing the browser client, and JavaScript/browser integration tests. The CLI itself has no Node.js dependency.
 
 ```sh
 go install ./cmd/hex
@@ -52,7 +52,7 @@ hex setup http://localhost:8080 --name local
 hex init my-app
 ```
 
-Open `my-app` in your editor. From that project directory:
+Open `my-app` in your editor. Initialization creates only `hex.json` and `.agents/skills/hex/SKILL.md`. Have your coding agent build the app using your preferred framework, install `@crazycatviking/hex` with the project's package manager, and produce a `dist/index.html` build. See [client installation](packages/client/README.md) for a local tarball workflow before a registry release. From that project directory, after building:
 
 ```sh
 hex capabilities
@@ -60,37 +60,33 @@ hex publish
 hex sites
 ```
 
-Open `http://my-app.localhost:8080/`. Each site has its own hostname and browser origin. Modern browsers resolve `*.localhost` to loopback; if your environment does not, add local DNS/hosts entries. The starter contains an HTML page, JavaScript app, a browser copy of the client, and `.agents/skills/hex/SKILL.md`. Point your coding agent to that skill if it does not discover `.agents/skills` automatically. `hex skills` refreshes the Hex-owned skill file without modifying existing project instructions.
+Open `http://my-app.localhost:8080/`. Each site has its own hostname and browser origin. Modern browsers resolve `*.localhost` to loopback; if your environment does not, add local DNS/hosts entries. Point your coding agent to the installed skill if it does not discover `.agents/skills` automatically. `hex skills` refreshes the Hex-owned skill file without modifying existing project instructions.
 
-Edit files under `public/` and publish again. For a bundled app, install the client into that project, build with relative asset URLs, and change `hex.json.directory` to the build output directory. Only that directory is uploaded.
+The default `hex.json` contains only the site name. Publishing uses `dist` and the current default profile from `hex setup`. Set optional `directory` for a different build output or `platform` to pin a saved profile. Add descriptive metadata as needed:
 
 ```json
 {
   "name": "my-app",
-  "server": "https://hex.example.com",
-  "siteBaseURL": "https://hex.example.com",
-  "directory": "dist",
-  "publishing": {
-    "provider": "azure-files",
-    "url": "https://ACCOUNT.file.core.windows.net/sites/public/sites"
-  }
+  "title": "Team dashboard",
+  "description": "Daily reports and shared tasks",
+  "author": "Alex"
 }
 ```
 
 `hex publish` synchronizes directly to `publishing`, and `hex delete my-app --yes` deletes that site's directory directly. Neither command calls the Hex API or obtains credentials from it. Azure Files uses AzCopy; local publishing uses filesystem operations. See [Publishing](docs/publishing.md) for configuration and storage authentication.
 
-`hex sites` calls the read-only discovery API, which enumerates actual site directories containing `index.html` and returns names and subdomain URLs. Set `siteBaseURL` when the API's `server` origin differs from the parent site domain; for example an Azure-generated API hostname with sites under `hex.example.com`. There is no site catalogue, manifest, registration call, release history, or publication timestamp. App uploads and database data are separate from site files and survive unpublishing.
+`hex sites` calls the read-only discovery API, which enumerates site directories containing `index.html` and returns names, subdomain URLs, and optional metadata. Publishing writes title, description, author, and a generated UTC `publishedAt` to `.hex-site.json` alongside the site; it excludes connection settings and local paths. Existing sites without metadata remain discoverable. Set `siteBaseURL` when the API origin differs from the parent site domain. App uploads and database data survive unpublishing.
 
 ## Connect to a company platform
 
 Run `hex setup` and enter the platform URL. Hex downloads connection settings directly if available. If hosting authentication is required, it opens the browser download URL and accepts the downloaded file's path, including terminal drag-and-drop quoting. Authentication stays with the browser's hosting provider and AzCopy for publishing.
 
-Agents such as Claude Code can use `hex setup <url> --json` and, when user sign-in is required, `hex setup --file <downloaded-file> --json`. Setup saves a non-secret local profile; `hex init` selects it and publishing works from that cache without contacting Hex. See [Setup and authentication handoff](docs/setup.md).
+Agents such as Claude Code can use `hex setup <url> --json` and, when user sign-in is required, `hex setup --file <downloaded-file> --json`. Setup saves a non-secret default profile; publishing resolves it from that cache without contacting Hex. See [Setup and authentication handoff](docs/setup.md).
 
 ## Browser API
 
 ```ts
-import { createHexClient } from '@hex-platform/client';
+import { createHexClient } from '@crazycatviking/hex';
 
 const hex = createHexClient({ site: 'my-app' });
 const capabilities = await hex.capabilities();
@@ -212,7 +208,6 @@ go test -race ./...
 go vet ./...
 npm ci
 npm run build
-npm run check:cli-client
 npm test
 npm run test:e2e
 npm run test:local

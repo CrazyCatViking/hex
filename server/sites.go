@@ -1,6 +1,7 @@
 package hex
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -8,13 +9,26 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 )
 
 var siteNamePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 
 type Site struct {
-	Name string `json:"name"`
-	URL  string `json:"url"`
+	Name     string        `json:"name"`
+	URL      string        `json:"url"`
+	Metadata *SiteMetadata `json:"metadata,omitempty"`
+}
+
+type SiteMetadata struct {
+	Title       string    `json:"title,omitempty"`
+	Description string    `json:"description,omitempty"`
+	Author      string    `json:"author,omitempty"`
+	PublishedAt time.Time `json:"publishedAt"`
+}
+
+type SiteMetadataReader interface {
+	ReadSiteMetadata(context.Context, string) (*SiteMetadata, error)
 }
 
 func (s *Server) listSites(w http.ResponseWriter, r *http.Request) {
@@ -40,10 +54,18 @@ func (s *Server) listSites(w http.ResponseWriter, r *http.Request) {
 		siteURL := *baseURL
 		siteURL.Host = name + "." + baseURL.Host
 		siteURL.Path = "/"
-		sites = append(sites, Site{
+		site := Site{
 			Name: name,
 			URL:  siteURL.String(),
-		})
+		}
+		if reader, ok := s.config.Sites.(SiteMetadataReader); ok {
+			site.Metadata, err = reader.ReadSiteMetadata(r.Context(), name)
+			if err != nil {
+				writeServerError(w, err)
+				return
+			}
+		}
+		sites = append(sites, site)
 	}
 
 	writeJSON(w, http.StatusOK, sites)

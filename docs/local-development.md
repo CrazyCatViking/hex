@@ -101,7 +101,7 @@ hex setup http://localhost:8080 --name local
 hex init demo
 ```
 
-Run `hex publish` in the generated app directory and open `http://demo.localhost:8080/`. For custom gateway ports, give setup the matching URL. The launcher also prints the absolute publishing root for manual `hex init --server ... --publish-root ...` configuration. App code uses same-origin API requests. Modern browsers resolve `.localhost` subdomains to loopback; configure local DNS/hosts entries if your environment does not.
+Initialization creates configuration and an agent skill. Build the app with your preferred tooling, installing `@crazycatviking/hex` through its package manager as described in the skill and [client README](../packages/client/README.md). Produce `dist/index.html`, or set `hex.json.directory` to a different build output. Then run `hex publish` and open `http://demo.localhost:8080/`. For custom gateway ports, give setup the matching URL. The launcher also prints the absolute publishing root for manual `hex init --server ... --publish-root ...` configuration. App code uses same-origin API requests. Modern browsers resolve `.localhost` subdomains to loopback; configure local DNS/hosts entries if your environment does not.
 
 ## 4. Choose your local services
 

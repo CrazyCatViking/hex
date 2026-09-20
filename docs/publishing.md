@@ -1,6 +1,6 @@
 # Direct publishing
 
-`hex publish` interacts directly with the provider configured in `hex.json`. It does not call Hex for capabilities, credentials, upload, registration or completion. `siteBaseURL` (falling back to `server`) is only used to print the resulting subdomain URL. `hex delete <site> --yes` likewise deletes directly from the publishing destination.
+`hex publish` interacts directly with the provider resolved from the default profile, an explicit `platform`, or settings in `hex.json`. It uploads `dist` by default; optional `directory` selects another build output. It does not call Hex for capabilities, credentials, upload, registration or completion. `siteBaseURL` (falling back to `server`) prints the resulting subdomain URL. `hex delete <site> --yes` likewise deletes directly from the publishing destination.
 
 `hex sites` and capability refreshes use the Hex API, with the gateway's authentication. Storage authentication for publishing is independent of that gateway session or `HEX_TOKEN`.
 
@@ -50,7 +50,7 @@ azcopy sync <temporary-build-directory> <configured-url>/<site> \
   --recursive=true --delete-destination=true
 ```
 
-It removes the temporary directory afterward. No archive or release metadata is stored in Azure. Unpublishing runs `azcopy remove <configured-url>/<site> --recursive=true`.
+The snapshot also contains the generated `.hex-site.json` metadata file. The CLI removes the temporary directory afterward. Unpublishing runs `azcopy remove <configured-url>/<site> --recursive=true`.
 
 The storage account in the OpenTofu example is private. Publishers must have network/DNS access to its private endpoint, such as a VPN-connected machine or private CI runner. Entra login and SAS credentials do not bypass that restriction. The example intentionally does not open public storage access or grant publishing privileges to all Hex users.
 
@@ -63,11 +63,27 @@ The storage account in the OpenTofu example is private. Publishers must have net
       demo/
         index.html
         app.js
+        .hex-site.json
 ```
 
-NGINX maps each site subdomain to its own directory. The server enumerates the immediate directories under `public/sites/`, keeping valid DNS-label names with a regular root `index.html`. It skips incomplete directories, symlinked sites and symlinked indexes. `GET /api/sites` returns a sorted array of `{name, url}`; its length is the site count. URLs are full subdomain URLs such as `https://demo.hex.example.com/`, derived from `HEX_SITE_BASE_URL`. See [Subdomain hosting](subdomains.md) for matching NGINX, DNS and authentication configuration.
+NGINX maps each site subdomain to its own directory. The server enumerates the immediate directories under `public/sites/`, keeping valid DNS-label names with a regular root `index.html`. It skips incomplete directories, symlinked sites and symlinked indexes. `GET /api/sites` returns a sorted array of `{name, url, metadata?}`; its length is the site count. URLs are full subdomain URLs such as `https://demo.hex.example.com/`, derived from `HEX_SITE_BASE_URL`. See [Subdomain hosting](subdomains.md) for matching NGINX, DNS and authentication configuration.
 
-Anything that places files in that layout can publish a site. There is no metadata file, manifest, database catalogue, registration step or completion notification. Discovery does not persist or cache its result. Existing public directories from older Hex versions remain discoverable; old `sites/*.json` manifests and `releases/` content are ignored, not automatically deleted.
+Anything that places files in that layout can publish a site. Metadata is optional: existing sites remain discoverable without it. Discovery does not persist or cache its result. Old `sites/*.json` manifests and `releases/` content are ignored, not automatically deleted.
+
+## Site metadata
+
+Add optional `title`, `description`, and `author` strings to the source `hex.json`. The CLI publishes those fields and a generated UTC `publishedAt` timestamp in `.hex-site.json`. It leaves the source configuration and build output untouched, and never copies platform settings, storage destinations, or local paths into metadata. The generated file is limited to 64 KiB.
+
+```json
+{
+  "name": "demo",
+  "title": "Team dashboard",
+  "description": "Shared reports and tasks",
+  "author": "Alex"
+}
+```
+
+The local site provider reads metadata on each discovery request; custom providers can implement `hex.SiteMetadataReader`. NGINX blocks the hidden metadata file from direct static requests, while the discovery API exposes its descriptive fields in `metadata`. Invalid, oversized, or symlinked metadata produces an explicit discovery error. Attribution is project-provided, not verified identity. The timestamp identifies a publication attempt, not a transaction or audit event; failed or concurrent synchronization can leave mixed files.
 
 ## Synchronization behavior
 
@@ -75,7 +91,7 @@ Anything that places files in that layout can publish a site. There is no metada
 - Hidden paths and `node_modules` are excluded; symlinks and special files are rejected before transfer.
 - A publish mirrors one site, including deleting obsolete destination files. Other site directories are untouched.
 - Whole-site synchronization is not atomic. A failed or concurrent publish can leave mixed content. Republish to recover, and serialize deployment jobs for a site in your CI system.
-- The filesystem adapter uses temporary-file renames and replaces root `index.html` last. AzCopy controls upload ordering and replacement semantics for Azure Files.
+- The filesystem adapter uses temporary-file renames, replaces root `index.html` after other assets, and writes metadata last. AzCopy controls upload ordering and replacement semantics for Azure Files.
 - Unpublishing removes site assets only, not the separate upload store or document database.
 - There are no server-side site-upload limits, release archives or rollback commands.
 
