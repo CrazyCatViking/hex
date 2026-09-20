@@ -29,7 +29,7 @@ resource "azapi_resource" "environment" {
 
 resource "azapi_resource" "mount" {
   for_each = var.sites_enabled ? {
-    sites          = "ReadWrite"
+    sites          = "ReadOnly"
     sites-readonly = "ReadOnly"
   } : {}
 
@@ -68,7 +68,7 @@ locals {
       name         = "sites"
       storageType  = "AzureFile"
       storageName  = "sites"
-      mountOptions = "dir_mode=0770,file_mode=0660,uid=65532,gid=65532"
+      mountOptions = "dir_mode=0550,file_mode=0440,uid=65532,gid=65532"
     },
     {
       name         = "sites-readonly"
@@ -109,6 +109,11 @@ resource "azapi_resource" "app" {
           targetPort    = 8080
           transport     = "auto"
           allowInsecure = false
+          customDomains = [for domain in var.custom_domains : {
+            name          = domain.name
+            bindingType   = "SniEnabled"
+            certificateId = domain.certificate_id
+          }]
         }
       }
       template = {
@@ -116,6 +121,10 @@ resource "azapi_resource" "app" {
           {
             name  = "nginx"
             image = var.nginx_image
+            env = [{
+              name  = "HEX_SITE_DOMAIN"
+              value = var.site_domain
+            }]
             resources = {
               cpu    = 0.25
               memory = "0.5Gi"

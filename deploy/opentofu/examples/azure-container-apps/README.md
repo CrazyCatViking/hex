@@ -15,7 +15,7 @@ capabilities = {
 
 | Setting | Values | Resources and behavior |
 | --- | --- | --- |
-| `sites` | `true` / `false` | Azure Files, private endpoint and mounts; enables publishing/site listing. Without it NGINX has no site mount. |
+| `sites` | `true` / `false` | Azure Files, private endpoint and read-only mounts; enables static hosting and directory-based discovery. Without it NGINX has no site mount. |
 | `files` | `true` / `false` | Separate Blob account/container, private endpoint and managed-identity role; enables app uploads/downloads. |
 | `database` | `"none"` | No database and no database API. |
 | | `"managed"` | Private Azure PostgreSQL; supply `postgres_password`. |
@@ -74,7 +74,17 @@ The root example owns a dedicated resource group, VNet, user-assigned identity a
 
 The hosting module creates the Container App with **internal ingress**, creates its Entra auth configuration, then enables external HTTPS ingress. The separate `azapi_update_resource.public_ingress` owns the ingress `external` property; the base app ignores changes to that one property so image updates do not fight the public-ingress resource. Preserve the explicit dependency on the authentication resource when adapting the module.
 
-Add the output `redirect_uri` as a Web redirect URI to the Entra app registration. Configure enterprise-application assignments if access should be restricted to particular employees/groups. There are no authentication exclusions. The Go listener is loopback-only. Storage public network access is disabled; NGINX gets a read-only SMB mount and Go gets a read-write mount when sites are enabled.
+Add the output `redirect_uri` as a Web redirect URI to the Entra app registration. Configure enterprise-application assignments if access should be restricted to particular employees/groups. There are no authentication exclusions. The Go listener is loopback-only. Storage public network access is disabled; both NGINX and Go get read-only SMB mounts when sites are enabled.
+
+## Direct publishing and site domains
+
+`tofu output -json publishing` returns the provider/destination object to put under `publishing` in the app's `hex.json`. `hex publish` and `hex delete` use this storage destination directly, not the Hex API. Publishers need private-endpoint network access and their own Azure Files data authorization. The example does not grant that role automatically. See [Publishing](../../../../docs/publishing.md).
+
+Set `site_base_url = "https://hex.example.com"` for the parent site origin. It configures NGINX's hostname routing and the discovery API's URL generation. In the app project, set `siteBaseURL` to this value when `server` uses the Azure-generated gateway hostname.
+
+Before browsing a site such as `demo.hex.example.com`, configure its DNS, certificate and Container Apps hostname binding. The `custom_domains` input accepts `{ name, certificate_id }` objects referring to certificates in this environment; `environment_id` is output for certificate provisioning. Add the corresponding `custom_domain_redirect_uris` to the Entra registration. DNS and certificates are operator-managed. Initially deploying with no bindings is allowed, but custom site URLs will not yet work.
+
+This example uses explicit domain bindings/callbacks; it does not assume a wildcard DNS record enables wildcard Container Apps routing or Entra redirects. See [Subdomain hosting](../../../../docs/subdomains.md) for setup and the distinction between hosting configuration and metadata-free publishing.
 
 For CLI access, configure an exposed API scope and appropriate consent on the Entra registration. Use v2 access tokens to match the issuer. Projects can set `resource: "api://<client-id>"` after authorizing Azure CLI as a client, or supply an appropriate token through `HEX_TOKEN`. Hex does not implement identity or claims APIs.
 
@@ -84,7 +94,7 @@ Before destroying a deployed environment, disable its Container App ingress (for
 
 `minReplicas = maxReplicas = 1`; the example does not scale to zero. Go and NGINX together reserve 0.75 vCPU and 1.5 GiB. Keep one replica while using the in-memory realtime provider. A different broker and hosting composition can support scale-out later.
 
-Site storage uses an explicitly selected `Hot` Azure Files tier, configurable through `site_access_tier`; it is not implicitly transaction-optimized. `site_quota_gib` defaults to 100. Uploads use Blob Hot storage. SMB mount UID/GID values match the provided NGINX and non-root Go images. Azure Files keys and database credentials are stored in infrastructure state, as described in the [OpenTofu overview](../../README.md).
+Site storage uses an explicitly selected `Hot` Azure Files tier, configurable through `site_access_tier`; it is not implicitly transaction-optimized. `site_quota_gib` defaults to 100. Uploads use Blob Hot storage. Read-only SMB mount UID/GID values match the provided NGINX and non-root Go images. Azure Files keys and database credentials are stored in infrastructure state, as described in the [OpenTofu overview](../../README.md).
 
 Private endpoints and storage accounts exist only for selected storage capabilities. PostgreSQL is often the largest fixed cost and is not provisioned by default. This example does not provision an ACR, Log Analytics workspace, managed broker, or application monitoring stack.
 

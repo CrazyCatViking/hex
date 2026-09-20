@@ -5,6 +5,7 @@ server_image    = "YOUR_REGISTRY/hex-server:0.1.0"
 nginx_image     = "YOUR_REGISTRY/hex-nginx:0.1.0"
 name            = "hex"
 location        = "westeurope"
+site_base_url   = "https://hex.example.com"
 
 capabilities = {
   sites    = true

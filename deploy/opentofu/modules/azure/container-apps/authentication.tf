@@ -43,6 +43,11 @@ resource "azapi_update_resource" "public_ingress" {
           targetPort    = 8080
           transport     = "auto"
           allowInsecure = false
+          customDomains = [for domain in var.custom_domains : {
+            name          = domain.name
+            bindingType   = "SniEnabled"
+            certificateId = domain.certificate_id
+          }]
         }
       }
     }

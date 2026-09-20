@@ -4,24 +4,26 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 )
 
 type Config struct {
 	Files          ObjectStore
-	Sites          ObjectStore
+	Sites          SiteDirectory
+	SiteBaseURL    string
 	Database       Database
 	Realtime       Realtime
 	MaxUploadBytes int64
 }
 
 type Server struct {
-	config     Config
-	mux        *http.ServeMux
-	siteWrites sync.Mutex
+	config Config
+	mux    *http.ServeMux
 }
 
 func New(config Config) *Server {
+	if config.SiteBaseURL == "" {
+		config.SiteBaseURL = "http://localhost:8080"
+	}
 	if config.MaxUploadBytes <= 0 {
 		config.MaxUploadBytes = 32 << 20
 	}
@@ -59,8 +61,6 @@ func (s *Server) registerRoutes() {
 
 	if s.config.Sites != nil {
 		s.mux.HandleFunc("GET /api/sites", s.listSites)
-		s.mux.HandleFunc("POST /api/sites/{site}/deploy", s.deploy)
-		s.mux.HandleFunc("DELETE /api/sites/{site}", s.deleteSite)
 	}
 }
 

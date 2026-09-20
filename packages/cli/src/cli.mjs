@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import { realpath } from "node:fs/promises";
-import { relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { createAPI } from "./api.mjs";
-import { archiveDirectory } from "./archive.mjs";
+import { publishSite, unpublishSite } from "./publishing/index.mjs";
+import { siteURL } from "./site-url.mjs";
 import {
   initializeProject,
   installSkills,
@@ -12,56 +12,19 @@ import {
   validateSiteName,
 } from "./project.mjs";
 
-export { archiveDirectory } from "./archive.mjs";
-
 const help = `hex init [directory] [--name name] [--server URL] [--resource ENTRA_APP_ID_URI]
+         [--publish-root DIRECTORY | --publish-url AZURE_FILES_URL]
+         [--site-base-url URL]
 hex publish
 hex sites
 hex delete [site] --yes
 hex capabilities
 hex skills
 
-Run management commands in a project containing hex.json.
-For Azure, supply HEX_TOKEN or configure resource and sign in with az login.`;
-
-async function publishSite(api, config, siteName) {
-  const capabilities = await api.request("/api/hex/capabilities");
-  if (!capabilities.sites) {
-    throw new Error("Site publishing is disabled on this server");
-  }
-
-  const projectDirectory = await realpath(process.cwd());
-  const publishDirectory = await realpath(resolve(config.directory));
-  const relativeDirectory = relative(projectDirectory, publishDirectory);
-  const outsideProject =
-    relativeDirectory === ".." ||
-    relativeDirectory.startsWith(".." + sep) ||
-    resolve(projectDirectory, relativeDirectory) !== publishDirectory;
-
-  if (!relativeDirectory || outsideProject) {
-    throw new Error("Publish directory must be a subdirectory of the project");
-  }
-
-  const archive = await archiveDirectory(
-    publishDirectory,
-    capabilities.maxUploadBytes,
-  );
-  const site = await api.request(
-    `/api/sites/${siteName}/deploy`,
-    "POST",
-    archive,
-  );
-  console.log(new URL(site.url, api.server).href);
-}
-
-async function deleteSite(api, siteName, confirmed) {
-  if (!confirmed) {
-    throw new Error("Use --yes to unpublish this site");
-  }
-
-  await api.request(`/api/sites/${siteName}`, "DELETE");
-  console.log(`Unpublished ${siteName}`);
-}
+Run commands in a project containing hex.json.
+publish/delete use the publishing provider directly; they never call the Hex API.
+Azure Files publishing uses AzCopy login or HEX_PUBLISH_SAS and requires storage network access.
+sites/capabilities use HEX_TOKEN or the optional resource setting for gateway access.`;
 
 export async function main(args = process.argv.slice(2)) {
   const { positionals, values } = parseArgs({
@@ -71,6 +34,9 @@ export async function main(args = process.argv.slice(2)) {
       server: { type: "string" },
       name: { type: "string" },
       resource: { type: "string" },
+      "publish-root": { type: "string" },
+      "publish-url": { type: "string" },
+      "site-base-url": { type: "string" },
       yes: { type: "boolean" },
       help: { type: "boolean" },
     },
@@ -98,6 +64,30 @@ export async function main(args = process.argv.slice(2)) {
   }
 
   const config = await readProjectConfig();
+
+  if (command === "publish") {
+    const siteName = validateSiteName(argument ?? config.name);
+    const base =
+      values["site-base-url"] ??
+      config.siteBaseURL ??
+      values.server ??
+      config.server;
+    const url = siteURL(base, siteName);
+    await publishSite(config, siteName);
+    console.log(url);
+    return;
+  }
+
+  if (command === "delete") {
+    if (!values.yes) {
+      throw new Error("Use --yes to unpublish this site");
+    }
+    const siteName = validateSiteName(argument ?? config.name);
+    await unpublishSite(config, siteName);
+    console.log(`Unpublished ${siteName}`);
+    return;
+  }
+
   const api = createAPI(config, values);
 
   switch (command) {
@@ -109,18 +99,6 @@ export async function main(args = process.argv.slice(2)) {
 
     case "sites":
       console.log(JSON.stringify(await api.request("/api/sites"), null, 2));
-      return;
-
-    case "delete":
-      await deleteSite(
-        api,
-        validateSiteName(argument ?? config.name),
-        values.yes,
-      );
-      return;
-
-    case "publish":
-      await publishSite(api, config, validateSiteName(argument ?? config.name));
       return;
   }
 }

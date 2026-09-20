@@ -3,9 +3,12 @@ import { join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export function validateSiteName(value) {
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(value)) {
+  if (
+    typeof value !== "string" ||
+    !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(value)
+  ) {
     throw new Error(
-      "Site names must contain 1–64 letters, digits, underscores or hyphens, starting with a letter or digit",
+      "Site names must be DNS labels: 1–63 lowercase letters, digits or hyphens, starting and ending with a letter or digit",
     );
   }
 
@@ -96,6 +99,26 @@ export async function initializeProject(directory, options) {
 
   if (options.resource) {
     config.resource = options.resource;
+  }
+
+  if (options["site-base-url"]) {
+    config.siteBaseURL = parseServerOrigin(options["site-base-url"]).origin;
+  }
+
+  if (options["publish-root"] && options["publish-url"]) {
+    throw new Error("Choose either --publish-root or --publish-url");
+  }
+  if (options["publish-root"]) {
+    config.publishing = {
+      provider: "filesystem",
+      root: resolve(options["publish-root"]),
+    };
+  }
+  if (options["publish-url"]) {
+    config.publishing = {
+      provider: "azure-files",
+      url: options["publish-url"],
+    };
   }
 
   await mkdir(projectDirectory, { recursive: true });

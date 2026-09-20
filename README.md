@@ -1,6 +1,6 @@
 # Hex
 
-A small internal app platform: static sites, shared backend capabilities, a browser client, and a publishing CLI. The hosting gateway authenticates users; Hex assumes everyone who reaches it can use every API, read and change data, and publish or unpublish any site.
+A small internal app platform: static sites, shared backend capabilities, a browser client, and a publishing CLI. The hosting gateway authenticates API and website visitors. Publishers authenticate directly to their storage provider; publishing never goes through the Hex API.
 
 ## Packages
 
@@ -24,12 +24,13 @@ npm link --workspace @hex-platform/cli
 npm run dev
 ```
 
-The development gateway binds to `127.0.0.1:8080`. NGINX serves published files directly and proxies `/api/` to Go on loopback port 8081. The launcher uses the same NGINX routing configuration as Azure. Set `NGINX_BIN` if NGINX is not on PATH, and optionally `NGINX_MIME_TYPES` if its MIME type file is in a nonstandard location. Files and site releases persist under `.hex-data/`; the default development database is in memory and resets on restart.
+The development gateway binds to `127.0.0.1:8080`. NGINX serves published files directly and proxies `/api/` to Go on loopback port 8081. The launcher uses the same NGINX routing configuration as Azure. Set `NGINX_BIN` if NGINX is not on PATH, and optionally `NGINX_MIME_TYPES` if its MIME type file is in a nonstandard location. Files and site directories persist under `.hex-data/`; the default development database is in memory and resets on restart. The launcher prints the absolute local publishing root.
 
 In another terminal:
 
 ```sh
-hex init my-app --name my-app --server http://localhost:8080
+hex init my-app --name my-app --server http://localhost:8080 \
+  --publish-root /absolute/path/to/hex/.hex-data/sites/public/sites
 ```
 
 Open `my-app` in your editor. From that project directory:
@@ -40,7 +41,7 @@ hex publish
 hex sites
 ```
 
-Open `http://localhost:8080/sites/my-app/`. The starter contains an HTML page, JavaScript app, a browser copy of the client, and `.agents/skills/hex/SKILL.md`. Point your coding agent to that skill if it does not discover `.agents/skills` automatically. `hex skills` refreshes the Hex-owned skill file without modifying existing project instructions.
+Open `http://my-app.localhost:8080/`. Each site has its own hostname and browser origin. Modern browsers resolve `*.localhost` to loopback; if your environment does not, add local DNS/hosts entries. The starter contains an HTML page, JavaScript app, a browser copy of the client, and `.agents/skills/hex/SKILL.md`. Point your coding agent to that skill if it does not discover `.agents/skills` automatically. `hex skills` refreshes the Hex-owned skill file without modifying existing project instructions.
 
 Edit files under `public/` and publish again. For a bundled app, install the client into that project, build with relative asset URLs, and change `hex.json.directory` to the build output directory. Only that directory is uploaded.
 
@@ -48,11 +49,18 @@ Edit files under `public/` and publish again. For a bundled app, install the cli
 {
   "name": "my-app",
   "server": "https://hex.example.com",
-  "directory": "dist"
+  "siteBaseURL": "https://hex.example.com",
+  "directory": "dist",
+  "publishing": {
+    "provider": "azure-files",
+    "url": "https://ACCOUNT.file.core.windows.net/sites/public/sites"
+  }
 }
 ```
 
-`hex delete my-app --yes` unpublishes a site. It does not delete its app data or stored releases.
+`hex publish` synchronizes directly to `publishing`, and `hex delete my-app --yes` deletes that site's directory directly. Neither command calls the Hex API or obtains credentials from it. Azure Files uses AzCopy; local publishing uses filesystem operations. See [Publishing](docs/publishing.md) for configuration and storage authentication.
+
+`hex sites` calls the read-only discovery API, which enumerates actual site directories containing `index.html` and returns names and subdomain URLs. Set `siteBaseURL` when the API's `server` origin differs from the parent site domain; for example an Azure-generated API hostname with sites under `hex.example.com`. There is no site catalogue, manifest, registration call, release history, or publication timestamp. App uploads and database data are separate from site files and survive unpublishing.
 
 ## Browser API
 
@@ -134,11 +142,12 @@ func run() error {
 }
 ```
 
-Omit a provider to disable that capability. `GET /api/hex/capabilities` reports which built-ins are enabled. `hex.New` returns an API-only `http.Handler`; provider credentials, connection pools and lifecycle remain under the host application's control. Mount the site store in NGINX and serve its `public/` directory directly. The Go handler has no website-serving route.
+Omit a provider to disable that capability. `GET /api/hex/capabilities` reports which built-ins are enabled. `hex.New` returns an API-only `http.Handler`; provider credentials, connection pools and lifecycle remain under the host application's control. Mount site storage in NGINX and route each hostname to `public/sites/<name>/`. Set `Config.SiteBaseURL` for directory-derived URLs. The Go handler has no website-serving route.
 
 The interfaces are defined in `server/storage.go`:
 
-- `ObjectStore`: atomic object replacement, reads, prefix listing and deletion. Configure independent stores for site files and app uploads. The local provider works on the Azure Files share mounted by both Go and NGINX. Azure Blob supplies app upload storage; another site provider also needs a corresponding direct static-serving setup.
+- `SiteDirectory`: read-only enumeration of actual site directories. The local provider reads the Azure Files share mounted by Go and NGINX, or a local development directory.
+- `ObjectStore`: uploaded application objects, with writes, reads, prefix listing and deletion. This is separate from publishing; Azure Blob supplies app upload storage in the example.
 - `Database`: site-scoped JSON documents with keyset pagination. The PostgreSQL provider works with Azure Database for PostgreSQL or another PostgreSQL installation.
 - `Realtime`: subscriptions and JSON broadcasts, allowing a future distributed broker implementation without changing the browser API.
 
@@ -181,13 +190,13 @@ npm test
 npm run test:e2e
 ```
 
-The end-to-end test requires NGINX. It starts Go and NGINX, initializes a real CLI project, publishes it, exercises the client through the gateway, republishes, and unpublishes it. It then stops Go and verifies that NGINX still serves the site's HTML and JavaScript while API requests fail. Go tests also cover realtime broadcasts, namespace separation, invalid archives, staging failures, file/directory transitions, upload limits, and filesystem traversal protection.
+The end-to-end test requires NGINX. It starts Go and NGINX, publishes directly to the shared directory, exercises discovery and application APIs, then stops Go and verifies that publishing and unpublishing still work. CLI tests check that direct publishing makes zero requests to Hex, filters source files, and handles file/directory transitions. Go tests cover filesystem discovery, realtime, namespaces and application-upload limits. Azure Files adapter tests verify AzCopy invocation; live Azure publishing is not tested locally.
 
 ## Initial scope
 
-- Sites share one origin at `/sites/<name>/`. Namespacing separates data organization, not authorization or browser trust boundaries.
+- Sites use separate origins such as `https://demo.hex.example.com/`, isolating localStorage, sessionStorage and IndexedDB. The former shared `/sites/<name>/` web routes are gone. Shared backend APIs still follow the initial all-authenticated-users trust model; subdomains are not per-site data authorization. See [Subdomain hosting](docs/subdomains.md).
 - The in-process realtime provider requires one backend replica. Messages are transient; clients handle reconnects and refresh state themselves.
 - Documents are JSON objects, at most 1 MiB. `set` replaces the entire document. Lists are ordered by ID, with up to 100 results per page. There is no query language or automatic database-change feed.
-- Uploads and expanded site archives default to 32 MiB; sites are limited to 5,000 ZIP entries. Uploads are buffered in memory. File and site listings are currently unpaginated.
-- Publishing stages and validates a release, then synchronizes `public/sites/<name>/` for NGINX, replacing the root `index.html` last. Each file replacement is atomic, but the entire folder update is not transactional: requests can span versions, and a storage failure during synchronization may leave a partially updated site. Republish to recover. Old releases are retained; there is no rollback command or garbage collector yet. Publish/delete operations are serialized within the server process.
+- Application file uploads through the API default to 32 MiB and are buffered in memory. Direct site publishing is not subject to that API limit. File and site listings are currently unpaginated.
+- Publishing mirrors one site's directory and deletes obsolete files. It is not a transactional whole-site replacement. Local publishing replaces files atomically and writes `index.html` last; Azure Files synchronization follows AzCopy's ordering and semantics. Concurrent publishers are not coordinated. Republish after an interrupted synchronization.
 - No custom integrations, identity API, application permissions, code generation or AI proxy is included in this version.

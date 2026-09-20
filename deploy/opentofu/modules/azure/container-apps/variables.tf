@@ -81,3 +81,16 @@ variable "registries" {
   }))
   default = []
 }
+
+variable "site_domain" {
+  type    = string
+  default = "localhost"
+}
+
+variable "custom_domains" {
+  type = list(object({
+    name           = string
+    certificate_id = string
+  }))
+  default = []
+}

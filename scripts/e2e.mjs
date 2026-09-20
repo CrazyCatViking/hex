@@ -8,13 +8,29 @@ import { fileURLToPath } from "node:url";
 import { createServer } from "node:net";
 import { once } from "node:events";
 import WebSocket from "ws";
+import { Agent } from "undici";
 import { createHexClient } from "../packages/client/dist/index.js";
 import { startNginx, waitForHTTP, stopProcess } from "./nginx.mjs";
 
-globalThis.WebSocket = WebSocket;
+function lookupLoopback(hostname, options, callback) {
+  if (options.all) {
+    callback(null, [{ address: "127.0.0.1", family: 4 }]);
+  } else {
+    callback(null, "127.0.0.1", 4);
+  }
+}
+
+globalThis.WebSocket = class extends WebSocket {
+  constructor(url) {
+    super(url, { lookup: lookupLoopback });
+  }
+};
 
 const exec = promisify(execFile);
 const root = fileURLToPath(new URL("../", import.meta.url));
+const loopback = new Agent({
+  connect: { lookup: lookupLoopback },
+});
 
 async function freePort() {
   const listener = createServer().listen(0, "127.0.0.1");
@@ -34,33 +50,51 @@ async function freePort() {
   return port;
 }
 
-async function readText(url) {
-  const response = await fetch(url);
-  assert.equal(response.status, 200, url);
+function siteRequest(origin, path = "/", site = "demo", options = {}) {
+  const url = new URL(path, origin);
+  url.hostname = `${site}.localhost`;
+  return fetch(url, {
+    ...options,
+    dispatcher: loopback,
+  });
+}
+
+async function readSiteText(origin, path = "/", site = "demo") {
+  const response = await siteRequest(origin, path, site);
+  assert.equal(response.status, 200, `${site}: ${path}`);
   return response.text();
 }
 
 async function verifyStaticServing(origin, backend) {
-  assert.match(await readText(`${origin}/sites/demo/`), /Welcome to Hex/);
-  assert.match(
-    await readText(`${origin}/sites/demo/hex-client.js`),
-    /createHexClient/,
-  );
+  assert.match(await readSiteText(origin), /Welcome to Hex/);
+  assert.match(await readSiteText(origin, "/hex-client.js"), /createHexClient/);
   assert.equal((await fetch(`${backend}/sites/demo/`)).status, 404);
 
-  const redirect = await fetch(`${origin}/sites/demo`, { redirect: "manual" });
-  assert.equal(redirect.headers.get("location"), "/sites/demo/");
+  assert.equal((await fetch(`${origin}/sites/demo/`)).status, 404);
+  assert.equal((await fetch(origin)).status, 404);
+  assert.equal(
+    (
+      await fetch(`http://demo.evil.example:${new URL(origin).port}/`, {
+        dispatcher: loopback,
+      })
+    ).status,
+    404,
+  );
 
-  const asset = await fetch(`${origin}/sites/demo/hex-client.js`);
+  const asset = await siteRequest(origin, "/hex-client.js");
   assert.match(asset.headers.get("content-type"), /javascript/);
   assert.equal(asset.headers.get("x-content-type-options"), "nosniff");
-  assert.equal((await fetch(`${origin}/sites/demo/missing.js`)).status, 404);
+  assert.equal((await siteRequest(origin, "/missing.js")).status, 404);
+  assert.equal(
+    (await siteRequest(origin, "/hex-client.js", "missing-site")).status,
+    404,
+  );
 }
 
-async function verifyPrivateFiles(origin, directory, sitesDirectory, release) {
+async function verifyPrivateFiles(origin, directory, sitesDirectory) {
   const privatePaths = [
     "/sites/demo.json",
-    `/releases/demo/${release}/index.html`,
+    "/releases/demo/old/index.html",
     "/public/sites/demo/index.html",
   ];
   for (const path of privatePaths) {
@@ -69,14 +103,14 @@ async function verifyPrivateFiles(origin, directory, sitesDirectory, release) {
 
   const hiddenFile = join(sitesDirectory, "public/sites/demo/.hex-test");
   await writeFile(hiddenFile, "temporary file");
-  assert.equal((await fetch(`${origin}/sites/demo/.hex-test`)).status, 404);
+  assert.equal((await siteRequest(origin, "/.hex-test")).status, 404);
   await rm(hiddenFile);
 
   const secret = join(directory, "secret.txt");
   const publicLink = join(sitesDirectory, "public/sites/demo/leak.txt");
   await writeFile(secret, "not published");
   await symlink(secret, publicLink);
-  assert.notEqual((await fetch(`${origin}/sites/demo/leak.txt`)).status, 200);
+  assert.notEqual((await siteRequest(origin, "/leak.txt")).status, 200);
   await rm(publicLink);
 }
 
@@ -134,19 +168,19 @@ async function verifyPublishing(origin, projectDirectory, invoke) {
   );
   await writeFile(join(projectDirectory, "public/old.js"), "old asset");
   await invoke(["publish"]);
-  assert.equal(await readText(`${origin}/sites/demo/nested/`), "nested page");
+  assert.equal(await readSiteText(origin, "/nested/"), "nested page");
 
   await writeFile(join(projectDirectory, "public/index.html"), "updated site");
   await rm(join(projectDirectory, "public/old.js"));
   await invoke(["publish"]);
-  assert.equal(await readText(`${origin}/sites/demo/`), "updated site");
-  assert.equal((await fetch(`${origin}/sites/demo/old.js`)).status, 404);
+  assert.equal(await readSiteText(origin), "updated site");
+  assert.equal((await siteRequest(origin, "/old.js")).status, 404);
 
   const siteList = await invoke(["sites"]);
   assert.equal(JSON.parse(siteList.stdout).length, 1);
 
   await invoke(["delete", "--yes"]);
-  assert.equal((await fetch(`${origin}/sites/demo/`)).status, 404);
+  assert.equal((await siteRequest(origin)).status, 404);
   await invoke(["publish"]);
 }
 
@@ -176,6 +210,7 @@ async function main() {
         ...process.env,
         HEX_ADDR: `127.0.0.1:${backendPort}`,
         HEX_SITES_DIR: sitesDirectory,
+        HEX_SITE_BASE_URL: `http://localhost:${port}`,
         DATABASE_URL: "",
         AZURE_BLOB_ENDPOINT: "",
       },
@@ -199,39 +234,80 @@ async function main() {
       projectDirectory,
       "--server",
       origin,
+      "--site-base-url",
+      `http://localhost:${port}`,
+      "--publish-root",
+      join(sitesDirectory, "public/sites"),
     ]);
 
     const invoke = (args) =>
       exec(process.execPath, [cli, ...args], { cwd: projectDirectory });
     const published = await invoke(["publish"]);
-    assert.equal(published.stdout.trim(), `${origin}/sites/demo/`);
+    assert.equal(published.stdout.trim(), `http://demo.localhost:${port}/`);
 
     await verifyStaticServing(origin, backend);
     const siteList = await invoke(["sites"]);
     const site = JSON.parse(siteList.stdout)[0];
-    await verifyPrivateFiles(origin, directory, sitesDirectory, site.release);
+    assert.deepEqual(site, {
+      name: "demo",
+      url: `http://demo.localhost:${port}/`,
+    });
+    await verifyPrivateFiles(origin, directory, sitesDirectory);
 
-    const client = createHexClient({ site: "demo", baseURL: origin });
+    const client = createHexClient({
+      site: "demo",
+      baseURL: `http://demo.localhost:${port}`,
+      fetch: (url, options) => {
+        const headers = new Headers(options.headers);
+        headers.set("Origin", `http://demo.localhost:${port}`);
+        return fetch(url, { ...options, headers, dispatcher: loopback });
+      },
+    });
     await verifyClientStorage(client);
     await verifyRealtime(client);
     await verifyPublishing(origin, projectDirectory, invoke);
 
+    if (process.argv.includes("--browser")) {
+      const otherSite = join(sitesDirectory, "public/sites/other");
+      await mkdir(otherSite, { recursive: true });
+      await writeFile(
+        join(otherSite, "index.html"),
+        "<!doctype html><title>Other site</title>",
+      );
+      try {
+        const { verifyBrowserIsolation } =
+          await import("./browser-isolation.mjs");
+        await verifyBrowserIsolation(port);
+      } finally {
+        await rm(otherSite, { recursive: true });
+      }
+    }
+
     await stopProcess(server);
     assert.equal((await fetch(`${origin}/api/hex/capabilities`)).status, 502);
+    await writeFile(
+      join(projectDirectory, "public/index.html"),
+      "published without an API",
+    );
+    await invoke(["publish"]);
     assert.equal((await fetch(`${origin}/healthz`)).status, 200);
-    assert.equal(await readText(`${origin}/sites/demo/`), "updated site");
+    assert.equal(await readSiteText(origin), "published without an API");
     assert.match(
-      await readText(`${origin}/sites/demo/hex-client.js`),
+      await readSiteText(origin, "/hex-client.js"),
       /createHexClient/,
     );
 
+    await invoke(["delete", "--yes"]);
+    assert.equal((await siteRequest(origin)).status, 404);
+
     console.log(
-      "End-to-end passed: NGINX static sites, proxied API/WebSockets, publishing lifecycle, and static availability with Go stopped.",
+      "End-to-end passed: direct publishing, directory discovery, API/WebSockets, and publishing/unpublishing with Go stopped.",
     );
   } finally {
     await stopProcess(nginx);
     await stopProcess(server);
     await rm(directory, { recursive: true, force: true });
+    await loopback.close();
   }
 }
 

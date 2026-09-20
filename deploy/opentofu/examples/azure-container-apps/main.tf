@@ -82,6 +82,7 @@ locals {
       HEX_DATABASE_PROVIDER = var.capabilities.database == "none" ? "none" : "postgres"
       HEX_REALTIME_PROVIDER = var.capabilities.realtime ? "memory" : "none"
       AZURE_CLIENT_ID       = azapi_resource.identity.output.properties.clientId
+      HEX_SITE_BASE_URL     = var.site_base_url == null ? "http://localhost:8080" : var.site_base_url
     },
     var.capabilities.sites ? module.sites[0].environment : {},
     var.capabilities.files ? module.files[0].environment : {}
@@ -113,7 +114,9 @@ module "hosting" {
     identity = azapi_resource.identity.id
   }]
 
-  depends_on = [azapi_resource.registry_access]
+  depends_on     = [azapi_resource.registry_access]
+  site_domain    = var.site_base_url == null ? "localhost" : trimsuffix(trimprefix(var.site_base_url, "https://"), "/")
+  custom_domains = var.custom_domains
 }
 
 output "url" {
@@ -126,4 +129,20 @@ output "redirect_uri" {
 
 output "capabilities" {
   value = var.capabilities
+}
+
+output "publishing" {
+  value = var.capabilities.sites ? module.sites[0].publishing : null
+}
+
+output "site_base_url" {
+  value = var.site_base_url
+}
+
+output "custom_domain_redirect_uris" {
+  value = module.hosting.custom_domain_redirect_uris
+}
+
+output "environment_id" {
+  value = module.hosting.environment_id
 }

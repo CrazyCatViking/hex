@@ -5,7 +5,7 @@ description: Build and publish web apps on Hex using its file storage, JSON docu
 
 # Hex apps
 
-Read `hex.json` for the site name, server origin and publish directory. Run `hex capabilities` to discover enabled built-ins and upload limits. Read the existing app before editing it.
+Read `hex.json` for the site name, server origin, source directory and `publishing` destination. `hex capabilities` discovers enabled application APIs and their upload limit, but is never a prerequisite for publishing. Read the existing app before editing it.
 
 The starter is a static ES-module app. Import `createHexClient` from `./hex-client.js`. In bundled TypeScript projects, import it from `@hex-platform/client`. Configure a relative asset base (for example Vite `base: './'`) and set `hex.json.directory` to the build output directory. Do not publish source directories, secrets or node_modules.
 
@@ -40,7 +40,7 @@ const next = await tasks.list({ limit: 100, after: page.at(-1).id });
 await tasks.delete(created.id);
 ```
 
-Documents are `{ id, data }`. `set` replaces the entire object and creates it if missing. There is no patch, query language, transaction API or automatic database subscription. Lists sort lexicographically by ID, not creation time. Continue pagination using the last ID until an empty page; avoid calling `page.at(-1).id` on an empty page. Maximum document size is 1 MiB. Collection names, IDs, channels and site names contain 1–64 letters, digits, underscores or hyphens, starting with a letter or digit.
+Documents are `{ id, data }`. `set` replaces the entire object and creates it if missing. There is no patch, query language, transaction API or automatic database subscription. Lists sort lexicographically by ID, not creation time. Continue pagination using the last ID until an empty page. Maximum document size is 1 MiB. Collection names, IDs and channels contain 1–64 letters, digits, underscores or hyphens. Published site names must instead be lowercase DNS labels of 1–63 characters, with no underscores or leading/trailing hyphens.
 
 ## Realtime
 
@@ -60,8 +60,8 @@ Messages are JSON, limited to 64 KiB, and delivered to connected subscribers inc
 
 Catch `HexError` for HTTP failures (`status` and `message`). A 404 means a missing object or unavailable capability. Network and authentication redirect failures can be ordinary errors. Never insert untrusted text using innerHTML.
 
-Run `hex publish` from the project root after building if needed. It uploads the configured directory as a ZIP. `index.html` must be at its root. The resulting URL is `/sites/<name>/`; use relative asset URLs and hash-based routing for single-page apps. There is no SPA fallback.
+Run `hex publish` from the project root after building if needed. It synchronizes directly to the `publishing` provider and never calls the Hex API. Set `publishing` to `{ "provider": "filesystem", "root": "/path/to/platform/public/sites" }` locally, or `{ "provider": "azure-files", "url": "https://ACCOUNT.file.core.windows.net/sites/public/sites" }` for Azure. The CLI appends the site name to the destination. `index.html` must be at the source root. Sites are served at `https://<name>.<parent-domain>/`, or `http://<name>.localhost:8080/` locally. `siteBaseURL` specifies the parent origin and defaults to `server`. There are no shared `/sites/<name>/` web routes. Use relative or root-relative assets and hash routing; there is no SPA fallback. Keep client API requests same-origin to preserve authentication. Subdomains isolate browser storage but do not grant separate backend permissions.
 
-Use `hex sites` to list published sites and `hex delete <name> --yes` to unpublish one. Publishing stages the release, then synchronizes its public folder, replacing the root index.html last. NGINX serves the files directly; only API calls reach Go. Folder synchronization is not transactional, so republish after a synchronization failure. Unpublishing removes public site files while preserving file uploads, database documents and stored releases.
+`hex sites` uses the read-only API to enumerate site directories containing a root index.html. Its JSON array contains names and URLs; its length is the count. There is no separate site metadata. `hex delete <name> --yes` removes that site directory directly through the provider, leaving app uploads and database documents intact. Folder synchronization deletes stale assets and is not transactional. Coordinate concurrent publishers and republish after a failure. No releases or manifests are written.
 
-For Azure CLI access, the operator supplies `HEX_TOKEN` or sets `resource` in hex.json after `az login`. Never write tokens into app files. Hex does not implement custom integrations, user identity APIs, AI calls or code generation yet.
+For `sites`/`capabilities` API access, the operator supplies `HEX_TOKEN` or sets `resource` after `az login`. Direct Azure Files publishing instead uses AzCopy with a prior `azcopy login`, or `AZCOPY_AUTO_LOGIN_TYPE=AZCLI`, or an operator-supplied `HEX_PUBLISH_SAS`. It requires Azure Files data permissions and network access to the private endpoint; the gateway token grants neither. Never store tokens in app files or hex.json. Hex does not implement custom integrations, user identity APIs, AI calls or code generation yet.

@@ -94,3 +94,10 @@ output "environment" {
     HEX_SITES_DIR      = "/mnt/sites"
   }
 }
+
+output "publishing" {
+  value = {
+    provider = "azure-files"
+    url      = "https://${module.storage.name}.file.core.windows.net/${azapi_resource.share.name}/public/sites"
+  }
+}

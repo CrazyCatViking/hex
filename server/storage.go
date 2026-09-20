@@ -9,6 +9,10 @@ import (
 
 var ErrNotFound = errors.New("not found")
 
+type SiteDirectory interface {
+	ListSites(ctx context.Context) ([]string, error)
+}
+
 type Object struct {
 	Key  string `json:"key"`
 	Size int64  `json:"size"`

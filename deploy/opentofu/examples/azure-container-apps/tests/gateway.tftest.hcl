@@ -92,8 +92,33 @@ run "site_mounts" {
   assert {
     condition = (
       azapi_resource.mount["sites-readonly"].body.properties.azureFile.accessMode == "ReadOnly" &&
-      azapi_resource.mount["sites"].body.properties.azureFile.accessMode == "ReadWrite"
+      azapi_resource.mount["sites"].body.properties.azureFile.accessMode == "ReadOnly"
     )
-    error_message = "NGINX must get a read-only mount while the publishing API can write."
+    error_message = "NGINX and the site-discovery API must both get read-only mounts."
+  }
+}
+
+run "subdomain_bindings" {
+  command = plan
+
+  module {
+    source = "../../modules/azure/container-apps"
+  }
+
+  variables {
+    site_domain = "hex.example.com"
+    custom_domains = [{
+      name           = "demo.hex.example.com"
+      certificate_id = "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/test/providers/Microsoft.App/managedEnvironments/test/certificates/sites"
+    }]
+  }
+
+  assert {
+    condition = (
+      azapi_resource.app.body.properties.template.containers[0].env[0].value == "hex.example.com" &&
+      azapi_resource.app.body.properties.configuration.ingress.customDomains[0].name == "demo.hex.example.com" &&
+      azapi_update_resource.public_ingress.body.properties.configuration.ingress.customDomains[0].name == "demo.hex.example.com"
+    )
+    error_message = "NGINX and Azure ingress must agree on site hostnames, including after public ingress is enabled."
   }
 }

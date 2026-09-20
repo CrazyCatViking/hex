@@ -40,6 +40,7 @@ variables {
   entra_client_secret = "test-only-secret"
   server_image        = "example.invalid/hex-server:test"
   nginx_image         = "example.invalid/hex-nginx:test"
+  site_base_url       = "https://hex.example.com"
 }
 
 override_resource {

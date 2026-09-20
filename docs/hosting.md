@@ -4,13 +4,14 @@ Hex is a Go framework and browser protocol, not an Azure deployment product. Inf
 
 ## What any host provides
 
-1. An authenticated HTTPS entry point for site assets, API routes, publishing and WebSocket upgrades. Authentication and allowed-user policy are owned by the host. The initial Hex server neither parses identity claims nor validates user tokens.
+1. An authenticated HTTPS entry point for site assets, API routes and WebSocket upgrades. Authentication and allowed-user policy are owned by the host. The initial Hex server neither parses identity claims nor validates user tokens.
 2. No unauthenticated network path around that entry point to the API or private assets.
-3. A static server exposing the site store's `public/sites/<site>/` files. Asset responses must not pass through Hex's Go handler.
+3. A static server exposing each `public/sites/<site>/` directory on its own subdomain. Asset responses must not pass through Hex's Go handler. The initial NGINX example uses `HEX_SITE_DOMAIN`; discovery uses the matching `HEX_SITE_BASE_URL` origin.
 4. Routing for `/api/` to the Hex HTTP handler, preserving the external Host header, methods, bodies and WebSocket upgrades. Clients use same-origin URLs.
-5. Whichever `ObjectStore`, `Database` and `Realtime` implementations the deployment enables, with credentials available only to backend processes.
+5. Whichever `SiteDirectory`, `ObjectStore`, `Database` and `Realtime` implementations the deployment enables, with credentials available only to backend processes.
+6. A direct publishing destination, separately authorized by its storage provider, that the Hex CLI can reach. The CLI uses a local publishing configuration; it does not contact Hex for publishing information or credentials.
 
-Sites, uploads, database and realtime are independent capabilities. An API-only deployment can omit the static server's mount and site publishing provider. A static-site deployment can omit uploads, database and realtime. Disabled capabilities have no API routes and are reported as disabled by `/api/hex/capabilities`.
+Sites, uploads, database and realtime are independent capabilities. An API-only deployment can omit the static server's mount and site-discovery provider. A static-site deployment can omit uploads, database and realtime. Disabling `Sites` removes discovery, not a publisher's storage permissions. Disabled capabilities have no API routes and are reported as disabled by `/api/hex/capabilities`.
 
 The Azure example implements this contract with Container Apps/Entra, NGINX, Azure Files, Blob Storage and PostgreSQL. None of those products is required by `hex.Config`.
 
@@ -33,6 +34,7 @@ Other reference executable settings:
 | --- | --- |
 | `HEX_ADDR` | Listener; defaults to `127.0.0.1:8080`. The container image defaults to loopback port 8081. |
 | `HEX_SITES_DIR` | Filesystem root for site files; defaults to `.hex-data/sites`. |
+| `HEX_SITE_BASE_URL` | Parent site origin used by discovery, default `http://localhost:8080`. For example `https://hex.example.com` yields `https://demo.hex.example.com/`. |
 | `HEX_FILES_DIR` | Filesystem root for local uploads; defaults to `.hex-data/files`. |
 | `AZURE_BLOB_ENDPOINT` | Blob service endpoint for the Azure upload provider. |
 | `AZURE_BLOB_CONTAINER` | Pre-existing container, default `uploads`. |
@@ -43,7 +45,7 @@ For a provider not supported by this executable, write a small executable that i
 
 ## A future GCP deployment
 
-A GCP example could compose a VM, NGINX, GCS/gcsfuse, IAP, and Cloud SQL, following Quick's architecture. It would supply a GCS-backed `ObjectStore` for publishing/uploads, expose the public site prefix through the mount, and reuse the PostgreSQL provider for Cloud SQL. NGINX can map subdomains to directories independently of the Go API.
+A GCP example could compose a VM, NGINX, GCS/gcsfuse, IAP, and Cloud SQL, following Quick's architecture. A CLI adapter would synchronize directly to GCS, with no Hex API calls. The server would enumerate sites through `SiteDirectory` and use a GCS-backed `ObjectStore` for app uploads. NGINX would expose the public prefix through its mount, and the PostgreSQL provider could connect to Cloud SQL. NGINX can map subdomains to directories independently of the Go API.
 
 This does not require Azure Files, Azure environment variables, or Entra claims in the framework. A future implementation must verify GCS/FUSE cache visibility and storage-operation semantics; the local filesystem provider's rename assumptions should not be assumed to hold on every object-storage mount. GCP infrastructure and GCS providers are not implemented yet.
 

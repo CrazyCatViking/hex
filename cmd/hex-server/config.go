@@ -67,7 +67,9 @@ func readProviderSelection(getenv func(string) string) (providerSelection, error
 }
 
 func configure(ctx context.Context, getenv func(string) string) (hex.Config, func(), error) {
-	var config hex.Config
+	config := hex.Config{
+		SiteBaseURL: environmentValue(getenv, "HEX_SITE_BASE_URL", "http://localhost:8080"),
+	}
 	selection, err := readProviderSelection(getenv)
 	if err != nil {
 		return config, nil, err

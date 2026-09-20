@@ -92,3 +92,20 @@ variable "container_registry" {
   })
   default = null
 }
+
+variable "site_base_url" {
+  type    = string
+  default = null
+  validation {
+    condition     = !var.capabilities.sites || can(regex("^https://[a-z0-9][a-z0-9.-]*[a-z0-9]/?$", var.site_base_url))
+    error_message = "Site hosting requires site_base_url, for example https://hex.example.com, with DNS and certificate bindings configured separately."
+  }
+}
+
+variable "custom_domains" {
+  type = list(object({
+    name           = string
+    certificate_id = string
+  }))
+  default = []
+}

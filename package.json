@@ -10,10 +10,13 @@
     "dev": "node scripts/dev.mjs",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "test:e2e": "npm run build && node scripts/e2e.mjs"
+    "test:e2e": "npm run build && node scripts/e2e.mjs",
+    "test:browser": "npm run build && node scripts/e2e.mjs --browser"
   },
   "devDependencies": {
+    "playwright": "1.63.0",
     "prettier": "3.9.8",
+    "undici": "7.29.1",
     "ws": "^8.21.3"
   }
 }

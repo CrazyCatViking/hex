@@ -23,7 +23,12 @@ try {
 
   server = spawn(binary, [], {
     cwd: root,
-    env: { ...process.env, HEX_ADDR: "127.0.0.1:8081", HEX_SITES_DIR: sites },
+    env: {
+      ...process.env,
+      HEX_ADDR: "127.0.0.1:8081",
+      HEX_SITES_DIR: sites,
+      HEX_SITE_BASE_URL: "http://localhost:8080",
+    },
     stdio: "inherit",
   });
   await waitForHTTP("http://127.0.0.1:8081/api/hex/capabilities", server);
@@ -37,6 +42,8 @@ try {
   console.log(
     "Hex gateway: http://localhost:8080 (NGINX static sites; Go API on loopback :8081)",
   );
+  console.log(`Local publishing root: ${join(sites, "public/sites")}`);
+  console.log("Sites are served at http://<name>.localhost:8080/");
 
   await new Promise((resolve) => {
     process.once("SIGINT", resolve);

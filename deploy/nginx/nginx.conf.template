@@ -9,6 +9,11 @@ http {
     default_type application/octet-stream;
     server_tokens off;
 
+    map $host $hex_site {
+        default "";
+        "~^(?<hex_site_name>[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)\.${HEX_SITE_DOMAIN_PATTERN}$" $hex_site_name;
+    }
+
     map $http_upgrade $connection_upgrade {
         default upgrade;
         '' close;
@@ -28,13 +33,17 @@ http {
             return 404;
         }
 
-        location /sites/ {
-            root /mnt/sites/public;
+        location / {
+            if ($hex_site = "") {
+                return 404;
+            }
+            root /mnt/sites/public/sites/$hex_site;
             index index.html;
             autoindex off;
             disable_symlinks on;
             add_header X-Content-Type-Options nosniff always;
             add_header Cache-Control no-cache always;
+            add_header Origin-Agent-Cluster "?1" always;
             try_files $uri $uri/ =404;
         }
 
@@ -49,8 +58,5 @@ http {
             proxy_buffering off;
         }
 
-        location / {
-            return 404;
-        }
     }
 }

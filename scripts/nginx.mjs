@@ -41,13 +41,17 @@ export async function startNginx({
   sitesDirectory,
   port = 8080,
   backendPort = 8081,
+  siteDomain = "localhost",
 }) {
+  if (!/^[a-z0-9.-]+$/.test(siteDomain)) {
+    throw new Error("Invalid site domain");
+  }
   const binary = process.env.NGINX_BIN ?? "nginx";
   const mimeTypes = await locateMimeTypes(binary);
   await mkdir(join(directory, "logs"), { recursive: true });
 
   const template = await readFile(
-    new URL("../deploy/nginx/nginx.conf", import.meta.url),
+    new URL("../deploy/nginx/nginx.conf.template", import.meta.url),
     "utf8",
   );
   const processSettings = [
@@ -57,13 +61,14 @@ export async function startNginx({
     "",
   ].join("\n");
   const configuration = template
+    .replaceAll("${HEX_SITE_DOMAIN_PATTERN}", siteDomain.replaceAll(".", "\\."))
     .replace("user nginx;", "")
     .replace("include /etc/nginx/mime.types;", `include ${quote(mimeTypes)};`)
     .replace("listen 8080;", `listen 127.0.0.1:${port};`)
     .replace("http://127.0.0.1:8081", `http://127.0.0.1:${backendPort}`)
     .replace(
-      "root /mnt/sites/public;",
-      `root ${quote(join(sitesDirectory, "public"))};`,
+      "root /mnt/sites/public/sites/$hex_site;",
+      `root ${quote(join(sitesDirectory, "public/sites", "__HEX_SITE__")).replace("__HEX_SITE__", "$hex_site")};`,
     )
     .replace("http {", "http {\n    access_log off;");
   const file = join(directory, "nginx.conf");

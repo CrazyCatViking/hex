@@ -10,9 +10,9 @@ Browser / CLI
 Azure Container Apps ingress + Entra authentication
     │ port 8080
 NGINX container
-    ├── /sites/* → Azure Files read-only mount (direct static serving)
+    ├── <site>.hex.example.com/* → that site's mounted directory
     └── /api/* → Go server on loopback port 8081
-                    ├── Azure Files read-write mount: publishing
+                    ├── Azure Files read-only mount: site discovery
                     ├── Private Blob endpoint: uploaded app files
                     ├── Private PostgreSQL endpoint: JSON documents
                     └── In-process realtime broker
@@ -20,29 +20,28 @@ NGINX container
 
 NGINX and Go run as two containers in the same Container App replica. Only port 8080 is exposed by ingress; Go binds to loopback. The full composition is shown above; the example defaults to site hosting only. Optional capability modules provision private storage/database resources only when selected. External PostgreSQL can be supplied instead of provisioning a server. Public storage access is disabled.
 
-Azure Container Apps mounts Azure Files, not Blob Storage. Like Quick, NGINX reads static files directly from a mounted filesystem. Go handles publishing and backend API operations but is absent from the website request path. No subrequest, authorization lookup or manifest resolution in Go is needed to serve an asset. NGINX readiness uses its own `/healthz` response rather than the API.
+Azure Container Apps mounts Azure Files, not Blob Storage. Like Quick, NGINX reads static files directly from a mounted filesystem. Go handles application APIs and read-only site discovery; it does not serve or receive website files. NGINX readiness uses its own `/healthz` response rather than the API.
+
+The CLI publishes directly: `hex publish → provider adapter → Azure Files HTTPS endpoint`. A publisher supplies its own storage credentials and private network connectivity. No Hex API call is made during publishing or unpublishing. See [Publishing](publishing.md).
 
 A deployment has this layout:
 
 ```text
-sites/my-app.json
-releases/my-app/<release-id>/index.html
-releases/my-app/<release-id>/assets/app.js
 public/sites/my-app/index.html
 public/sites/my-app/assets/app.js
 ```
 
-The manifest records the last successful publication for the management API; NGINX does not read it. The server stages the full release first, then synchronizes the public site folder, removing stale assets and replacing the root `index.html` last. Unpublishing removes the public files and manifest while retaining release archives and app data. NGINX's document root is only `public/`; metadata, staged releases, hidden temporary files and symlinks are not served.
+The site directory is authoritative. The server reads immediate directories under `public/sites/`, checks for a regular root `index.html`, and derives each site's name and subdomain URL. No site metadata is persisted. Listing is a fresh enumeration, not a catalogue lookup. NGINX selects `public/sites/<site>/` as the document root from a validated hostname; hidden paths and symlinks are not served.
 
-The local provider writes temporary files and renames them. Each `Put` is atomic, but synchronizing an entire folder is not. Invalid archives and staging failures leave the public site unchanged; failures during synchronization can leave a partial update. Republish to recover. Publishing and unpublishing are serialized within one server process. This is the folder-sync model rather than the previous request-time active-release lookup, and it works on SMB without symlink support.
+The CLI's filesystem publisher writes temporary files and renames them, with root `index.html` replaced last. The Azure Files publisher delegates synchronization to AzCopy. Neither provides an atomic whole-site deployment or coordinates concurrent publishers. Failed synchronization can leave a partial update; republish to recover.
 
-Sites published using the previous manifest-only layout need to be republished once to populate `public/sites/`.
+Previously published public directories remain valid. Old metadata and release directories are ignored and can be removed separately by the operator. No migration or registration API is required.
 
 ## Trust model
 
-The API does not verify identity-provider tokens or implement user authorization. The hosting layer authenticates external traffic, including API requests, site assets, publishing and WebSocket upgrades. In the Azure example this is Container Apps' built-in Entra authentication, with no excluded paths. Local development deliberately has no authentication.
+The API does not verify identity-provider tokens or implement user authorization. The hosting layer authenticates API requests, site assets and WebSocket upgrades. In the Azure example this is Container Apps' built-in Entra authentication, with no excluded paths. Direct publishing is authorized by the storage provider separately. Local development deliberately has no authentication.
 
-Every admitted user can access all site namespaces. All hosted JavaScript shares one origin and is trusted to use these capabilities. A site name supplied by a client is an organizational namespace, not an authenticated app identity.
+Each site has a separate browser origin, isolating browser storage. Every admitted user can still access all API namespaces under the initial trust model. A site name supplied by a client is an organizational namespace, not an authenticated app identity. See [Subdomain hosting](subdomains.md) for cookie and authentication considerations.
 
 As browser request hygiene, state-changing API requests require `X-Hex-Request: 1`. Requests with a foreign `Origin` or a cross-site Fetch Metadata header are rejected. The client and CLI supply the marker automatically; it is not a credential. No CORS permissions are granted. A reverse proxy must preserve the external `Host` header for same-origin and WebSocket checks.
 
@@ -51,10 +50,8 @@ As browser request hygiene, state-changing API requests require `X-Hex-Request: 
 | Method | Path | Result |
 | --- | --- | --- |
 | GET | `/api/hex/capabilities` | Enabled built-ins, contract version and upload limit |
-| GET | `/api/sites` | Published site metadata |
-| POST | `/api/sites/{site}/deploy` | ZIP body → published site metadata (201) |
-| DELETE | `/api/sites/{site}` | Unpublish (204) |
-| GET/HEAD | `/sites/{site}/{asset}` | NGINX static file; directory indexes use `index.html` |
+| GET | `/api/sites` | Directory-derived array of `{name,url}`; length is the count |
+| GET/HEAD | `https://{site}.<site-domain>/{asset}` | NGINX static file; directory indexes use `index.html` |
 | GET | `/api/sites/{site}/files` | Array of `{key,size}` |
 | PUT | `/api/sites/{site}/files/{key}` | Raw binary body → `{key,size}` |
 | GET | `/api/sites/{site}/files/{key}` | Binary attachment |
@@ -68,7 +65,7 @@ As browser request hygiene, state-changing API requests require `X-Hex-Request: 
 
 Registered API handlers return errors as `{ "error": "..." }`. Unknown API routes and methods use standard Go HTTP routing responses. Disabled capabilities have no routes. Website responses, redirects, MIME types, conditional requests and range requests are handled by NGINX. The Go handler returns 404 for website paths. The client handles both JSON and non-JSON errors.
 
-Names are 1–64 ASCII letters, digits, underscores or hyphens, starting with a letter or digit. File keys are relative slash-separated paths without dot-prefixed segments, backslashes or NULs. ZIP uploads reject traversal, duplicate files, symlinks, oversized expanded content and archives without a root `index.html`.
+Published site names are DNS labels: 1–63 lowercase letters, digits or hyphens, starting and ending with a letter or digit. Other API identifiers remain 1–64 ASCII letters, digits, underscores or hyphens, starting with a letter or digit. Application file keys are relative paths without dot-prefixed segments, backslashes or NULs. There are no site upload/delete routes; the former publishing endpoints return 404.
 
 Static sites have no server-side runtime. Assets use relative paths; SPAs should use hash routing. Missing assets return 404 rather than an HTML fallback. Downloads use attachment disposition, while site assets use extension-derived MIME types.
 
@@ -80,7 +77,11 @@ Providers must be safe for concurrent requests and return `hex.ErrNotFound` for 
 
 `List(ctx, prefix)` returns all matching keys and sizes, including nested keys. Results must use a non-nil empty slice when empty. `Open` returns a reader whose caller closes it. Keys are logical forward-slash paths. Successful writes replace an entire object atomically. The API validates client paths; filesystem providers must additionally prevent escaping their configured root.
 
-Keep site and upload stores separate: they have independent internal key layouts. Azure storage containers and file shares are provisioned by infrastructure, not created by an API request. A site store must be paired with an independent static-serving mechanism that exposes its `public/` prefix; the Azure deployment uses a shared filesystem mount. Replacing that store with Blob Storage alone does not make its assets accessible to NGINX.
+`ObjectStore` is for application uploads, not site publishing. Keep it separate from site assets. Storage resources are provisioned by infrastructure, not created by an API request.
+
+### Site directories
+
+`SiteDirectory.ListSites(ctx)` returns names of actual published directories. It is read-only and has no write or registration method. The filesystem implementation reads `public/sites/` and checks indexes without scanning all assets. The HTTP handler filters invalid names, sorts them, and builds subdomain URLs from `Config.SiteBaseURL`. A future provider can enumerate an object prefix. Static serving and direct CLI publishing are configured independently of this interface.
 
 ### Database
 
