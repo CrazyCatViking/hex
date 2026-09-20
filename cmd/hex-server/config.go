@@ -149,6 +149,19 @@ func configure(ctx context.Context, getenv func(string) string) (hex.Config, fun
 		config.Realtime = memory.NewRealtime()
 	}
 
+	if serverURL := getenv("HEX_PUBLIC_URL"); serverURL != "" {
+		config.Connection = &hex.ConnectionConfig{
+			Name:   environmentValue(getenv, "HEX_PLATFORM_NAME", "Hex"),
+			Server: serverURL,
+		}
+		if publishingURL := getenv("HEX_PUBLISH_URL"); publishingURL != "" {
+			config.Connection.Publishing = &hex.PublishingConfig{
+				Provider: "azure-files",
+				URL:      publishingURL,
+			}
+		}
+	}
+
 	configured = true
 	return config, closeProviders, nil
 }

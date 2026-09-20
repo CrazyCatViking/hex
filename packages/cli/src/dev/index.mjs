@@ -28,12 +28,12 @@ function serverEnvironment(settings) {
     HEX_REALTIME_PROVIDER: "memory",
     ...settings.environment,
     ...serviceEnvironment(settings),
-    HEX_DEV: "1",
     HEX_ADDR: `127.0.0.1:${settings.apiPort}`,
     HEX_DEV_DATA_DIR: settings.dataDirectory,
     HEX_SITES_DIR: join(settings.dataDirectory, "sites"),
     HEX_FILES_DIR: join(settings.dataDirectory, "files"),
     HEX_SITE_BASE_URL: `http://localhost:${settings.port}`,
+    HEX_PUBLIC_URL: `http://localhost:${settings.port}`,
   };
 }
 
@@ -159,8 +159,8 @@ export async function devCommand(args) {
   [--services postgres,azurite | --services none]
   [--postgres-port 54320] [--blob-port 10000] [--stop-services]
 
-Builds and runs YOUR Go server. It must opt into local providers (server/dev)
-or consume the same environment variables. Requires native NGINX.
+Builds and runs YOUR Go server. Use server/dev for convenient local defaults
+or configure providers yourself. Requires native NGINX.
 Optional services require Docker Compose v2. No Azure account or .NET required.`);
     return;
   }

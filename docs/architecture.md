@@ -52,6 +52,7 @@ As browser request hygiene, state-changing API requests require `X-Hex-Request: 
 | Method | Path | Result |
 | --- | --- | --- |
 | GET | `/api/hex/capabilities` | Enabled built-ins, contract version and upload limit |
+| GET | `/api/hex/config` | Optional non-secret connection document for CLI setup; JSON attachment |
 | GET | `/api/sites` | Directory-derived array of `{name,url}`; length is the count |
 | GET/HEAD | `https://{site}.<site-domain>/{asset}` | NGINX static file; directory indexes use `index.html` |
 | GET | `/api/sites/{site}/files` | Array of `{key,size}` |

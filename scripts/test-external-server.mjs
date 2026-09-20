@@ -48,6 +48,10 @@ async function main() {
   const platform = join(directory, "platform");
   const app = join(directory, "app");
   const dataDirectory = join(platform, "data");
+  const cliEnvironment = {
+    ...process.env,
+    HEX_CONFIG_DIR: join(directory, "profiles"),
+  };
   const dispatcher = new Agent({ connect: { lookup: loopbackLookup } });
   let development;
   let logs = "";
@@ -59,7 +63,6 @@ async function main() {
       apiPort = await freePort();
     }
     const origin = `http://127.0.0.1:${port}`;
-    const siteBaseURL = `http://localhost:${port}`;
     const siteURL = `http://demo.localhost:${port}/`;
     await mkdir(platform);
     await copyFile(
@@ -141,21 +144,24 @@ replace github.com/crazycatviking/hex => ${JSON.stringify(root)}
     assert.equal(capabilities.files, true);
     assert.equal(capabilities.database, true);
 
-    await exec(process.execPath, [
-      cli,
-      "init",
-      app,
-      "--name",
-      "demo",
-      "--server",
-      origin,
-      "--site-base-url",
-      siteBaseURL,
-      "--publish-root",
-      join(dataDirectory, "sites/public/sites"),
-    ]);
+    const setup = await exec(
+      process.execPath,
+      [cli, "setup", origin, "--name", "local", "--json"],
+      {
+        cwd: directory,
+        env: cliEnvironment,
+      },
+    );
+    assert.equal(JSON.parse(setup.stdout).status, "ready");
+
+    await exec(process.execPath, [cli, "init", app, "--name", "demo"], {
+      env: cliEnvironment,
+    });
     await writeFile(join(app, "public/index.html"), "consumer website");
-    await exec(process.execPath, [cli, "publish"], { cwd: app });
+    await exec(process.execPath, [cli, "publish"], {
+      cwd: app,
+      env: cliEnvironment,
+    });
     assert.equal(
       await (await fetch(siteURL, { dispatcher })).text(),
       "consumer website",
@@ -175,12 +181,43 @@ replace github.com/crazycatviking/hex => ${JSON.stringify(root)}
     await assert.rejects(
       fetch(`http://127.0.0.1:${apiPort}/api/hex/capabilities`),
     );
+    await exec(process.execPath, [cli, "publish"], {
+      cwd: app,
+      env: cliEnvironment,
+    });
 
     const binary = join(platform, "platform-server");
     await exec("go", ["build", "-o", binary, "."], {
       cwd: platform,
       env: { ...process.env, GOWORK: "off" },
     });
+
+    development = await startProcess(binary, [], {
+      cwd: platform,
+      env: {
+        ...process.env,
+        HEX_DEV: "",
+        HEX_ADDR: `127.0.0.1:${apiPort}`,
+        HEX_DEV_DATA_DIR: join(directory, "direct-run-data"),
+        HEX_SITES_DIR: "",
+        HEX_FILES_DIR: "",
+        HEX_SITES_PROVIDER: "filesystem",
+        HEX_FILES_PROVIDER: "memory",
+        HEX_DATABASE_PROVIDER: "memory",
+        HEX_REALTIME_PROVIDER: "memory",
+      },
+      stdio: "ignore",
+    });
+    await waitForHTTP(
+      `http://127.0.0.1:${apiPort}/api/hex/capabilities`,
+      development,
+    );
+    const directResponse = await fetch(
+      `http://127.0.0.1:${apiPort}/api/platform`,
+    );
+    assert.equal((await directResponse.json()).name, "custom-server");
+    await stopProcess(development);
+
     development = await launch(["--binary", binary]);
     assert.equal(
       await (await fetch(siteURL, { dispatcher })).text(),
@@ -208,7 +245,7 @@ replace github.com/crazycatviking/hex => ${JSON.stringify(root)}
       await assert.rejects(notes.get(note.id), (error) => error.status === 404);
     }
     console.log(
-      "External-server test passed: independent Go module, custom endpoint, env file, binary launch, direct publishing, persistence and process cleanup.",
+      "External-server test passed: independent Go module, direct flag-free startup, CLI launch, custom endpoint, publishing, restart behavior and cleanup.",
     );
   } catch (error) {
     console.error(logs);

@@ -46,7 +46,15 @@ test("site URLs use distinct DNS origins and reject unsafe labels", () => {
 test("init creates a working static project and skill without replacing existing configuration", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "hex-init-"));
   t.after(() => rm(root, { recursive: true, force: true }));
-  await exec(process.execPath, [cli, "init", root, "--name", "demo"]);
+  await exec(process.execPath, [
+    cli,
+    "init",
+    root,
+    "--name",
+    "demo",
+    "--server",
+    "http://localhost:8080",
+  ]);
   const config = JSON.parse(await readFile(join(root, "hex.json"), "utf8"));
   assert.equal(config.directory, "public");
   assert.equal(config.name, "demo");

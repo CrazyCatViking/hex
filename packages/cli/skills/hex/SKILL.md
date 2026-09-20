@@ -5,7 +5,15 @@ description: Build and publish web apps on Hex using its file storage, JSON docu
 
 # Hex apps
 
-Read `hex.json` for the site name, server origin, source directory and `publishing` destination. `hex capabilities` discovers enabled application APIs and their upload limit, but is never a prerequisite for publishing. Read the existing app before editing it.
+## Platform setup with an agent
+
+If a user needs to connect to a platform, run `hex setup <platform-url> --json`. This command never blocks on a prompt or opens a browser in JSON mode. Exit code 0 with `status: "ready"` means the profile is configured. Exit code 2 with `status: "download_required"` includes a `downloadURL`: ask the user to open it, sign in through their company's hosting provider, and download the JSON file. When they provide or drop the file into the conversation, run `hex setup --file "/actual/local/path.json" --server <platform-url> --json`. If you only receive file contents, save the JSON to a local file first. Do not ask for passwords, browser cookies, client IDs, or access tokens.
+
+Then use `hex init <app-name>` to select the saved default profile. Its hex.json contains `platform`, `name`, and `directory`; the publishing destination and URLs are resolved from that profile. `hex login` delegates Azure Storage sign-in to Microsoft's AzCopy; the user completes its first-party login flow. It does not authenticate CLI requests to the Hex gateway. For local filesystem publishing no login is needed.
+
+## Building an app
+
+Read `hex.json` for the site name, source directory, and selected platform profile or explicit connection settings. `hex capabilities` reads cached profile capabilities when available; `--refresh` requests them from the API. Discovery is never a prerequisite for publishing. Read the existing app before editing it.
 
 The starter is a static ES-module app. Import `createHexClient` from `./hex-client.js`. In bundled TypeScript projects, import it from `@hex-platform/client`. Configure a relative asset base (for example Vite `base: './'`) and set `hex.json.directory` to the build output directory. Do not publish source directories, secrets or node_modules.
 

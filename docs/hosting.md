@@ -17,7 +17,7 @@ The Azure example implements this contract with Container Apps/Entra, NGINX, Azu
 
 ## Reference executable
 
-For local testing of a consuming server, use [hex dev and the optional Go development adapter](local-development.md). Application uploads, documents and realtime default to in-memory providers; only published site assets remain on disk. PostgreSQL/Azurite are opt-in integration-testing services. The adapter requires `HEX_DEV=1`; the reference executable delegates to it when that flag is set. Production provider selection below is separate.
+For local testing of a consuming server, call the optional [Go local configuration helper](local-development.md) directly. Application uploads, documents and realtime default to in-memory providers; only published site assets remain on disk. It requires no mode flag or special launcher. `hex dev` optionally orchestrates NGINX and integration-test services. The reference executable's explicit provider selection below is separate and does not switch configurations based on a mode flag.
 
 `cmd/hex-server` is one composition root. It supports these explicit selections:
 
@@ -37,6 +37,9 @@ Other reference executable settings:
 | `HEX_ADDR` | Listener; defaults to `127.0.0.1:8080`. The container image defaults to loopback port 8081. |
 | `HEX_SITES_DIR` | Filesystem root for site files; defaults to `.hex-data/sites`. |
 | `HEX_SITE_BASE_URL` | Parent site origin used by discovery, default `http://localhost:8080`. For example `https://hex.example.com` yields `https://demo.hex.example.com/`. |
+| `HEX_PUBLIC_URL` | Enables the reference executable's connection-settings download and declares its canonical gateway origin. |
+| `HEX_PLATFORM_NAME` | Human-readable connection name, default `Hex` (`Local Hex` in the local helper). |
+| `HEX_PUBLISH_URL` | Non-secret Azure Files publishing URL advertised in connection settings. |
 | `HEX_FILES_DIR` | Filesystem root for local uploads; defaults to `.hex-data/files`. |
 | `AZURE_BLOB_ENDPOINT` | Blob service endpoint for the Azure upload provider. |
 | `AZURE_BLOB_CONTAINER` | Pre-existing container, default `uploads`. |
@@ -44,6 +47,8 @@ Other reference executable settings:
 | `DATABASE_URL` | PostgreSQL connection string. Use TLS verification for remote services. |
 
 For a provider not supported by this executable, write a small executable that imports `server/`, constructs the providers and calls `hex.New`. The cloud SDK is then a dependency of that provider/composition, not the HTTP framework. The browser client and publishing protocol remain unchanged.
+
+An embedded server can set `Config.Connection` to expose non-secret platform settings. This endpoint uses the same hosting authentication as other APIs; `hex setup` either downloads directly or asks the user to download through their browser. No user tokens are issued or stored by Hex. See [Setup](setup.md).
 
 ## A future GCP deployment
 

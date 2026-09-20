@@ -2,7 +2,9 @@
 
 `hex publish` interacts directly with the provider configured in `hex.json`. It does not call Hex for capabilities, credentials, upload, registration or completion. `siteBaseURL` (falling back to `server`) is only used to print the resulting subdomain URL. `hex delete <site> --yes` likewise deletes directly from the publishing destination.
 
-`hex sites` and `hex capabilities` still use the Hex API, with the gateway's authentication. Storage authentication for publishing is independent of that gateway session or `HEX_TOKEN`.
+`hex sites` and capability refreshes use the Hex API, with the gateway's authentication. Storage authentication for publishing is independent of that gateway session or `HEX_TOKEN`.
+
+For normal onboarding, use [hex setup](setup.md) to download a profile rather than manually enter the settings below. Projects initialized with a profile use cached capabilities by default; `hex capabilities --refresh` explicitly calls the API. `hex login` delegates publishing sign-in to AzCopy. Neither setup nor login copies a browser session into the CLI.
 
 ## Local filesystem
 

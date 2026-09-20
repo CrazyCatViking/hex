@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadProfile } from "./profiles.mjs";
 
 export function validateSiteName(value) {
   if (
@@ -29,11 +30,19 @@ export function parseServerOrigin(value) {
   return server;
 }
 
-export async function readProjectConfig() {
+export async function readProjectConfig({ optional = false } = {}) {
   try {
     const content = await readFile("hex.json", "utf8");
-    return JSON.parse(content);
+    const config = JSON.parse(content);
+    if (config.platform) {
+      const profile = await loadProfile(config.platform);
+      return { ...profile.connection, ...config };
+    }
+    return config;
   } catch (error) {
+    if (optional && error.code === "ENOENT") {
+      return null;
+    }
     throw new Error(`Read project configuration hex.json: ${error.message}`, {
       cause: error,
     });
@@ -90,12 +99,28 @@ export async function initializeProject(directory, options) {
   const siteName = validateSiteName(
     options.name ?? projectDirectory.split(sep).at(-1),
   );
-  const server = parseServerOrigin(options.server ?? "http://localhost:8080");
+  const explicitConnection =
+    options.server || options["publish-root"] || options["publish-url"];
+  let profile = null;
+  if (options.platform) {
+    profile = await loadProfile(options.platform);
+  } else if (!explicitConnection) {
+    profile = await loadProfile(undefined, { optional: true });
+  }
   const config = {
     name: siteName,
-    server: server.origin,
     directory: "public",
   };
+  if (profile) {
+    config.platform = profile.name;
+  } else {
+    config.server = parseServerOrigin(
+      options.server ?? "http://localhost:8080",
+    ).origin;
+  }
+  if (profile && options.server) {
+    config.server = parseServerOrigin(options.server).origin;
+  }
 
   if (options.resource) {
     config.resource = options.resource;

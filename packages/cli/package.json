@@ -23,6 +23,7 @@
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
-    "@hex-platform/client": "0.1.0"
+    "@hex-platform/client": "0.1.0",
+    "open": "10.2.0"
   }
 }

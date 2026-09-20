@@ -5,6 +5,8 @@ import { parseArgs } from "node:util";
 import { createAPI } from "./api.mjs";
 import { publishSite, unpublishSite } from "./publishing/index.mjs";
 import { siteURL } from "./site-url.mjs";
+import { loadProfile } from "./profiles.mjs";
+import { loginPublishing } from "./publishing/login.mjs";
 import {
   initializeProject,
   installSkills,
@@ -12,13 +14,15 @@ import {
   validateSiteName,
 } from "./project.mjs";
 
-const help = `hex init [directory] [--name name] [--server URL] [--resource ENTRA_APP_ID_URI]
+const help = `hex setup [platform-url] [--file downloaded.json] [--name company] [--json]
+hex login [--platform company]
+hex init [directory] [--name name] [--platform company] [--server URL] [--resource ENTRA_APP_ID_URI]
          [--publish-root DIRECTORY | --publish-url AZURE_FILES_URL]
          [--site-base-url URL]
 hex publish
 hex sites
 hex delete [site] --yes
-hex capabilities
+hex capabilities [--refresh]
 hex skills
 hex dev [server-directory] [--package ./cmd/server] [--services postgres,azurite]
 
@@ -28,6 +32,11 @@ Azure Files publishing uses AzCopy login or HEX_PUBLISH_SAS and requires storage
 sites/capabilities use HEX_TOKEN or the optional resource setting for gateway access.`;
 
 export async function main(args = process.argv.slice(2)) {
+  if (args[0] === "setup") {
+    const { setupCommand } = await import("./setup/index.mjs");
+    await setupCommand(args.slice(1));
+    return;
+  }
   if (args[0] === "dev") {
     const { devCommand } = await import("./dev/index.mjs");
     await devCommand(args.slice(1));
@@ -41,6 +50,8 @@ export async function main(args = process.argv.slice(2)) {
       server: { type: "string" },
       name: { type: "string" },
       resource: { type: "string" },
+      platform: { type: "string" },
+      refresh: { type: "boolean" },
       "publish-root": { type: "string" },
       "publish-url": { type: "string" },
       "site-base-url": { type: "string" },
@@ -66,11 +77,38 @@ export async function main(args = process.argv.slice(2)) {
     return;
   }
 
-  if (!["publish", "sites", "delete", "capabilities"].includes(command)) {
+  if (
+    !["publish", "sites", "delete", "capabilities", "login"].includes(command)
+  ) {
     throw new Error(`Unknown command: ${command}`);
   }
 
-  const config = await readProjectConfig();
+  const needsProject = command === "publish" || command === "delete";
+  let config =
+    values.platform && !needsProject
+      ? null
+      : await readProjectConfig({ optional: !needsProject });
+  if (values.platform || !config) {
+    const profile = await loadProfile(values.platform);
+    config = needsProject
+      ? {
+          ...config,
+          ...profile.connection,
+          name: config.name,
+          directory: config.directory,
+        }
+      : profile.connection;
+  }
+
+  if (command === "login") {
+    await loginPublishing(config);
+    return;
+  }
+
+  if (command === "capabilities" && config.capabilities && !values.refresh) {
+    console.log(JSON.stringify(config.capabilities, null, 2));
+    return;
+  }
 
   if (command === "publish") {
     const siteName = validateSiteName(argument ?? config.name);

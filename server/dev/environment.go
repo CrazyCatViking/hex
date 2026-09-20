@@ -24,10 +24,6 @@ type Environment struct {
 }
 
 func Open(ctx context.Context) (*Environment, error) {
-	if os.Getenv("HEX_DEV") != "1" {
-		return nil, errors.New("local providers require HEX_DEV=1; use hex dev to run locally")
-	}
-
 	settings, err := readSettings()
 	if err != nil {
 		return nil, err
@@ -42,8 +38,35 @@ func Open(ctx context.Context) (*Environment, error) {
 	if err := environment.openProviders(ctx, settings); err != nil {
 		return nil, errors.Join(err, environment.Close())
 	}
+	if err := environment.configureConnection(settings); err != nil {
+		return nil, errors.Join(err, environment.Close())
+	}
 
 	return environment, nil
+}
+
+func (e *Environment) configureConnection(settings settings) error {
+	serverURL := os.Getenv("HEX_PUBLIC_URL")
+	if serverURL == "" {
+		_, port, err := net.SplitHostPort(e.Address)
+		if err != nil {
+			return fmt.Errorf("derive local connection URL: %w", err)
+		}
+		serverURL = "http://localhost:" + port
+	}
+	e.Config.Connection = &hex.ConnectionConfig{
+		Name:   value("HEX_PLATFORM_NAME", "Local Hex"),
+		Server: serverURL,
+	}
+	if settings.sites == "filesystem" {
+		directory := value("HEX_SITES_DIR", filepath.Join(settings.dataDir, "sites"))
+		root, err := filepath.Abs(filepath.Join(directory, "public", "sites"))
+		if err != nil {
+			return fmt.Errorf("resolve local publishing directory: %w", err)
+		}
+		e.Config.Connection.Publishing = &hex.PublishingConfig{Provider: "filesystem", Root: root}
+	}
+	return nil
 }
 
 func (e *Environment) Close() error {
@@ -76,11 +99,6 @@ func readSettings() (settings, error) {
 		database: value("HEX_DATABASE_PROVIDER", "memory"),
 		realtime: value("HEX_REALTIME_PROVIDER", "memory"),
 	}
-	host, _, err := net.SplitHostPort(settings.address)
-	if err != nil || !net.ParseIP(host).IsLoopback() {
-		return settings, errors.New("the unauthenticated development server must bind to a loopback IP")
-	}
-
 	selections := []struct {
 		name    string
 		value   string

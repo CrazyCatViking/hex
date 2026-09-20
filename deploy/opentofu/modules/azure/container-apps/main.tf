@@ -8,10 +8,11 @@ terraform {
 }
 
 resource "azapi_resource" "environment" {
-  type      = "Microsoft.App/managedEnvironments@2024-03-01"
-  name      = "${var.name}-environment"
-  parent_id = var.resource_group_id
-  location  = var.location
+  type                   = "Microsoft.App/managedEnvironments@2024-03-01"
+  name                   = "${var.name}-environment"
+  parent_id              = var.resource_group_id
+  location               = var.location
+  response_export_values = ["properties.defaultDomain"]
 
   body = {
     properties = {
@@ -50,7 +51,12 @@ resource "azapi_resource" "mount" {
 }
 
 locals {
-  environment = merge(var.server_environment, { HEX_ADDR = "127.0.0.1:8081" })
+  gateway_url = "https://${var.name}.${azapi_resource.environment.output.properties.defaultDomain}"
+  environment = merge(
+    { HEX_PUBLIC_URL = local.gateway_url, HEX_SITE_BASE_URL = local.gateway_url },
+    var.server_environment,
+    { HEX_ADDR = "127.0.0.1:8081" }
+  )
 
   secrets = concat(
     [{

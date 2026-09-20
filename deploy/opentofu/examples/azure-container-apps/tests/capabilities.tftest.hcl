@@ -7,6 +7,7 @@ mock_provider "azapi" {
           clientId                 = "00000000-0000-0000-0000-000000000004"
           principalId              = "00000000-0000-0000-0000-000000000005"
           fullyQualifiedDomainName = "test.postgres.database.azure.com"
+          defaultDomain            = "test.azurecontainerapps.io"
         }
       }
     }

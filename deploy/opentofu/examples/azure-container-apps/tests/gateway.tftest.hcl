@@ -1,7 +1,8 @@
 mock_provider "azapi" {
   mock_resource "azapi_resource" {
     defaults = {
-      id = "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/test/providers/Microsoft.App/containerApps/test"
+      id     = "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/test/providers/Microsoft.App/containerApps/test"
+      output = { properties = { defaultDomain = "test.azurecontainerapps.io" } }
     }
   }
 

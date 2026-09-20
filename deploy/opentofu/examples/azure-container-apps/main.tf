@@ -82,8 +82,10 @@ locals {
       HEX_DATABASE_PROVIDER = var.capabilities.database == "none" ? "none" : "postgres"
       HEX_REALTIME_PROVIDER = var.capabilities.realtime ? "memory" : "none"
       AZURE_CLIENT_ID       = azapi_resource.identity.output.properties.clientId
-      HEX_SITE_BASE_URL     = var.site_base_url == null ? "http://localhost:8080" : var.site_base_url
+      HEX_PLATFORM_NAME     = var.name
     },
+    var.site_base_url == null ? {} : { HEX_SITE_BASE_URL = var.site_base_url },
+    var.platform_url == null ? {} : { HEX_PUBLIC_URL = var.platform_url },
     var.capabilities.sites ? module.sites[0].environment : {},
     var.capabilities.files ? module.files[0].environment : {}
   )

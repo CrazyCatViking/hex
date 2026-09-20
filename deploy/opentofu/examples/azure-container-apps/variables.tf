@@ -109,3 +109,8 @@ variable "custom_domains" {
   }))
   default = []
 }
+
+variable "platform_url" {
+  type    = string
+  default = null
+}

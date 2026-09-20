@@ -14,7 +14,6 @@ import (
 func localSettings(t *testing.T) {
 	t.Helper()
 	for name, value := range map[string]string{
-		"HEX_DEV":               "1",
 		"HEX_ADDR":              "127.0.0.1:8081",
 		"HEX_DEV_DATA_DIR":      t.TempDir(),
 		"HEX_SITES_DIR":         "",
@@ -29,16 +28,43 @@ func localSettings(t *testing.T) {
 	}
 }
 
-func TestDevelopmentRequiresExplicitOptInAndLoopback(t *testing.T) {
-	localSettings(t)
-	t.Setenv("HEX_DEV", "")
-	if _, err := Open(context.Background()); err == nil {
-		t.Fatal("expected opt-in error")
+func TestLocalDefaultsDoNotDependOnAModeFlag(t *testing.T) {
+	for _, flag := range []string{"", "1", "production"} {
+		t.Run("flag="+flag, func(t *testing.T) {
+			localSettings(t)
+			t.Setenv("HEX_DEV", flag)
+			t.Setenv("HEX_ADDR", "")
+			environment, err := Open(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := environment.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			if environment.Address != "127.0.0.1:8081" {
+				t.Fatalf("unexpected default address: %s", environment.Address)
+			}
+			if environment.Config.Sites == nil || environment.Config.Files == nil || environment.Config.Database == nil || environment.Config.Realtime == nil {
+				t.Fatal("local defaults were not configured")
+			}
+		})
 	}
-	t.Setenv("HEX_DEV", "1")
-	t.Setenv("HEX_ADDR", "0.0.0.0:8081")
-	if _, err := Open(context.Background()); err == nil {
-		t.Fatal("expected loopback restriction")
+}
+
+func TestCallerCanChooseTheListenerAddress(t *testing.T) {
+	localSettings(t)
+	t.Setenv("HEX_ADDR", "0.0.0.0:9000")
+	environment, err := Open(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if environment.Address != "0.0.0.0:9000" {
+		t.Fatalf("caller address was changed: %s", environment.Address)
+	}
+	if err := environment.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 

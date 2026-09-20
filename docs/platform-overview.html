@@ -340,21 +340,31 @@ Browser → site subdomain → NGINX → that site's files directly</code></pre>
       <section id="local">
         <h2>2. What already runs locally</h2>
         <p>
+          Configure the CLI with <code>hex setup</code>. It downloads non-secret
+          platform settings directly when possible. For a protected company
+          platform, sign in and download the file in your browser, then drop its
+          path into the prompt. Claude Code can use
+          <code>hex setup &lt;url&gt; --json</code> and
+          <code>hex setup --file &lt;downloaded-file&gt; --json</code> without
+          waiting for terminal input. Hex does not manage the browser login or
+          store its session tokens.
+        </p>
+        <p>
           <strong
             >A separate repository is not required to start testing.</strong
           >
-          This repository includes a reference executable at
-          <code>cmd/hex-server</code> and a development launcher that starts Go
-          and NGINX. Install Go, Node.js, and NGINX, then run from the Hex
-          repository:
+          This repository includes a local example at
+          <code>examples/custom-server</code> and a development launcher that
+          starts Go and NGINX. Install Go, Node.js, and NGINX, then run from the
+          Hex repository:
         </p>
         <pre><code>npm ci
 npm run build
 npm link --workspace @hex-platform/cli
 npm run dev</code></pre>
         <p>In another terminal, initialize an app:</p>
-        <pre><code>hex init my-app --server http://localhost:8080 \
-  --publish-root /absolute/path/to/hex/.hex-data/sites/public/sites</code></pre>
+        <pre><code>hex setup http://localhost:8080 --name local
+hex init my-app</code></pre>
         <p>From the generated app directory, publish it:</p>
         <pre><code>hex publish</code></pre>
         <p>
@@ -460,7 +470,7 @@ npm run dev</code></pre>
           <li>
             <code>hex dev</code> builds and launches your own repository or a
             prebuilt executable. <code>npm run dev</code> is a thin wrapper
-            selecting this repository’s reference executable.
+            selecting this repository’s local example.
           </li>
         </ul>
       </section>

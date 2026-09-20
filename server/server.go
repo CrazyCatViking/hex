@@ -13,6 +13,7 @@ type Config struct {
 	Database       Database
 	Realtime       Realtime
 	MaxUploadBytes int64
+	Connection     *ConnectionConfig
 }
 
 type Server struct {
@@ -39,6 +40,9 @@ func New(config Config) *Server {
 
 func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/hex/capabilities", s.capabilities)
+	if s.config.Connection != nil {
+		s.mux.HandleFunc("GET /api/hex/config", s.connectionConfig)
+	}
 
 	if s.config.Files != nil {
 		s.mux.HandleFunc("GET /api/sites/{site}/files", s.listFiles)
@@ -69,12 +73,19 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if strings.HasPrefix(r.URL.Path, "/api/") {
 		w.Header().Set("Cache-Control", "no-store")
-		if !validateRequestOrigin(w, r) {
+		if !connectionDownloadNavigation(r) && !validateRequestOrigin(w, r) {
 			return
 		}
 	}
 
 	s.mux.ServeHTTP(w, r)
+}
+
+func connectionDownloadNavigation(r *http.Request) bool {
+	isRead := r.Method == http.MethodGet || r.Method == http.MethodHead
+	return isRead && r.URL.Path == "/api/hex/config" &&
+		r.Header.Get("Sec-Fetch-Mode") == "navigate" &&
+		r.Header.Get("Sec-Fetch-Dest") == "document"
 }
 
 func validateRequestOrigin(w http.ResponseWriter, r *http.Request) bool {
@@ -106,12 +117,16 @@ func validateRequestOrigin(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func (s *Server) capabilities(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
+	writeJSON(w, http.StatusOK, s.capabilityDescription())
+}
+
+func (s *Server) capabilityDescription() map[string]any {
+	return map[string]any{
 		"version":        1,
 		"files":          s.config.Files != nil,
 		"database":       s.config.Database != nil,
 		"realtime":       s.config.Realtime != nil,
 		"sites":          s.config.Sites != nil,
 		"maxUploadBytes": s.config.MaxUploadBytes,
-	})
+	}
 }

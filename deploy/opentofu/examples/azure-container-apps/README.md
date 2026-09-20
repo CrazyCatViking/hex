@@ -78,6 +78,8 @@ Add the output `redirect_uri` as a Web redirect URI to the Entra app registratio
 
 ## Direct publishing and site domains
 
+The example advertises connection settings at `/api/hex/config` behind the existing Entra authentication. Users run `hex setup <gateway-url>`; if authentication blocks the direct download, they download through the browser and import the file. Set `platform_url` if users connect through a custom gateway hostname rather than the generated Azure URL. It must match the setup origin. No custom Hex CLI Entra registration is introduced. See [Setup](../../../../docs/setup.md).
+
 `tofu output -json publishing` returns the provider/destination object to put under `publishing` in the app's `hex.json`. `hex publish` and `hex delete` use this storage destination directly, not the Hex API. Publishers need private-endpoint network access and their own Azure Files data authorization. The example does not grant that role automatically. See [Publishing](../../../../docs/publishing.md).
 
 Set `site_base_url = "https://hex.example.com"` for the parent site origin. It configures NGINX's hostname routing and the discovery API's URL generation. In the app project, set `siteBaseURL` to this value when `server` uses the Azure-generated gateway hostname.

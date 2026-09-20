@@ -52,8 +52,15 @@ export function createAPI(config, options) {
       method,
       headers,
       body,
-      redirect: "error",
+      redirect: "manual",
     });
+
+    if ([301, 302, 303, 307, 308, 401, 403].includes(response.status)) {
+      await response.body?.cancel();
+      throw new Error(
+        `Gateway access requires authentication or permission (HTTP ${response.status}). Open ${server.origin} in your browser, or supply HEX_TOKEN for programmatic API access. hex login authenticates publishing storage only.`,
+      );
+    }
 
     if (!response.ok) {
       throw new Error(`Hex ${response.status}: ${await response.text()}`);

@@ -92,6 +92,7 @@ output "environment" {
   value = {
     HEX_SITES_PROVIDER = "filesystem"
     HEX_SITES_DIR      = "/mnt/sites"
+    HEX_PUBLISH_URL    = "https://${module.storage.name}.file.core.windows.net/${azapi_resource.share.name}/public/sites"
   }
 }
 

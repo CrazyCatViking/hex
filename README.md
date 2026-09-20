@@ -27,7 +27,7 @@ hex dev --package ./cmd/platform
 
 By default, application uploads, documents and realtime are in-memory; published website assets use local files for direct NGINX serving. No service containers are started. Use `hex dev --services postgres,azurite` only for explicit provider integration testing. The CLI builds **your** server, supplies environment variables and runs NGINX. It also supports prebuilt binaries and a `hex.dev.json` configuration file. No .NET or cloud account is required.
 
-See [Local development](docs/local-development.md) and the [custom-server example](examples/custom-server/README.md). The commands below run this repository's reference executable using the same tooling.
+You can also run your executable directly with `go run .` or from an IDE: the `dev.Open` convenience configuration needs no mode flag. The CLI only adds orchestration. See [Local development](docs/local-development.md) and the [custom-server example](examples/custom-server/README.md). The commands below run that example using the same tooling.
 
 ## Run locally
 
@@ -40,13 +40,13 @@ npm link --workspace @hex-platform/cli
 npm run dev
 ```
 
-The development gateway binds to `127.0.0.1:8080`. NGINX serves published files directly and proxies `/api/` to Go on loopback port 8081. `npm run dev` delegates to the packaged `hex dev` implementation with the reference server selected. The NGINX routing template is shared with the Azure image. Set `NGINX_BIN` if NGINX is not on PATH, and optionally `NGINX_MIME_TYPES` if its MIME type file is in a nonstandard location. Published site directories persist under `.hex-data/`; default application uploads and documents are in memory and reset on restart. The launcher prints the absolute local publishing root.
+The development gateway binds to `127.0.0.1:8080`. NGINX serves published files directly and proxies `/api/` to Go on loopback port 8081. `npm run dev` delegates to the packaged `hex dev` implementation with `examples/custom-server` selected. The NGINX routing template is shared with the Azure image. Set `NGINX_BIN` if NGINX is not on PATH, and optionally `NGINX_MIME_TYPES` if its MIME type file is in a nonstandard location. Published site directories persist under `.hex-data/`; default application uploads and documents are in memory and reset on restart. The launcher prints the absolute local publishing root.
 
 In another terminal:
 
 ```sh
-hex init my-app --name my-app --server http://localhost:8080 \
-  --publish-root /absolute/path/to/hex/.hex-data/sites/public/sites
+hex setup http://localhost:8080 --name local
+hex init my-app
 ```
 
 Open `my-app` in your editor. From that project directory:
@@ -77,6 +77,12 @@ Edit files under `public/` and publish again. For a bundled app, install the cli
 `hex publish` synchronizes directly to `publishing`, and `hex delete my-app --yes` deletes that site's directory directly. Neither command calls the Hex API or obtains credentials from it. Azure Files uses AzCopy; local publishing uses filesystem operations. See [Publishing](docs/publishing.md) for configuration and storage authentication.
 
 `hex sites` calls the read-only discovery API, which enumerates actual site directories containing `index.html` and returns names and subdomain URLs. Set `siteBaseURL` when the API's `server` origin differs from the parent site domain; for example an Azure-generated API hostname with sites under `hex.example.com`. There is no site catalogue, manifest, registration call, release history, or publication timestamp. App uploads and database data are separate from site files and survive unpublishing.
+
+## Connect to a company platform
+
+Run `hex setup` and enter the platform URL. Hex downloads connection settings directly if available. If hosting authentication is required, it opens the browser download URL and accepts the downloaded file's path, including terminal drag-and-drop quoting. Authentication stays with the browser's hosting provider and AzCopy for publishing.
+
+Agents such as Claude Code can use `hex setup <url> --json` and, when user sign-in is required, `hex setup --file <downloaded-file> --json`. Setup saves a non-secret local profile; `hex init` selects it and publishing works from that cache without contacting Hex. See [Setup and authentication handoff](docs/setup.md).
 
 ## Browser API
 

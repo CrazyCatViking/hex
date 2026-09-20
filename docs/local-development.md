@@ -36,7 +36,7 @@ go mod edit -replace=github.com/crazycatviking/hex=../hex
 
 A Go workspace is another option. Only your development checkout needs the replacement/workspace; a deployed server can use a versioned dependency.
 
-The local adapter is used like this inside your server's development configuration branch:
+Choose the convenience local configuration directly in your server:
 
 ```go
 environment, err := dev.Open(ctx)
@@ -53,15 +53,23 @@ mux := http.NewServeMux()
 mux.Handle("/", hex.New(environment.Config))
 ```
 
-The imports are `github.com/crazycatviking/hex/server` (aliased to `hex`) and `github.com/crazycatviking/hex/server/dev`. They are packages in the same root Go module, not separate repositories. Listen on `environment.Address`. `hex dev` sets `HEX_DEV=1`; use that flag to select this branch **before** creating any production providers. `dev.Open` refuses to run without the flag or with a non-loopback listener.
+The imports are `github.com/crazycatviking/hex/server` (aliased to `hex`) and `github.com/crazycatviking/hex/server/dev`. They are packages in the same root Go module, not separate repositories. Listen on `environment.Address`. Calling `dev.Open` selects local defaults; it does not inspect a development-mode flag or detect how the application was launched. Environment variables can override its defaults but are not required. The address defaults to `127.0.0.1:8081`; choosing a different listener is the application's responsibility.
 
-Copy [the complete custom-server example](../examples/custom-server/main.go) into your own repository for an immediately runnable development server, then run `go mod tidy`. It also defines `/api/platform` to demonstrate that the executable is yours. That example is intentionally development-only; replace its configuration branch with your own production provider setup when deploying.
+Copy [the complete custom-server example](../examples/custom-server/main.go) into your own repository, then run `go mod tidy`. It defines `/api/platform` to demonstrate that the executable is yours. This example explicitly chooses local defaults. For deployment, your application chooses hosted providers instead; Hex does not switch configurations based on a mode flag.
 
 You may construct local providers yourself instead of importing `server/dev`; consume the environment contract below. The CLI only expects the resulting HTTP handler to expose `/api/hex/capabilities` for readiness.
 
 ## 2. Run it
 
-From your server repository:
+You can run the Go server normally from your repository, with no environment flag:
+
+```sh
+go run .
+```
+
+Its APIs are available on `http://127.0.0.1:8081`. This starts only your executable, not NGINX. The same applies when launching from an IDE or running the compiled binary.
+
+For the full local hosting arrangement, including NGINX and site subdomains, optionally use:
 
 ```sh
 hex dev
@@ -88,14 +96,14 @@ Both listeners are loopback-only. Local requests are unauthenticated. Ctrl+C sto
 
 ## 3. Publish a test app
 
-The launcher prints the absolute publishing root. From an app workspace:
+The local helper exposes its connection settings automatically. From an app workspace:
 
 ```sh
-hex init demo --server http://localhost:8080 \
-  --publish-root /absolute/path/to/my-hex-platform/.hex-dev/sites/public/sites
+hex setup http://localhost:8080 --name local
+hex init demo
 ```
 
-Run `hex publish` in the generated app directory and open `http://demo.localhost:8080/`. For custom gateway ports, use the matching `--server` value. App code uses same-origin API requests. Modern browsers resolve `.localhost` subdomains to loopback; configure local DNS/hosts entries if your environment does not.
+Run `hex publish` in the generated app directory and open `http://demo.localhost:8080/`. For custom gateway ports, give setup the matching URL. The launcher also prints the absolute publishing root for manual `hex init --server ... --publish-root ...` configuration. App code uses same-origin API requests. Modern browsers resolve `.localhost` subdomains to loopback; configure local DNS/hosts entries if your environment does not.
 
 ## 4. Choose your local services
 
@@ -182,16 +190,16 @@ For an existing Azurite service, select `HEX_FILES_PROVIDER=azureblob` and provi
 
 ## Environment contract
 
-The CLI preserves ordinary inherited environment variables but replaces ambient Hex provider choices and storage connection strings with lightweight local defaults. Explicit environment-file values override those defaults. Selected Compose services then supply their provider/connection settings. Finally, launcher-owned ports, paths and `HEX_DEV` are set so NGINX and your executable agree.
+The CLI preserves ordinary inherited environment variables but replaces ambient Hex provider choices and storage connection strings with lightweight local defaults. Explicit environment-file values override those defaults. Selected Compose services then supply their provider/connection settings. Finally, launcher-owned ports and paths are set so NGINX and your executable agree. The CLI neither sets nor requires a development-mode flag.
 
 | Variable | Meaning |
 | --- | --- |
-| `HEX_DEV=1` | Explicit local-development opt-in |
 | `HEX_ADDR` | Loopback API listener selected by `--api-port` |
 | `HEX_DEV_DATA_DIR` | Persistent development data directory |
 | `HEX_SITES_DIR` | Site filesystem root, shared with NGINX |
 | `HEX_FILES_DIR` | Uploaded-file root when explicitly selecting the filesystem provider |
 | `HEX_SITE_BASE_URL` | `http://localhost:<gateway-port>` |
+| `HEX_PUBLIC_URL` | Gateway origin advertised by the connection-settings endpoint |
 | `HEX_SITES_PROVIDER` | `filesystem` or `none` |
 | `HEX_FILES_PROVIDER` | `memory` (default), `filesystem`, `azureblob` (connection-string mode), or `none` |
 | `HEX_DATABASE_PROVIDER` | `memory`, `postgres`, or `none` |
@@ -211,7 +219,7 @@ npm run test:local
 npm run test:services
 ```
 
-`test:local` builds a temporary **independent Go module** importing Hex, launches it through `hex dev`, checks its custom route and provider configuration, publishes a site directly, restarts using a prebuilt binary, verifies that site files persist while in-memory documents/uploads reset, and checks process cleanup.
+`test:local` builds a temporary **independent Go module** importing Hex, verifies direct flag-free startup and CLI-managed startup, checks its custom route and provider configuration, publishes a site directly, restarts using a prebuilt binary, verifies that site files persist while in-memory documents/uploads reset, and checks process cleanup.
 
 `test:services` starts the Compose services, runs PostgreSQL and Azure Blob provider integration tests, then repeats the external-server workflow with those services. It stops the containers afterward while retaining their volumes. To test already-running services without invoking Docker, set `HEX_TEST_POSTGRES_URL` and `HEX_TEST_BLOB_CONNECTION_STRING`, then run:
 
