@@ -42,14 +42,23 @@ variable "access_tier" {
   }
 }
 
+# Publishing is CLI-to-storage, so publishers need network reachability to
+# this account. Enabling public access keeps Entra/SAS data-plane
+# authorization but removes the need for private connectivity when publishing.
+variable "public_network_access" {
+  type    = bool
+  default = false
+}
+
 module "storage" {
-  source            = "../private-storage"
-  name              = var.storage_name
-  resource_group_id = var.resource_group_id
-  location          = var.location
-  network_id        = var.network_id
-  subnet_id         = var.subnet_id
-  service           = "file"
+  source                = "../private-storage"
+  name                  = var.storage_name
+  resource_group_id     = var.resource_group_id
+  location              = var.location
+  network_id            = var.network_id
+  subnet_id             = var.subnet_id
+  service               = "file"
+  public_network_access = var.public_network_access
 }
 
 resource "azapi_resource" "service" {

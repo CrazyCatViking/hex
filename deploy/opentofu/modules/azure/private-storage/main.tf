@@ -36,6 +36,12 @@ variable "service" {
   }
 }
 
+variable "public_network_access" {
+  description = "Expose the account's public endpoint alongside the private endpoint. The data plane still requires Microsoft Entra or SAS authorization; there is no anonymous access."
+  type        = bool
+  default     = false
+}
+
 resource "azapi_resource" "account" {
   type      = "Microsoft.Storage/storageAccounts@2023-05-01"
   name      = var.name
@@ -49,7 +55,7 @@ resource "azapi_resource" "account" {
       minimumTlsVersion        = "TLS1_2"
       supportsHttpsTrafficOnly = true
       allowBlobPublicAccess    = false
-      publicNetworkAccess      = "Disabled"
+      publicNetworkAccess      = var.public_network_access ? "Enabled" : "Disabled"
       accessTier               = "Hot"
     }
   }
