@@ -53,6 +53,17 @@ resource "azapi_update_resource" "public_ingress" {
     }
   }
 
+  # The update PUTs the merged resource back, but GET never returns secret
+  # values, so they must be re-supplied or ARM rejects the request with
+  # ContainerAppSecretInvalid.
+  sensitive_body = {
+    properties = {
+      configuration = {
+        secrets = local.secrets
+      }
+    }
+  }
+
   response_export_values = ["properties.configuration.ingress.fqdn"]
   depends_on             = [azapi_resource.authentication]
 }
