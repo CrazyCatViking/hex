@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .hex-data/
+.hex-dev/
 .env
 *.tsbuildinfo
 .terraform/

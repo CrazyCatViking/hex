@@ -25,6 +25,27 @@ func New(endpoint, container string, credential azcore.TokenCredential) (*Store,
 	return &Store{client: client, container: container}, nil
 }
 
+func NewFromConnectionString(connectionString, container string) (*Store, error) {
+	client, err := azblob.NewClientFromConnectionString(connectionString, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create Azure Blob client from connection string: %w", err)
+	}
+
+	return &Store{client: client, container: container}, nil
+}
+
+func (s *Store) EnsureContainer(ctx context.Context) error {
+	_, err := s.client.CreateContainer(ctx, s.container, nil)
+	if bloberror.HasCode(err, bloberror.ContainerAlreadyExists) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("create blob container %q: %w", s.container, err)
+	}
+
+	return nil
+}
+
 func (s *Store) Put(ctx context.Context, key string, reader io.Reader) error {
 	_, err := s.client.UploadStream(ctx, s.container, key, reader, nil)
 	if err != nil {

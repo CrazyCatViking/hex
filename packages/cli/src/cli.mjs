@@ -20,6 +20,7 @@ hex sites
 hex delete [site] --yes
 hex capabilities
 hex skills
+hex dev [server-directory] [--package ./cmd/server] [--services postgres,azurite]
 
 Run commands in a project containing hex.json.
 publish/delete use the publishing provider directly; they never call the Hex API.
@@ -27,6 +28,12 @@ Azure Files publishing uses AzCopy login or HEX_PUBLISH_SAS and requires storage
 sites/capabilities use HEX_TOKEN or the optional resource setting for gateway access.`;
 
 export async function main(args = process.argv.slice(2)) {
+  if (args[0] === "dev") {
+    const { devCommand } = await import("./dev/index.mjs");
+    await devCommand(args.slice(1));
+    return;
+  }
+
   const { positionals, values } = parseArgs({
     args,
     allowPositionals: true,

@@ -5,13 +5,15 @@
     "packages/*"
   ],
   "scripts": {
-    "format": "prettier --write \"packages/**/*.{ts,js,mjs,json,html}\" \"scripts/**/*.mjs\" package.json",
-    "format:check": "prettier --check \"packages/**/*.{ts,js,mjs,json,html}\" \"scripts/**/*.mjs\" package.json",
+    "format": "prettier --write \"packages/**/*.{ts,js,mjs,json,html,yaml,yml}\" \"scripts/**/*.mjs\" package.json",
+    "format:check": "prettier --check \"packages/**/*.{ts,js,mjs,json,html,yaml,yml}\" \"scripts/**/*.mjs\" package.json",
     "dev": "node scripts/dev.mjs",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "test:e2e": "npm run build && node scripts/e2e.mjs",
-    "test:browser": "npm run build && node scripts/e2e.mjs --browser"
+    "test:browser": "npm run build && node scripts/e2e.mjs --browser",
+    "test:local": "npm run build && node scripts/test-external-server.mjs",
+    "test:services": "npm run build && node scripts/test-services.mjs"
   },
   "devDependencies": {
     "playwright": "1.63.0",

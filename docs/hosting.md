@@ -17,12 +17,14 @@ The Azure example implements this contract with Container Apps/Entra, NGINX, Azu
 
 ## Reference executable
 
+For local testing of a consuming server, use [hex dev and the optional Go development adapter](local-development.md). Application uploads, documents and realtime default to in-memory providers; only published site assets remain on disk. PostgreSQL/Azurite are opt-in integration-testing services. The adapter requires `HEX_DEV=1`; the reference executable delegates to it when that flag is set. Production provider selection below is separate.
+
 `cmd/hex-server` is one composition root. It supports these explicit selections:
 
 | Variable | Values | Default when omitted |
 | --- | --- | --- |
 | `HEX_SITES_PROVIDER` | `none`, `filesystem` | `filesystem` |
-| `HEX_FILES_PROVIDER` | `none`, `filesystem`, `azureblob` | `azureblob` when `AZURE_BLOB_ENDPOINT` is set, otherwise `filesystem` |
+| `HEX_FILES_PROVIDER` | `none`, `memory`, `filesystem`, `azureblob` | `azureblob` when `AZURE_BLOB_ENDPOINT` is set, otherwise `filesystem` |
 | `HEX_DATABASE_PROVIDER` | `none`, `memory`, `postgres` | `postgres` when `DATABASE_URL` is set, otherwise `memory` |
 | `HEX_REALTIME_PROVIDER` | `none`, `memory` | `memory` |
 

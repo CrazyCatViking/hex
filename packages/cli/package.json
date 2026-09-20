@@ -6,12 +6,13 @@
     "hex": "./src/cli.mjs"
   },
   "files": [
+    "assets",
     "src",
     "skills",
     "templates"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=20.19"
   },
   "scripts": {
     "test": "node --test test/*.test.mjs"

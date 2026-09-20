@@ -2,6 +2,8 @@
 
 Hex's HTTP framework is independent of cloud infrastructure. See [Hosting contract](hosting.md) for the required host behavior, optional runtime capabilities and future GCP composition. The repository's [OpenTofu infrastructure](../deploy/opentofu/README.md) is an editable example, not part of the framework.
 
+For consuming repositories, `hex dev` launches their own executable and NGINX using packaged local-development assets. `server/dev` optionally constructs local providers; PostgreSQL and Azurite can be started through Docker Compose. The core server has no dependency on this launcher. See [Local development](local-development.md).
+
 ## Azure example topology
 
 ```text

@@ -1,0 +1,7 @@
+{
+  "package": ".",
+  "services": [],
+  "dataDirectory": ".hex-dev",
+  "port": 8080,
+  "apiPort": 8081
+}

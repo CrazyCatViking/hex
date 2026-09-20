@@ -8,10 +8,24 @@ A small internal app platform: static sites, shared backend capabilities, a brow
 | --- | --- |
 | `server/` | Embeddable Go HTTP API framework |
 | `server/providers/` | Local storage, Azure Blob Storage, PostgreSQL and in-memory providers |
+| `server/dev/` | Optional local provider adapter for consuming Go applications |
 | `cmd/hex-server/` | Configurable reference server executable |
 | `packages/client/` | `@hex-platform/client`, a dependency-free browser JS/TS client |
 | `packages/cli/` | `@hex-platform/cli`, publishing tools and bundled agent skill |
 | `deploy/` | Container images, NGINX configuration and composable OpenTofu deployment examples |
+| `examples/custom-server/` | Example consuming executable with its own API endpoint |
+
+## Develop a platform in your own repository
+
+Your executable can import `server/` and use `server/dev` for its local configuration. Start that repository with:
+
+```sh
+hex dev --package ./cmd/platform
+```
+
+By default, application uploads, documents and realtime are in-memory; published website assets use local files for direct NGINX serving. No service containers are started. Use `hex dev --services postgres,azurite` only for explicit provider integration testing. The CLI builds **your** server, supplies environment variables and runs NGINX. It also supports prebuilt binaries and a `hex.dev.json` configuration file. No .NET or cloud account is required.
+
+See [Local development](docs/local-development.md) and the [custom-server example](examples/custom-server/README.md). The commands below run this repository's reference executable using the same tooling.
 
 ## Run locally
 
@@ -24,7 +38,7 @@ npm link --workspace @hex-platform/cli
 npm run dev
 ```
 
-The development gateway binds to `127.0.0.1:8080`. NGINX serves published files directly and proxies `/api/` to Go on loopback port 8081. The launcher uses the same NGINX routing configuration as Azure. Set `NGINX_BIN` if NGINX is not on PATH, and optionally `NGINX_MIME_TYPES` if its MIME type file is in a nonstandard location. Files and site directories persist under `.hex-data/`; the default development database is in memory and resets on restart. The launcher prints the absolute local publishing root.
+The development gateway binds to `127.0.0.1:8080`. NGINX serves published files directly and proxies `/api/` to Go on loopback port 8081. `npm run dev` delegates to the packaged `hex dev` implementation with the reference server selected. The NGINX routing template is shared with the Azure image. Set `NGINX_BIN` if NGINX is not on PATH, and optionally `NGINX_MIME_TYPES` if its MIME type file is in a nonstandard location. Published site directories persist under `.hex-data/`; default application uploads and documents are in memory and reset on restart. The launcher prints the absolute local publishing root.
 
 In another terminal:
 
@@ -188,6 +202,7 @@ go vet ./...
 npm run build
 npm test
 npm run test:e2e
+npm run test:local
 ```
 
 The end-to-end test requires NGINX. It starts Go and NGINX, publishes directly to the shared directory, exercises discovery and application APIs, then stops Go and verifies that publishing and unpublishing still work. CLI tests check that direct publishing makes zero requests to Hex, filters source files, and handles file/directory transitions. Go tests cover filesystem discovery, realtime, namespaces and application-upload limits. Azure Files adapter tests verify AzCopy invocation; live Azure publishing is not tested locally.

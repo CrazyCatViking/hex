@@ -18,7 +18,7 @@
 }
 ```
 
-The provider synchronizes the build directory to `<root>/<name>/`. Relative roots are resolved from the app project directory. `npm run dev` prints the correct absolute root for the reference platform. You can initialize a project with `hex init demo --publish-root /absolute/path/to/hex/.hex-data/sites/public/sites`.
+The provider synchronizes the build directory to `<root>/<name>/`. Relative roots are resolved from the app project directory. `hex dev` prints the correct absolute root for your platform (by default `<server-repository>/.hex-dev/sites/public/sites`). The repository's `npm run dev` wrapper uses `.hex-data/` for its reference server. Initialize an app with `hex init demo --publish-root <printed-root>`.
 
 ## Azure Files
 

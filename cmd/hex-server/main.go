@@ -11,6 +11,7 @@ import (
 	"time"
 
 	hex "github.com/hex-platform/hex/server"
+	"github.com/hex-platform/hex/server/dev"
 )
 
 func main() {
@@ -24,7 +25,7 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	config, closeProviders, err := configure(ctx, os.Getenv)
+	config, closeProviders, err := configureServer(ctx)
 	if err != nil {
 		return err
 	}
@@ -52,4 +53,21 @@ func run() error {
 		return nil
 	}
 	return err
+}
+
+func configureServer(ctx context.Context) (hex.Config, func(), error) {
+	if os.Getenv("HEX_DEV") != "1" {
+		return configure(ctx, os.Getenv)
+	}
+
+	environment, err := dev.Open(ctx)
+	if err != nil {
+		return hex.Config{}, nil, err
+	}
+	closeProviders := func() {
+		if err := environment.Close(); err != nil {
+			slog.Error("close development providers", "error", err)
+		}
+	}
+	return environment.Config, closeProviders, nil
 }

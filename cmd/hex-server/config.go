@@ -45,7 +45,7 @@ func readProviderSelection(getenv func(string) string) (providerSelection, error
 		allowed []string
 	}{
 		{"HEX_SITES_PROVIDER", selection.sites, []string{"none", "filesystem"}},
-		{"HEX_FILES_PROVIDER", selection.files, []string{"none", "filesystem", "azureblob"}},
+		{"HEX_FILES_PROVIDER", selection.files, []string{"none", "memory", "filesystem", "azureblob"}},
 		{"HEX_DATABASE_PROVIDER", selection.database, []string{"none", "memory", "postgres"}},
 		{"HEX_REALTIME_PROVIDER", selection.realtime, []string{"none", "memory"}},
 	}
@@ -112,6 +112,9 @@ func configure(ctx context.Context, getenv func(string) string) (hex.Config, fun
 	}
 
 	switch selection.files {
+	case "memory":
+		config.Files = memory.NewStore()
+
 	case "filesystem":
 		directory := environmentValue(getenv, "HEX_FILES_DIR", ".hex-data/files")
 		store, err := openFilesystem(directory)

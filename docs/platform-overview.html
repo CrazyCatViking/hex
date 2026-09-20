@@ -232,9 +232,10 @@
           services.
         </p>
         <p>
-          The basic local workflow already works. The next step is a reusable
-          setup for testing a platform executable from another repository
-          against realistic service stand-ins.
+          The local workflow supports a platform executable from another
+          repository. Use <code>hex dev</code> for lightweight providers or
+          optional PostgreSQL and Azurite services. No .NET or Azure account is
+          required.
         </p>
       </header>
 
@@ -363,13 +364,13 @@ npm run dev</code></pre>
         <pre><code>localhost:8080 — NGINX
     ├── &lt;site&gt;.localhost → that site's local directory
     └── /api/*   → Go on localhost:8081
-                       ├── Local files
+                       ├── In-memory app uploads
                        ├── In-memory documents
                        └── In-memory realtime</code></pre>
         <p>
-          Files persist under <code>.hex-data/</code>. The default document
-          database resets when the process restarts. Local development has no
-          authentication and the listeners bind to loopback.
+          Published sites persist under <code>.hex-data/</code>. Application
+          uploads and documents reset when the process restarts. Local
+          development has no authentication and the listeners bind to loopback.
         </p>
         <p>
           This tests the complete user workflow, including real WebSockets and
@@ -411,13 +412,15 @@ npm run dev</code></pre>
               </tr>
               <tr>
                 <th scope="row">Azure Blob uploads</th>
-                <td>Filesystem upload provider</td>
+                <td>In-memory object store</td>
                 <td>Azurite to exercise the Blob SDK and provider</td>
               </tr>
               <tr>
                 <th scope="row">Azure PostgreSQL</th>
-                <td>Local PostgreSQL container</td>
-                <td>Same PostgreSQL provider and schema</td>
+                <td>In-memory document database</td>
+                <td>
+                  Optional local PostgreSQL with the same provider and schema
+                </td>
               </tr>
               <tr>
                 <th scope="row">In-process realtime</th>
@@ -435,29 +438,29 @@ npm run dev</code></pre>
         <p>
           A local filesystem is sufficient to develop publishing, but does not
           prove Azure Files’ mount permissions, caching, or failure behavior.
-          Filesystem uploads test the Hex file API; Azurite tests the Azure Blob
+          In-memory uploads test the Hex file API; Azurite tests the Azure Blob
           provider.
         </p>
 
-        <h3>Current implementation gaps</h3>
+        <h3>Available local tooling</h3>
         <ul>
           <li>
             The PostgreSQL provider already accepts a local connection through
             <code>DATABASE_URL</code>.
           </li>
           <li>
-            A Docker Compose environment for PostgreSQL and Azurite has not yet
-            been added.
+            The CLI ships optional Docker Compose services for PostgreSQL and
+            Azurite, with persistent volumes and readiness checks.
           </li>
           <li>
-            The Blob provider currently uses Azure token credentials. An
-            emulator-compatible option, such as a connection-string constructor,
-            is needed for Azurite.
+            The Blob provider supports connection strings for Azurite. The Go
+            development adapter initializes its upload container without
+            requiring Azure credentials.
           </li>
           <li>
-            <code>npm run dev</code> currently builds this repository’s
-            reference executable. It does not yet launch an arbitrary platform
-            repository.
+            <code>hex dev</code> builds and launches your own repository or a
+            prebuilt executable. <code>npm run dev</code> is a thin wrapper
+            selecting this repository’s reference executable.
           </li>
         </ul>
       </section>
@@ -506,20 +509,22 @@ my-hex-app/
       <section id="development">
         <h2>5. Recommended development environment</h2>
         <p>
-          Add reusable tooling with two modes. The lightweight arrangement
-          exists for the reference executable; the external-repository launcher
-          and service-backed setup are proposed additions.
+          The CLI provides two modes for consuming repositories. Import
+          <code>server/dev</code> in your local server configuration, then run
+          <code>hex dev</code>. The production HTTP framework remains
+          independent.
         </p>
 
         <h3>Lightweight mode</h3>
         <pre><code>NGINX + your platform executable
     ├── Local site directory
-    ├── Local upload directory
+    ├── In-memory app uploads
     ├── In-memory database
     └── In-process realtime</code></pre>
         <p>
-          Fast startup, no Azure account, and optionally no Docker. Suitable for
-          frontend work and framework development.
+          This is the default: no Azure account, Docker, PostgreSQL or Azurite
+          service is needed. Site files remain on disk for NGINX; application
+          uploads and documents reset on restart.
         </p>
 
         <h3>Service-backed mode</h3>
@@ -529,11 +534,11 @@ my-hex-app/
     ├── PostgreSQL container
     └── In-process realtime</code></pre>
         <p>
-          Use Docker Compose profiles so developers start only the services they
-          need. PostgreSQL and Azurite should have persistent volumes, health
-          checks, and repeatable initialization.
+          Run <code>hex dev --services postgres,azurite</code>, or select just
+          one service. Docker Compose supplies persistent volumes and health
+          checks. The local Go adapter supplies repeatable initialization.
         </p>
-        <p>The launcher should accept:</p>
+        <p>The launcher accepts:</p>
         <ul>
           <li>The platform repository or executable to run.</li>
           <li>Its environment configuration.</li>
@@ -567,25 +572,28 @@ my-hex-app/
 go vet ./...
 npm run build
 npm test
-npm run test:e2e</code></pre>
+npm run test:e2e
+npm run test:local
+npm run test:services</code></pre>
         <p>
           The existing end-to-end test uses the local providers and real NGINX.
           It exercises publishing, file operations, documents, WebSockets, and
-          static serving after the Go process stops. PostgreSQL and Azurite
-          integration coverage remains a next step.
+          static serving after the Go process stops. Additional tests build an
+          independent consuming Go module and verify its custom endpoint, local
+          configuration, restart persistence and process cleanup. Service-backed
+          tests exercise real PostgreSQL and Azurite through the Go providers.
         </p>
         <p class="callout">
-          <strong>Recommended next step:</strong> add the service-backed Compose
-          setup and make the launcher work with an external platform executable.
-          This enables a real <code>my-company-hex</code> repository with a
-          fast, entirely local feedback loop.
+          <strong>Get started:</strong> copy the custom-server example into your
+          own Go module and run <code>hex dev</code>. See
+          <a href="local-development.md">the local development guide</a> for
+          configuration, optional services and the environment contract.
         </p>
       </section>
 
       <footer>
-        Hex platform overview · Current functionality and proposed local
-        development additions · Self-contained document; no external assets or
-        scripts.
+        Hex platform overview · Current functionality and local development
+        tooling · Self-contained document; no external assets or scripts.
       </footer>
     </main>
   </body>
