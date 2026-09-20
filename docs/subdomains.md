@@ -22,7 +22,7 @@ The gateway does not provide the old shared `/sites/<name>/` web routes. A site 
 
 The CLI falls back to its `server` origin if `siteBaseURL` is absent. The server defaults to `http://localhost:8080` for development. Public site URLs are always derived from this configured base and the directory name, not from an untrusted Host header.
 
-The NGINX Docker image generates its configuration from `packages/cli/assets/nginx.conf.template` at startup. The local CLI ships and uses the same template, so it works outside the Hex checkout. The image's domain validation/escaping script runs before the official envsubst step. Unrecognized hosts cannot serve static assets. The configured base domain is for API access, not a catch-all website directory.
+The NGINX Docker image generates its configuration from `internal/cli/assets/nginx.conf.template` at startup. The Go CLI embeds and uses the same template, so it works outside the Hex checkout. The image's domain validation/escaping script runs before the official envsubst step. Unrecognized hosts cannot serve static assets. The configured base domain is for API access, not a catch-all website directory.
 
 ## Browser boundaries
 

@@ -2,7 +2,7 @@
 
 A small internal app platform: static sites, shared backend capabilities, a browser client, and a publishing CLI. The hosting gateway authenticates API and website visitors. Publishers authenticate directly to their storage provider; publishing never goes through the Hex API.
 
-This is the [github.com/crazycatviking/hex](https://github.com/crazycatviking/hex) monorepo: one root Go module for the server packages, npm workspaces for the client and CLI, and shared infrastructure examples and documentation.
+This is the [github.com/crazycatviking/hex](https://github.com/crazycatviking/hex) monorepo: one root Go module for the server and CLI, a TypeScript browser-client package, and shared infrastructure examples and documentation.
 
 ## Packages
 
@@ -13,11 +13,16 @@ This is the [github.com/crazycatviking/hex](https://github.com/crazycatviking/he
 | `server/dev/` | Optional local provider adapter for consuming Go applications |
 | `cmd/hex-server/` | Configurable reference server executable |
 | `packages/client/` | `@hex-platform/client`, a dependency-free browser JS/TS client |
-| `packages/cli/` | `@hex-platform/cli`, publishing tools and bundled agent skill |
+| `cmd/hex/` | Standalone Go CLI entry point |
+| `internal/cli/` | CLI implementation and embedded starter, client, skill and development assets |
 | `deploy/` | Container images, NGINX configuration and composable OpenTofu deployment examples |
 | `examples/custom-server/` | Example consuming executable with its own API endpoint |
 
 ## Develop a platform in your own repository
+
+Build/install the CLI from this checkout with `go install ./cmd/hex`, or use a prebuilt executable when available. Running the CLI requires neither Go nor Node.js. Building a consuming Go server still requires Go; `hex dev --binary` does not. Put your Go installation's bin directory on PATH. If you previously linked the Node CLI, remove that old global npm installation/link so `hex` resolves to the Go executable.
+
+See [CLI build, distribution and migration](docs/cli.md) for cross-compilation and embedded-client maintenance.
 
 Your executable can import `server/` and use `server/dev` for its local configuration. Start that repository with:
 
@@ -31,16 +36,14 @@ You can also run your executable directly with `go run .` or from an IDE: the `d
 
 ## Run locally
 
-Requires Go 1.25+, Node.js 20+, and NGINX. These packages are currently built from this workspace, not published to a registry.
+Building from source requires Go 1.25+. Local website hosting also requires NGINX. Node.js is only needed to develop/build the browser client or run JavaScript/browser integration tests, not to use the CLI or generate a starter site.
 
 ```sh
-npm ci
-npm run build
-npm link --workspace @hex-platform/cli
-npm run dev
+go install ./cmd/hex
+hex dev --package ./examples/custom-server --data-dir .hex-data
 ```
 
-The development gateway binds to `127.0.0.1:8080`. NGINX serves published files directly and proxies `/api/` to Go on loopback port 8081. `npm run dev` delegates to the packaged `hex dev` implementation with `examples/custom-server` selected. The NGINX routing template is shared with the Azure image. Set `NGINX_BIN` if NGINX is not on PATH, and optionally `NGINX_MIME_TYPES` if its MIME type file is in a nonstandard location. Published site directories persist under `.hex-data/`; default application uploads and documents are in memory and reset on restart. The launcher prints the absolute local publishing root.
+The development gateway binds to `127.0.0.1:8080`. NGINX serves published files directly and proxies `/api/` to Go on loopback port 8081. The NGINX routing template is shared with the Azure image and embedded in the CLI. Set `NGINX_BIN` if NGINX is not on PATH, and optionally `NGINX_MIME_TYPES` if its MIME type file is in a nonstandard location. Published site directories persist under `.hex-data/`; default application uploads and documents are in memory and reset on restart. The launcher prints the absolute local publishing root.
 
 In another terminal:
 
@@ -197,7 +200,7 @@ The infrastructure is an example to copy and adapt, not the only way to host Hex
 Use `gofmt` for Go, Prettier for JS/TS and project files, and `tofu fmt` for infrastructure. Formatting handles layout; the structure and naming principles in [AGENTS.md](AGENTS.md) still apply.
 
 ```sh
-gofmt -w cmd server
+gofmt -w cmd internal server examples
 npm run format
 tofu fmt -recursive deploy/opentofu
 ```
@@ -207,7 +210,9 @@ tofu fmt -recursive deploy/opentofu
 ```sh
 go test -race ./...
 go vet ./...
+npm ci
 npm run build
+npm run check:cli-client
 npm test
 npm run test:e2e
 npm run test:local

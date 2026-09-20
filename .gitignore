@@ -1,5 +1,8 @@
 node_modules/
 dist/
+bin/
+/cmd/hex/hex
+/cmd/hex/hex.exe
 .hex-data/
 .hex-dev/
 .env

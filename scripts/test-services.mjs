@@ -1,21 +1,43 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
-import { developmentSettings } from "../packages/cli/src/dev/settings.mjs";
-import {
-  manageServices,
-  serviceEnvironment,
-} from "../packages/cli/src/dev/services.mjs";
 
 const exec = promisify(execFile);
 const root = fileURLToPath(new URL("../", import.meta.url));
+const compose = fileURLToPath(
+  new URL("../internal/cli/assets/compose.yaml", import.meta.url),
+);
 const existing = process.argv.includes("--existing");
-const settings = await developmentSettings(root, {
-  services: "postgres,azurite",
-  "data-dir": ".hex-dev/service-tests",
-});
+const blobKey = Buffer.from("hex-local-development-only").toString("base64");
+const environment = { ...process.env };
 
-let environment = { ...process.env };
+async function composeCommand(action) {
+  const args = [
+    "compose",
+    "--file",
+    compose,
+    "--project-name",
+    "hex-provider-tests",
+    "--profile",
+    "postgres",
+    "--profile",
+    "azurite",
+    ...action,
+  ];
+  const result = await exec("docker", args, {
+    cwd: root,
+    env: {
+      ...process.env,
+      HEX_LOCAL_POSTGRES_PORT: "54320",
+      HEX_LOCAL_BLOB_PORT: "10000",
+      HEX_LOCAL_BLOB_KEY: blobKey,
+    },
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  process.stdout.write(result.stdout);
+  process.stderr.write(result.stderr);
+}
+
 if (existing) {
   if (
     !environment.HEX_TEST_POSTGRES_URL ||
@@ -26,16 +48,14 @@ if (existing) {
     );
   }
 } else {
-  const services = serviceEnvironment(settings);
-  environment.HEX_TEST_POSTGRES_URL = services.DATABASE_URL;
-  environment.HEX_TEST_BLOB_CONNECTION_STRING =
-    services.AZURE_BLOB_CONNECTION_STRING;
+  environment.HEX_TEST_POSTGRES_URL =
+    "postgres://hex:hex-local-only@127.0.0.1:54320/hex?sslmode=disable";
+  environment.HEX_TEST_BLOB_CONNECTION_STRING = `DefaultEndpointsProtocol=http;AccountName=hexlocal;AccountKey=${blobKey};BlobEndpoint=http://127.0.0.1:10000/hexlocal`;
 }
 
 try {
-  if (!existing) {
-    await manageServices(settings, "up");
-  }
+  if (!existing)
+    await composeCommand(["up", "--detach", "--wait", "postgres", "azurite"]);
   const providers = await exec(
     "go",
     [
@@ -66,7 +86,5 @@ try {
   process.stdout.write(consumer.stdout);
   process.stderr.write(consumer.stderr);
 } finally {
-  if (!existing) {
-    await manageServices(settings, "down");
-  }
+  if (!existing) await composeCommand(["down"]);
 }

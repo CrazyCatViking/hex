@@ -9,15 +9,11 @@ import { createServer } from "node:net";
 import { once } from "node:events";
 import { Agent } from "undici";
 import { createHexClient } from "../packages/client/dist/index.js";
-import {
-  startProcess,
-  stopProcess,
-  waitForHTTP,
-} from "../packages/cli/src/dev/processes.mjs";
+import { startProcess, stopProcess, waitForHTTP } from "./processes.mjs";
+import { buildCLI } from "./build-cli.mjs";
 
 const exec = promisify(execFile);
 const root = fileURLToPath(new URL("../", import.meta.url));
-const cli = join(root, "packages/cli/src/cli.mjs");
 
 async function freePort() {
   const server = createServer().listen(0, "127.0.0.1");
@@ -57,6 +53,7 @@ async function main() {
   let logs = "";
 
   try {
+    const cli = await buildCLI(directory);
     const port = await freePort();
     let apiPort = await freePort();
     while (port === apiPort) {
@@ -115,15 +112,11 @@ replace github.com/crazycatviking/hex => ${JSON.stringify(root)}
 
     async function launch(args = []) {
       logs = "";
-      const child = await startProcess(
-        process.execPath,
-        [cli, "dev", platform, ...args],
-        {
-          cwd: directory,
-          env: { ...process.env, GOWORK: "off" },
-          stdio: ["ignore", "pipe", "pipe"],
-        },
-      );
+      const child = await startProcess(cli, ["dev", platform, ...args], {
+        cwd: directory,
+        env: { ...process.env, GOWORK: "off" },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
       development = child;
       child.stdout.on("data", (data) => {
         logs += data.toString();
@@ -145,8 +138,8 @@ replace github.com/crazycatviking/hex => ${JSON.stringify(root)}
     assert.equal(capabilities.database, true);
 
     const setup = await exec(
-      process.execPath,
-      [cli, "setup", origin, "--name", "local", "--json"],
+      cli,
+      ["setup", origin, "--name", "local", "--json"],
       {
         cwd: directory,
         env: cliEnvironment,
@@ -154,11 +147,11 @@ replace github.com/crazycatviking/hex => ${JSON.stringify(root)}
     );
     assert.equal(JSON.parse(setup.stdout).status, "ready");
 
-    await exec(process.execPath, [cli, "init", app, "--name", "demo"], {
+    await exec(cli, ["init", app, "--name", "demo"], {
       env: cliEnvironment,
     });
     await writeFile(join(app, "public/index.html"), "consumer website");
-    await exec(process.execPath, [cli, "publish"], {
+    await exec(cli, ["publish"], {
       cwd: app,
       env: cliEnvironment,
     });
@@ -181,7 +174,7 @@ replace github.com/crazycatviking/hex => ${JSON.stringify(root)}
     await assert.rejects(
       fetch(`http://127.0.0.1:${apiPort}/api/hex/capabilities`),
     );
-    await exec(process.execPath, [cli, "publish"], {
+    await exec(cli, ["publish"], {
       cwd: app,
       env: cliEnvironment,
     });

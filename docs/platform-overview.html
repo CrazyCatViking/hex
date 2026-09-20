@@ -322,8 +322,9 @@ Browser → site subdomain → NGINX → that site's files directly</code></pre>
             CRUD, realtime channels, and capability discovery.
           </li>
           <li>
-            <code>@hex-platform/cli</code> initializes projects, installs the
-            agent skill, publishes sites, lists sites, and unpublishes them.
+            The standalone Go <code>hex</code> CLI initializes projects,
+            installs the agent skill, publishes sites, lists sites, and
+            unpublishes them.
           </li>
           <li>
             Apps use same-origin requests to the gateway’s <code>/api/</code>
@@ -355,13 +356,11 @@ Browser → site subdomain → NGINX → that site's files directly</code></pre>
           >
           This repository includes a local example at
           <code>examples/custom-server</code> and a development launcher that
-          starts Go and NGINX. Install Go, Node.js, and NGINX, then run from the
-          Hex repository:
+          starts Go and NGINX. Install Go and NGINX, then run from the Hex
+          repository:
         </p>
-        <pre><code>npm ci
-npm run build
-npm link --workspace @hex-platform/cli
-npm run dev</code></pre>
+        <pre><code>go install ./cmd/hex
+hex dev --package ./examples/custom-server --data-dir .hex-data</code></pre>
         <p>In another terminal, initialize an app:</p>
         <pre><code>hex setup http://localhost:8080 --name local
 hex init my-app</code></pre>

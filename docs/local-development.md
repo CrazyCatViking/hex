@@ -16,14 +16,12 @@ The development adapter neither starts a server nor provisions cloud infrastruct
 
 ## 1. Add Hex to your server
 
-Install Go 1.25+, Node.js 20.19+, the Hex CLI, and native NGINX. Set `NGINX_BIN` if its executable is not on PATH; set `NGINX_MIME_TYPES` if its MIME type file is in a nonstandard location. The current local launcher targets Linux/macOS-style native NGINX environments.
+Install the Hex executable and native NGINX. Go 1.25+ is needed only when building your server or the CLI from source; `hex dev --binary` needs no Go installation. Node.js is not required by the CLI. Set `NGINX_BIN` if NGINX is not on PATH; set `NGINX_MIME_TYPES` if its MIME type file is in a nonstandard location. The local NGINX runner is tested on Linux; the CLI can also be built for macOS and Windows, but native NGINX behavior there needs platform validation (WSL is an option on Windows).
 
-For development from a checkout, build and link the CLI from the Hex repository:
+For development from a checkout, install the CLI from the Hex repository and ensure your Go bin directory is on PATH:
 
 ```sh
-npm ci
-npm run build
-npm link --workspace @hex-platform/cli
+go install ./cmd/hex
 ```
 
 Create your own Go module in a separate directory. Until Hex is published as a versioned module, use a local replacement (adjust the path):

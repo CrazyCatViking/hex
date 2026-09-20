@@ -11,6 +11,7 @@ import WebSocket from "ws";
 import { Agent } from "undici";
 import { createHexClient } from "../packages/client/dist/index.js";
 import { startNginx, waitForHTTP, stopProcess } from "./nginx.mjs";
+import { buildCLI } from "./build-cli.mjs";
 
 function lookupLoopback(hostname, options, callback) {
   if (options.all) {
@@ -226,10 +227,9 @@ async function main() {
     });
     await waitForHTTP(`${origin}/healthz`, nginx);
 
-    const cli = join(root, "packages/cli/src/cli.mjs");
+    const cli = await buildCLI(directory);
     const projectDirectory = join(directory, "demo");
-    await exec(process.execPath, [
-      cli,
+    await exec(cli, [
       "init",
       projectDirectory,
       "--server",
@@ -240,8 +240,7 @@ async function main() {
       join(sitesDirectory, "public/sites"),
     ]);
 
-    const invoke = (args) =>
-      exec(process.execPath, [cli, ...args], { cwd: projectDirectory });
+    const invoke = (args) => exec(cli, args, { cwd: projectDirectory });
     const published = await invoke(["publish"]);
     assert.equal(published.stdout.trim(), `http://demo.localhost:${port}/`);
 

@@ -81,6 +81,6 @@ Anything that places files in that layout can publish a site. There is no metada
 
 ## Other providers
 
-Publishing adapters live in `packages/cli/src/publishing/`. They provide `publish(name, source)` and `delete(name)` independently of the Hex API. A future GCS adapter can synchronize through GCP tooling or its SDK while retaining the same `hex publish` command. The host separately provides direct static serving and a read-only `SiteDirectory` implementation. GCS publishing is not implemented yet.
+Publishing code lives in `internal/cli/publishing.go`. Provider operations are independent of the Hex API. A future GCS publisher can synchronize through GCP tooling or its Go SDK while retaining the same `hex publish` command. The host separately provides direct static serving and a read-only `SiteDirectory` implementation. GCS publishing is not implemented yet.
 
 References: [AzCopy Azure Files synchronization](https://learn.microsoft.com/en-us/azure/storage/common/storage-use-azcopy-files#synchronize-files), [AzCopy user authorization](https://learn.microsoft.com/en-us/azure/storage/common/storage-use-azcopy-authorize-user-identity).
