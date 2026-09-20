@@ -1,4 +1,4 @@
-module github.com/hex-platform/hex
+module github.com/crazycatviking/hex
 
 go 1.25.0
 

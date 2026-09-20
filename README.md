@@ -2,6 +2,8 @@
 
 A small internal app platform: static sites, shared backend capabilities, a browser client, and a publishing CLI. The hosting gateway authenticates API and website visitors. Publishers authenticate directly to their storage provider; publishing never goes through the Hex API.
 
+This is the [github.com/crazycatviking/hex](https://github.com/crazycatviking/hex) monorepo: one root Go module for the server packages, npm workspaces for the client and CLI, and shared infrastructure examples and documentation.
+
 ## Packages
 
 | Path | Purpose |
@@ -114,9 +116,9 @@ import (
     "log"
     "net/http"
 
-    hex "github.com/hex-platform/hex/server"
-    "github.com/hex-platform/hex/server/providers/local"
-    "github.com/hex-platform/hex/server/providers/memory"
+    hex "github.com/crazycatviking/hex/server"
+    "github.com/crazycatviking/hex/server/providers/local"
+    "github.com/crazycatviking/hex/server/providers/memory"
 )
 
 func main() {

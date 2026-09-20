@@ -6,7 +6,7 @@ import (
 	"slices"
 	"sync"
 
-	hex "github.com/hex-platform/hex/server"
+	hex "github.com/crazycatviking/hex/server"
 )
 
 type documentKey struct {

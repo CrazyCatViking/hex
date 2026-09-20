@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	hex "github.com/hex-platform/hex/server"
-	"github.com/hex-platform/hex/server/providers/local"
-	"github.com/hex-platform/hex/server/providers/memory"
+	hex "github.com/crazycatviking/hex/server"
+	"github.com/crazycatviking/hex/server/providers/local"
+	"github.com/crazycatviking/hex/server/providers/memory"
 )
 
 func setup(t *testing.T) (*hex.Server, *local.Store) {

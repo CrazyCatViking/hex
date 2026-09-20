@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"time"
 
-	hex "github.com/hex-platform/hex/server"
-	"github.com/hex-platform/hex/server/dev"
+	hex "github.com/crazycatviking/hex/server"
+	"github.com/crazycatviking/hex/server/dev"
 )
 
 func main() {

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	hex "github.com/hex-platform/hex/server"
+	hex "github.com/crazycatviking/hex/server"
 )
 
 func TestPostgresDatabase(t *testing.T) {

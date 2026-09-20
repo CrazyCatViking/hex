@@ -8,7 +8,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
-	hex "github.com/hex-platform/hex/server"
+	hex "github.com/crazycatviking/hex/server"
 )
 
 type Store struct {

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"syscall"
 
-	hex "github.com/hex-platform/hex/server"
+	hex "github.com/crazycatviking/hex/server"
 )
 
 type Store struct {

@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	hex "github.com/hex-platform/hex/server"
+	hex "github.com/crazycatviking/hex/server"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )

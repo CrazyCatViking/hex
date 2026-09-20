@@ -10,11 +10,11 @@ import (
 	"slices"
 	"time"
 
-	hex "github.com/hex-platform/hex/server"
-	"github.com/hex-platform/hex/server/providers/azureblob"
-	"github.com/hex-platform/hex/server/providers/local"
-	"github.com/hex-platform/hex/server/providers/memory"
-	"github.com/hex-platform/hex/server/providers/postgres"
+	hex "github.com/crazycatviking/hex/server"
+	"github.com/crazycatviking/hex/server/providers/azureblob"
+	"github.com/crazycatviking/hex/server/providers/local"
+	"github.com/crazycatviking/hex/server/providers/memory"
+	"github.com/crazycatviking/hex/server/providers/postgres"
 )
 
 type Environment struct {

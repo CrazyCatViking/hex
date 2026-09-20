@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	hex "github.com/hex-platform/hex/server"
+	hex "github.com/crazycatviking/hex/server"
 )
 
 func localSettings(t *testing.T) {

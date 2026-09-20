@@ -2,6 +2,11 @@
   "name": "@hex-platform/client",
   "version": "0.1.0",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/crazycatviking/hex.git",
+    "directory": "packages/client"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

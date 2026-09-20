@@ -11,7 +11,7 @@ import (
 	"testing"
 	"testing/iotest"
 
-	hex "github.com/hex-platform/hex/server"
+	hex "github.com/crazycatviking/hex/server"
 )
 
 func readObject(t *testing.T, reader io.ReadCloser) []byte {

@@ -30,8 +30,8 @@ Create your own Go module in a separate directory. Until Hex is published as a v
 
 ```sh
 go mod init example.com/my-hex-platform
-go mod edit -require=github.com/hex-platform/hex@v0.0.0
-go mod edit -replace=github.com/hex-platform/hex=../hex
+go mod edit -require=github.com/crazycatviking/hex@v0.0.0
+go mod edit -replace=github.com/crazycatviking/hex=../hex
 ```
 
 A Go workspace is another option. Only your development checkout needs the replacement/workspace; a deployed server can use a versioned dependency.
@@ -53,7 +53,7 @@ mux := http.NewServeMux()
 mux.Handle("/", hex.New(environment.Config))
 ```
 
-The imports are `github.com/hex-platform/hex/server` (aliased to `hex`) and `github.com/hex-platform/hex/server/dev`. Listen on `environment.Address`. `hex dev` sets `HEX_DEV=1`; use that flag to select this branch **before** creating any production providers. `dev.Open` refuses to run without the flag or with a non-loopback listener.
+The imports are `github.com/crazycatviking/hex/server` (aliased to `hex`) and `github.com/crazycatviking/hex/server/dev`. They are packages in the same root Go module, not separate repositories. Listen on `environment.Address`. `hex dev` sets `HEX_DEV=1`; use that flag to select this branch **before** creating any production providers. `dev.Open` refuses to run without the flag or with a non-loopback listener.
 
 Copy [the complete custom-server example](../examples/custom-server/main.go) into your own repository for an immediately runnable development server, then run `go mod tidy`. It also defines `/api/platform` to demonstrate that the executable is yours. That example is intentionally development-only; replace its configuration branch with your own production provider setup when deploying.
 

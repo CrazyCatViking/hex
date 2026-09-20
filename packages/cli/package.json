@@ -2,6 +2,11 @@
   "name": "@hex-platform/cli",
   "version": "0.1.0",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/crazycatviking/hex.git",
+    "directory": "packages/cli"
+  },
   "bin": {
     "hex": "./src/cli.mjs"
   },
