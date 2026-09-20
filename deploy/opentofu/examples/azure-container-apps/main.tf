@@ -86,6 +86,7 @@ locals {
     var.capabilities.sites ? module.sites[0].environment : {},
     var.capabilities.files ? module.files[0].environment : {}
   )
+
   server_secrets = var.capabilities.database == "none" ? {} : {
     DATABASE_URL = var.capabilities.database == "managed" ? module.database[0].connection_string : var.database_url
   }
@@ -107,10 +108,22 @@ module "hosting" {
   site_mount          = var.capabilities.sites ? module.sites[0].mount : null
   server_environment  = local.server_environment
   server_secrets      = local.server_secrets
-  registries          = var.container_registry == null ? [] : [{ server = var.container_registry.server, identity = azapi_resource.identity.id }]
-  depends_on          = [azapi_resource.registry_access]
+  registries = var.container_registry == null ? [] : [{
+    server   = var.container_registry.server
+    identity = azapi_resource.identity.id
+  }]
+
+  depends_on = [azapi_resource.registry_access]
 }
 
-output "url" { value = module.hosting.url }
-output "redirect_uri" { value = module.hosting.redirect_uri }
-output "capabilities" { value = var.capabilities }
+output "url" {
+  value = module.hosting.url
+}
+
+output "redirect_uri" {
+  value = module.hosting.redirect_uri
+}
+
+output "capabilities" {
+  value = var.capabilities
+}

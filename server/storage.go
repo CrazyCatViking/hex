@@ -15,10 +15,10 @@ type Object struct {
 }
 
 type ObjectStore interface {
-	Put(context.Context, string, io.Reader) error
-	Open(context.Context, string) (io.ReadCloser, error)
-	List(context.Context, string) ([]Object, error)
-	Delete(context.Context, string) error
+	Put(ctx context.Context, key string, source io.Reader) error
+	Open(ctx context.Context, key string) (io.ReadCloser, error)
+	List(ctx context.Context, prefix string) ([]Object, error)
+	Delete(ctx context.Context, key string) error
 }
 
 type Document struct {
@@ -27,10 +27,10 @@ type Document struct {
 }
 
 type Database interface {
-	Put(context.Context, string, string, string, json.RawMessage) error
-	Get(context.Context, string, string, string) (Document, error)
-	List(context.Context, string, string, string, int) ([]Document, error)
-	Delete(context.Context, string, string, string) error
+	Put(ctx context.Context, site, collection, id string, data json.RawMessage) error
+	Get(ctx context.Context, site, collection, id string) (Document, error)
+	List(ctx context.Context, site, collection, after string, limit int) ([]Document, error)
+	Delete(ctx context.Context, site, collection, id string) error
 }
 
 type Subscription interface {
@@ -39,6 +39,6 @@ type Subscription interface {
 }
 
 type Realtime interface {
-	Subscribe(context.Context, string) (Subscription, error)
-	Publish(context.Context, string, json.RawMessage) error
+	Subscribe(ctx context.Context, room string) (Subscription, error)
+	Publish(ctx context.Context, room string, message json.RawMessage) error
 }

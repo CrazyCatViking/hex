@@ -2,6 +2,7 @@ package azureblob
 
 import (
 	"context"
+	"fmt"
 	"io"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
@@ -18,14 +19,19 @@ type Store struct {
 func New(endpoint, container string, credential azcore.TokenCredential) (*Store, error) {
 	client, err := azblob.NewClient(endpoint, credential, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create Azure Blob client: %w", err)
 	}
+
 	return &Store{client: client, container: container}, nil
 }
 
 func (s *Store) Put(ctx context.Context, key string, reader io.Reader) error {
 	_, err := s.client.UploadStream(ctx, s.container, key, reader, nil)
-	return err
+	if err != nil {
+		return fmt.Errorf("upload blob %q: %w", key, err)
+	}
+
+	return nil
 }
 
 func (s *Store) Open(ctx context.Context, key string) (io.ReadCloser, error) {
@@ -34,23 +40,31 @@ func (s *Store) Open(ctx context.Context, key string) (io.ReadCloser, error) {
 		return nil, hex.ErrNotFound
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("download blob %q: %w", key, err)
 	}
+
 	return response.Body, nil
 }
 
 func (s *Store) List(ctx context.Context, prefix string) ([]hex.Object, error) {
-	pager := s.client.NewListBlobsFlatPager(s.container, &azblob.ListBlobsFlatOptions{Prefix: &prefix})
+	options := &azblob.ListBlobsFlatOptions{Prefix: &prefix}
+	pager := s.client.NewListBlobsFlatPager(s.container, options)
 	objects := []hex.Object{}
+
 	for pager.More() {
 		page, err := pager.NextPage(ctx)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("list blobs under %q: %w", prefix, err)
 		}
+
 		for _, blob := range page.Segment.BlobItems {
-			objects = append(objects, hex.Object{Key: *blob.Name, Size: *blob.Properties.ContentLength})
+			objects = append(objects, hex.Object{
+				Key:  *blob.Name,
+				Size: *blob.Properties.ContentLength,
+			})
 		}
 	}
+
 	return objects, nil
 }
 
@@ -59,5 +73,9 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 	if bloberror.HasCode(err, bloberror.BlobNotFound) {
 		return hex.ErrNotFound
 	}
-	return err
+	if err != nil {
+		return fmt.Errorf("delete blob %q: %w", key, err)
+	}
+
+	return nil
 }

@@ -3,11 +3,13 @@ package hex
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
-	"path"
 	"strings"
 	"time"
 )
@@ -20,179 +22,212 @@ type Site struct {
 }
 
 func (s *Server) deploy(w http.ResponseWriter, r *http.Request) {
-	if !identifiers(w, r) {
+	if !validateIdentifiers(w, r) {
 		return
 	}
+
 	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, s.config.MaxUploadBytes))
 	if err != nil {
-		fail(w, 413, "deployment exceeds upload limit")
+		writeError(w, http.StatusRequestEntityTooLarge, "deployment exceeds upload limit")
 		return
 	}
-	archive, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+
+	archive, files, err := validateArchive(data, s.config.MaxUploadBytes)
 	if err != nil {
-		fail(w, 400, "expected ZIP archive")
+		writeDeploymentError(w, err)
 		return
 	}
-	if len(archive.File) > 5000 {
-		fail(w, 400, "maximum 5000 entries")
+
+	releaseID, err := newID()
+	if err != nil {
+		writeServerError(w, err)
 		return
 	}
-	seen := map[string]bool{}
-	var size uint64
-	for _, file := range archive.File {
-		if file.FileInfo().IsDir() {
-			continue
-		}
-		if !validKey(file.Name) || !file.Mode().IsRegular() || seen[file.Name] {
-			fail(w, 400, "invalid or duplicate archive path")
-			return
-		}
-		if file.UncompressedSize64 > uint64(s.config.MaxUploadBytes)-size {
-			fail(w, 413, "expanded deployment exceeds limit")
-			return
-		}
-		size += file.UncompressedSize64
-		seen[file.Name] = true
-	}
-	if !seen["index.html"] {
-		fail(w, 400, "index.html is required at archive root")
-		return
-	}
-	for key := range seen {
-		for parent := path.Dir(key); parent != "."; parent = path.Dir(parent) {
-			if seen[parent] {
-				fail(w, 400, "archive path is both a file and directory")
-				return
-			}
-		}
-	}
+
 	s.siteWrites.Lock()
 	defer s.siteWrites.Unlock()
-	site := Site{Name: r.PathValue("site"), Release: newID(), URL: "/sites/" + r.PathValue("site") + "/", PublishedAt: time.Now().UTC()}
-	prefix := "releases/" + site.Name + "/" + site.Release + "/"
-	written := []string{}
+
+	site := Site{
+		Name:        r.PathValue("site"),
+		Release:     releaseID,
+		URL:         "/sites/" + r.PathValue("site") + "/",
+		PublishedAt: time.Now().UTC(),
+	}
+	written, err := s.stageRelease(r.Context(), site, archive)
 	committed := false
 	defer func() {
 		if !committed {
-			for _, key := range written {
-				s.config.Sites.Delete(r.Context(), key)
-			}
+			s.removeStagedFiles(r.Context(), written)
 		}
 	}()
+	if err != nil {
+		writeDeploymentError(w, err)
+		return
+	}
+
+	if err := s.publishFiles(r.Context(), site, files); err != nil {
+		writeServerError(w, err)
+		return
+	}
+
+	manifest, err := json.Marshal(site)
+	if err != nil {
+		writeServerError(w, fmt.Errorf("encode site manifest: %w", err))
+		return
+	}
+
+	manifestKey := "sites/" + site.Name + ".json"
+	if err := s.config.Sites.Put(r.Context(), manifestKey, bytes.NewReader(manifest)); err != nil {
+		writeServerError(w, err)
+		return
+	}
+
+	committed = true
+	writeJSON(w, http.StatusCreated, site)
+}
+
+func (s *Server) stageRelease(ctx context.Context, site Site, archive *zip.Reader) ([]string, error) {
+	prefix := "releases/" + site.Name + "/" + site.Release + "/"
+	var written []string
+
 	for _, file := range archive.File {
 		if file.FileInfo().IsDir() {
 			continue
 		}
-		src, err := file.Open()
+
+		content, err := readArchiveFile(file)
 		if err != nil {
-			fail(w, 400, "invalid ZIP entry")
-			return
+			return written, err
 		}
-		content, readErr := io.ReadAll(io.LimitReader(src, int64(file.UncompressedSize64)+1))
-		src.Close()
-		if readErr != nil || uint64(len(content)) != file.UncompressedSize64 {
-			fail(w, 400, "corrupt ZIP entry")
-			return
-		}
+
 		key := prefix + file.Name
-		if err := s.config.Sites.Put(r.Context(), key, bytes.NewReader(content)); err != nil {
-			serverError(w, err)
-			return
+		if err := s.config.Sites.Put(ctx, key, bytes.NewReader(content)); err != nil {
+			return written, fmt.Errorf("stage file %q: %w", file.Name, err)
 		}
 		written = append(written, key)
 	}
-	if err := s.publishFiles(r, site, seen); err != nil {
-		serverError(w, err)
-		return
-	}
-	manifest, _ := json.Marshal(site)
-	if err := s.config.Sites.Put(r.Context(), "sites/"+site.Name+".json", bytes.NewReader(manifest)); err != nil {
-		serverError(w, err)
-		return
-	}
-	committed = true
-	respond(w, 201, site)
+
+	return written, nil
 }
 
-func (s *Server) publishFiles(r *http.Request, site Site, files map[string]bool) error {
-	prefix := "public/sites/" + site.Name + "/"
-	previous, err := s.config.Sites.List(r.Context(), prefix)
-	if err != nil {
-		return err
-	}
-	for _, object := range previous {
-		if !files[strings.TrimPrefix(object.Key, prefix)] {
-			if err := s.config.Sites.Delete(r.Context(), object.Key); err != nil {
-				return err
-			}
+func (s *Server) removeStagedFiles(ctx context.Context, keys []string) {
+	for _, key := range keys {
+		if err := s.config.Sites.Delete(ctx, key); err != nil {
+			slog.Error("remove staged file", "key", key, "error", err)
 		}
 	}
-	copyFile := func(key string) error {
-		source, err := s.config.Sites.Open(r.Context(), "releases/"+site.Name+"/"+site.Release+"/"+key)
-		if err != nil {
+}
+
+func (s *Server) publishFiles(ctx context.Context, site Site, files map[string]bool) error {
+	prefix := "public/sites/" + site.Name + "/"
+	previous, err := s.config.Sites.List(ctx, prefix)
+	if err != nil {
+		return fmt.Errorf("list published files: %w", err)
+	}
+
+	for _, object := range previous {
+		if files[strings.TrimPrefix(object.Key, prefix)] {
+			continue
+		}
+
+		if err := s.config.Sites.Delete(ctx, object.Key); err != nil {
+			return fmt.Errorf("remove obsolete file %q: %w", object.Key, err)
+		}
+	}
+
+	for key := range files {
+		if key == "index.html" {
+			continue
+		}
+
+		if err := s.copyPublishedFile(ctx, site, key); err != nil {
 			return err
 		}
-		defer source.Close()
-		return s.config.Sites.Put(r.Context(), prefix+key, source)
 	}
-	for key := range files {
-		if key != "index.html" {
-			if err := copyFile(key); err != nil {
-				return err
-			}
-		}
+
+	return s.copyPublishedFile(ctx, site, "index.html")
+}
+
+func (s *Server) copyPublishedFile(ctx context.Context, site Site, key string) error {
+	sourceKey := "releases/" + site.Name + "/" + site.Release + "/" + key
+	source, err := s.config.Sites.Open(ctx, sourceKey)
+	if err != nil {
+		return fmt.Errorf("open staged file %q: %w", key, err)
 	}
-	return copyFile("index.html")
+	defer closeReader(source, sourceKey)
+
+	destinationKey := "public/sites/" + site.Name + "/" + key
+	if err := s.config.Sites.Put(ctx, destinationKey, source); err != nil {
+		return fmt.Errorf("publish file %q: %w", key, err)
+	}
+
+	return nil
 }
 
 func (s *Server) listSites(w http.ResponseWriter, r *http.Request) {
 	objects, err := s.config.Sites.List(r.Context(), "sites/")
 	if err != nil {
-		serverError(w, err)
+		writeServerError(w, err)
 		return
 	}
-	sites := []Site{}
-	for _, obj := range objects {
-		f, err := s.config.Sites.Open(r.Context(), obj.Key)
+
+	sites := make([]Site, 0, len(objects))
+	for _, object := range objects {
+		site, err := s.readSite(r.Context(), object.Key)
 		if errors.Is(err, ErrNotFound) {
 			continue
 		}
 		if err != nil {
-			serverError(w, err)
-			return
-		}
-		var site Site
-		err = json.NewDecoder(f).Decode(&site)
-		f.Close()
-		if err != nil {
-			serverError(w, err)
+			writeServerError(w, err)
 			return
 		}
 		sites = append(sites, site)
 	}
-	respond(w, 200, sites)
+
+	writeJSON(w, http.StatusOK, sites)
+}
+
+func (s *Server) readSite(ctx context.Context, key string) (Site, error) {
+	reader, err := s.config.Sites.Open(ctx, key)
+	if err != nil {
+		return Site{}, fmt.Errorf("open site manifest %q: %w", key, err)
+	}
+	defer closeReader(reader, key)
+
+	var site Site
+	if err := json.NewDecoder(reader).Decode(&site); err != nil {
+		return Site{}, fmt.Errorf("decode site manifest %q: %w", key, err)
+	}
+
+	return site, nil
 }
 
 func (s *Server) deleteSite(w http.ResponseWriter, r *http.Request) {
-	if !identifiers(w, r) {
+	if !validateIdentifiers(w, r) {
 		return
 	}
+
 	s.siteWrites.Lock()
 	defer s.siteWrites.Unlock()
-	objects, err := s.config.Sites.List(r.Context(), "public/sites/"+r.PathValue("site")+"/")
+
+	site := r.PathValue("site")
+	objects, err := s.config.Sites.List(r.Context(), "public/sites/"+site+"/")
 	if err != nil {
-		serverError(w, err)
+		writeServerError(w, err)
 		return
 	}
+
 	for _, object := range objects {
 		if err := s.config.Sites.Delete(r.Context(), object.Key); err != nil {
-			serverError(w, err)
+			writeServerError(w, err)
 			return
 		}
 	}
-	if err := s.config.Sites.Delete(r.Context(), "sites/"+r.PathValue("site")+".json"); err != nil {
-		serverError(w, err)
+
+	if err := s.config.Sites.Delete(r.Context(), "sites/"+site+".json"); err != nil {
+		writeServerError(w, err)
 		return
 	}
-	w.WriteHeader(204)
+
+	w.WriteHeader(http.StatusNoContent)
 }

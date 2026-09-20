@@ -1,26 +1,47 @@
 terraform {
   required_providers {
-    azapi = { source = "Azure/azapi", version = "~> 2.0" }
+    azapi = {
+      source  = "Azure/azapi"
+      version = "~> 2.0"
+    }
   }
 }
 
-variable "name" { type = string }
-variable "resource_group_id" { type = string }
-variable "location" { type = string }
-variable "network_id" { type = string }
-variable "subnet_id" { type = string }
+variable "name" {
+  type = string
+}
+
+variable "resource_group_id" {
+  type = string
+}
+
+variable "location" {
+  type = string
+}
+
+variable "network_id" {
+  type = string
+}
+
+variable "subnet_id" {
+  type = string
+}
+
 variable "administrator" {
   type    = string
   default = "hexadmin"
 }
+
 variable "password" {
   type      = string
   sensitive = true
 }
+
 variable "sku" {
   type    = string
   default = "Standard_B1ms"
 }
+
 variable "sku_tier" {
   type    = string
   default = "Burstable"
@@ -38,7 +59,13 @@ resource "azapi_resource" "link" {
   name      = var.name
   parent_id = azapi_resource.zone.id
   location  = "global"
-  body      = { properties = { registrationEnabled = false, virtualNetwork = { id = var.network_id } } }
+
+  body = {
+    properties = {
+      registrationEnabled = false
+      virtualNetwork      = { id = var.network_id }
+    }
+  }
 }
 
 resource "azapi_resource" "server" {
@@ -46,14 +73,21 @@ resource "azapi_resource" "server" {
   name      = var.name
   parent_id = var.resource_group_id
   location  = var.location
+
   body = {
-    sku = { name = var.sku, tier = var.sku_tier }
+    sku = {
+      name = var.sku
+      tier = var.sku_tier
+    }
     properties = {
       version                    = "16"
       administratorLogin         = var.administrator
       administratorLoginPassword = var.password
       storage                    = { storageSizeGB = 32 }
-      backup                     = { backupRetentionDays = 7, geoRedundantBackup = "Disabled" }
+      backup = {
+        backupRetentionDays = 7
+        geoRedundantBackup  = "Disabled"
+      }
       network = {
         delegatedSubnetResourceId   = var.subnet_id
         privateDnsZoneArmResourceId = azapi_resource.zone.id
@@ -69,11 +103,23 @@ resource "azapi_resource" "database" {
   type      = "Microsoft.DBforPostgreSQL/flexibleServers/databases@2024-08-01"
   name      = "hex"
   parent_id = azapi_resource.server.id
-  body      = { properties = { charset = "UTF8", collation = "en_US.utf8" } }
+
+  body = {
+    properties = {
+      charset   = "UTF8"
+      collation = "en_US.utf8"
+    }
+  }
+}
+
+locals {
+  encoded_administrator = replace(urlencode(var.administrator), "+", "%20")
+  encoded_password      = replace(urlencode(var.password), "+", "%20")
+  hostname              = azapi_resource.server.output.properties.fullyQualifiedDomainName
 }
 
 output "connection_string" {
-  value      = "postgres://${replace(urlencode(var.administrator), "+", "%20")}:${replace(urlencode(var.password), "+", "%20")}@${azapi_resource.server.output.properties.fullyQualifiedDomainName}:5432/hex?sslmode=verify-full"
+  value      = "postgres://${local.encoded_administrator}:${local.encoded_password}@${local.hostname}:5432/hex?sslmode=verify-full"
   sensitive  = true
   depends_on = [azapi_resource.database]
 }

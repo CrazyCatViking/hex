@@ -6,7 +6,10 @@ import (
 )
 
 func randomName() (string, error) {
-	b := make([]byte, 16)
-	_, err := rand.Read(b)
-	return hex.EncodeToString(b), err
+	var randomBytes [16]byte
+	if _, err := rand.Read(randomBytes[:]); err != nil {
+		return "", err
+	}
+
+	return hex.EncodeToString(randomBytes[:]), nil
 }

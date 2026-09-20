@@ -3,26 +3,37 @@ package memory
 import (
 	"context"
 	"encoding/json"
-	"sort"
+	"slices"
 	"sync"
 
 	hex "github.com/hex-platform/hex/server"
 )
 
-type Database struct {
-	mu   sync.RWMutex
-	docs map[[3]string]json.RawMessage
+type documentKey struct {
+	site       string
+	collection string
+	id         string
 }
 
-func NewDatabase() *Database { return &Database{docs: make(map[[3]string]json.RawMessage)} }
+type Database struct {
+	mu        sync.RWMutex
+	documents map[documentKey]json.RawMessage
+}
+
+func NewDatabase() *Database {
+	return &Database{documents: make(map[documentKey]json.RawMessage)}
+}
 
 func (d *Database) Put(ctx context.Context, site, collection, id string, data json.RawMessage) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.docs[[3]string{site, collection, id}] = append(json.RawMessage(nil), data...)
+
+	key := documentKey{site: site, collection: collection, id: id}
+	d.documents[key] = slices.Clone(data)
 	return nil
 }
 
@@ -30,48 +41,64 @@ func (d *Database) Get(ctx context.Context, site, collection, id string) (hex.Do
 	if err := ctx.Err(); err != nil {
 		return hex.Document{}, err
 	}
+
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	data, ok := d.docs[[3]string{site, collection, id}]
+
+	key := documentKey{site: site, collection: collection, id: id}
+	data, ok := d.documents[key]
 	if !ok {
 		return hex.Document{}, hex.ErrNotFound
 	}
-	return hex.Document{ID: id, Data: append(json.RawMessage(nil), data...)}, nil
+
+	return hex.Document{ID: id, Data: slices.Clone(data)}, nil
 }
 
 func (d *Database) List(ctx context.Context, site, collection, after string, limit int) ([]hex.Document, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	ids := []string{}
-	for key := range d.docs {
-		if key[0] == site && key[1] == collection && key[2] > after {
-			ids = append(ids, key[2])
+
+	var ids []string
+	for key := range d.documents {
+		if key.site == site && key.collection == collection && key.id > after {
+			ids = append(ids, key.id)
 		}
 	}
-	sort.Strings(ids)
+
+	slices.Sort(ids)
 	if len(ids) > limit {
 		ids = ids[:limit]
 	}
-	result := []hex.Document{}
+
+	documents := make([]hex.Document, 0, len(ids))
 	for _, id := range ids {
-		result = append(result, hex.Document{ID: id, Data: append(json.RawMessage(nil), d.docs[[3]string{site, collection, id}]...)})
+		key := documentKey{site: site, collection: collection, id: id}
+		documents = append(documents, hex.Document{
+			ID:   id,
+			Data: slices.Clone(d.documents[key]),
+		})
 	}
-	return result, nil
+
+	return documents, nil
 }
 
 func (d *Database) Delete(ctx context.Context, site, collection, id string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	key := [3]string{site, collection, id}
-	if _, ok := d.docs[key]; !ok {
+
+	key := documentKey{site: site, collection: collection, id: id}
+	if _, ok := d.documents[key]; !ok {
 		return hex.ErrNotFound
 	}
-	delete(d.docs, key)
+
+	delete(d.documents, key)
 	return nil
 }

@@ -7,99 +7,223 @@ export interface Capabilities {
   maxUploadBytes: number;
 }
 
-export interface StoredFile { key: string; size: number }
-export interface Document<T> { id: string; data: T }
+export interface StoredFile {
+  key: string;
+  size: number;
+}
+
+export interface Document<T> {
+  id: string;
+  data: T;
+}
+
 export interface ClientOptions {
   site: string;
   baseURL?: string;
   fetch?: typeof fetch;
 }
 
+export interface ListOptions {
+  after?: string;
+  limit?: number;
+}
+
+export interface RealtimeOptions<T> {
+  onMessage: (message: T) => void;
+  onClose?: (event: CloseEvent) => void;
+  onError?: (event: Event) => void;
+}
+
 export class HexError extends Error {
-  constructor(public readonly status: number, message: string) {
-    super(message);
+  constructor(
+    public readonly status: number,
+    message: string,
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
     this.name = "HexError";
   }
 }
 
-function name(value: string): string {
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(value)) throw new Error(`Invalid Hex identifier: ${value}`);
+function validateName(value: string): string {
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(value)) {
+    throw new Error(`Invalid Hex identifier: ${value}`);
+  }
+
   return value;
 }
 
-function filePath(value: string): string {
+function encodeFilePath(value: string): string {
   const parts = value.split("/");
-  if (parts.some(part => !part || part.startsWith(".") || /[\\\0]/.test(part))) throw new Error("Invalid file key");
+  const invalid = parts.some(
+    (part) => !part || part.startsWith(".") || /[\\\0]/.test(part),
+  );
+  if (invalid) {
+    throw new Error("Invalid file key");
+  }
+
   return parts.map(encodeURIComponent).join("/");
+}
+
+function jsonBody(method: string, data: unknown): RequestInit {
+  return {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  };
+}
+
+async function responseError(response: Response): Promise<HexError> {
+  try {
+    const body = (await response.json()) as { error?: string };
+    return new HexError(response.status, body.error ?? response.statusText);
+  } catch (cause) {
+    return new HexError(response.status, response.statusText, { cause });
+  }
+}
+
+function connectChannel<T>(url: URL, options: RealtimeOptions<T>) {
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  const socket = new WebSocket(url);
+  const ready = new Promise<void>((resolve, reject) => {
+    socket.addEventListener("open", () => resolve(), { once: true });
+    socket.addEventListener(
+      "error",
+      () => reject(new Error("WebSocket connection failed")),
+      { once: true },
+    );
+    socket.addEventListener(
+      "close",
+      () => reject(new Error("WebSocket closed before opening")),
+      { once: true },
+    );
+  });
+
+  socket.addEventListener("message", (event) => {
+    const message = JSON.parse(String(event.data)) as T;
+    options.onMessage(message);
+  });
+  if (options.onClose) {
+    socket.addEventListener("close", options.onClose);
+  }
+  if (options.onError) {
+    socket.addEventListener("error", options.onError);
+  }
+
+  return {
+    ready,
+    async send(message: T) {
+      await ready;
+      if (socket.readyState !== WebSocket.OPEN) {
+        throw new Error("WebSocket is not open");
+      }
+
+      socket.send(JSON.stringify(message));
+    },
+    close() {
+      socket.close(1000, "client closed");
+    },
+  };
 }
 
 export function createHexClient(options: ClientOptions) {
   const baseURL = (options.baseURL ?? "").replace(/\/$/, "");
   const transport = options.fetch ?? globalThis.fetch.bind(globalThis);
-  const root = `/api/sites/${name(options.site)}`;
+  const root = `/api/sites/${validateName(options.site)}`;
 
-  async function request(path: string, init: RequestInit = {}): Promise<Response> {
+  async function request(
+    path: string,
+    init: RequestInit = {},
+  ): Promise<Response> {
     const headers = new Headers(init.headers);
     headers.set("X-Hex-Request", "1");
-    const response = await transport(baseURL + path, { ...init, headers, credentials: "same-origin", redirect: "error" });
+
+    const response = await transport(baseURL + path, {
+      ...init,
+      headers,
+      credentials: "same-origin",
+      redirect: "error",
+    });
     if (!response.ok) {
-      let message = response.statusText;
-      try { message = (await response.json() as { error?: string }).error ?? message; } catch {}
-      throw new HexError(response.status, message);
+      throw await responseError(response);
     }
+
     return response;
   }
 
-  async function json<T>(path: string, init?: RequestInit): Promise<T> {
-    return (await request(path, init)).json() as Promise<T>;
+  async function requestJSON<T>(path: string, init?: RequestInit): Promise<T> {
+    const response = await request(path, init);
+    return response.json() as Promise<T>;
   }
 
-  const body = (data: unknown, method: string): RequestInit => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+  function collection<T extends object = Record<string, unknown>>(
+    name: string,
+  ) {
+    const path = `${root}/db/${validateName(name)}`;
+
+    return {
+      list(options: ListOptions = {}) {
+        const query = new URLSearchParams();
+        if (options.after !== undefined) {
+          query.set("after", options.after);
+        }
+        if (options.limit !== undefined) {
+          query.set("limit", String(options.limit));
+        }
+
+        return requestJSON<Document<T>[]>(`${path}?${query}`);
+      },
+      get(id: string) {
+        return requestJSON<Document<T>>(`${path}/${validateName(id)}`);
+      },
+      create(data: T) {
+        return requestJSON<Document<T>>(path, jsonBody("POST", data));
+      },
+      set(id: string, data: T) {
+        return requestJSON<Document<T>>(
+          `${path}/${validateName(id)}`,
+          jsonBody("PUT", data),
+        );
+      },
+      async delete(id: string) {
+        await request(`${path}/${validateName(id)}`, { method: "DELETE" });
+      },
+    };
+  }
 
   return {
-    capabilities: () => json<Capabilities>("/api/hex/capabilities"),
-    files: {
-      list: () => json<StoredFile[]>(`${root}/files`),
-      upload: (key: string, data: Blob | ArrayBuffer | Uint8Array<ArrayBuffer>) => json<StoredFile>(`${root}/files/${filePath(key)}`, { method: "PUT", body: data }),
-      download: async (key: string) => (await request(`${root}/files/${filePath(key)}`)).blob(),
-      url: (key: string) => `${baseURL}${root}/files/${filePath(key)}`,
-      delete: async (key: string) => { await request(`${root}/files/${filePath(key)}`, { method: "DELETE" }); },
+    capabilities() {
+      return requestJSON<Capabilities>("/api/hex/capabilities");
     },
-    db: {
-      collection<T extends object = Record<string, unknown>>(collection: string) {
-        const path = `${root}/db/${name(collection)}`;
-        return {
-          list: (options: { after?: string; limit?: number } = {}) => {
-            const query = new URLSearchParams();
-            if (options.after !== undefined) query.set("after", options.after);
-            if (options.limit !== undefined) query.set("limit", String(options.limit));
-            return json<Document<T>[]>(`${path}?${query}`);
-          },
-          get: (id: string) => json<Document<T>>(`${path}/${name(id)}`),
-          create: (data: T) => json<Document<T>>(path, body(data, "POST")),
-          set: (id: string, data: T) => json<Document<T>>(`${path}/${name(id)}`, body(data, "PUT")),
-          delete: async (id: string) => { await request(`${path}/${name(id)}`, { method: "DELETE" }); },
-        };
+    files: {
+      list() {
+        return requestJSON<StoredFile[]>(`${root}/files`);
+      },
+      upload(key: string, data: Blob | ArrayBuffer | Uint8Array<ArrayBuffer>) {
+        return requestJSON<StoredFile>(`${root}/files/${encodeFilePath(key)}`, {
+          method: "PUT",
+          body: data,
+        });
+      },
+      async download(key: string) {
+        const response = await request(`${root}/files/${encodeFilePath(key)}`);
+        return response.blob();
+      },
+      url(key: string) {
+        return `${baseURL}${root}/files/${encodeFilePath(key)}`;
+      },
+      async delete(key: string) {
+        await request(`${root}/files/${encodeFilePath(key)}`, {
+          method: "DELETE",
+        });
       },
     },
+    db: { collection },
     realtime: {
-      connect<T = unknown>(channel: string, options: { onMessage: (message: T) => void; onClose?: (event: CloseEvent) => void; onError?: (event: Event) => void }) {
-        const url = new URL(`${baseURL}${root}/realtime/${name(channel)}`, globalThis.location?.href);
-        url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-        const socket = new WebSocket(url);
-        const ready = new Promise<void>((resolve, reject) => {
-          socket.addEventListener("open", () => resolve(), { once: true });
-          socket.addEventListener("error", () => reject(new Error("WebSocket connection failed")), { once: true });
-          socket.addEventListener("close", () => reject(new Error("WebSocket closed before opening")), { once: true });
-        });
-        socket.addEventListener("message", event => options.onMessage(JSON.parse(String(event.data)) as T));
-        if (options.onClose) socket.addEventListener("close", options.onClose);
-        if (options.onError) socket.addEventListener("error", options.onError);
-        return {
-          ready,
-          async send(message: T) { await ready; if (socket.readyState !== WebSocket.OPEN) throw new Error("WebSocket is not open"); socket.send(JSON.stringify(message)); },
-          close: () => socket.close(1000, "client closed"),
-        };
+      connect<T = unknown>(channel: string, options: RealtimeOptions<T>) {
+        const path = `${root}/realtime/${validateName(channel)}`;
+        const url = new URL(baseURL + path, globalThis.location?.href);
+        return connectChannel(url, options);
       },
     },
   };

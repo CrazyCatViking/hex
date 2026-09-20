@@ -25,12 +25,30 @@ func setup(t *testing.T) (*hex.Server, *local.Store) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { store.Close() })
-	return hex.New(hex.Config{Files: store, Sites: store, Database: memory.NewDatabase(), Realtime: memory.NewRealtime(), MaxUploadBytes: 4096}), store
+	t.Cleanup(func() {
+		closeResource(t, store)
+	})
+
+	server := hex.New(hex.Config{
+		Files:          store,
+		Sites:          store,
+		Database:       memory.NewDatabase(),
+		Realtime:       memory.NewRealtime(),
+		MaxUploadBytes: 4096,
+	})
+	return server, store
+}
+
+func closeResource(t *testing.T, resource io.Closer) {
+	t.Helper()
+	if err := resource.Close(); err != nil {
+		t.Errorf("close test resource: %v", err)
+	}
 }
 
 func request(t *testing.T, handler http.Handler, method, path string, data []byte, want int) *httptest.ResponseRecorder {
 	t.Helper()
+
 	r := httptest.NewRequest(method, path, bytes.NewReader(data))
 	r.Header.Set("X-Hex-Request", "1")
 	w := httptest.NewRecorder()
@@ -38,12 +56,14 @@ func request(t *testing.T, handler http.Handler, method, path string, data []byt
 	if w.Code != want {
 		t.Fatalf("%s %s: got %d, want %d: %s", method, path, w.Code, want, w.Body.String())
 	}
+
 	return w
 }
 
 func TestFileRoundtripAndBoundaries(t *testing.T) {
 	s, _ := setup(t)
 	path := "/api/sites/demo/files/reports/a.txt"
+
 	request(t, s, "PUT", path, []byte("hello"), 200)
 	if got := request(t, s, "GET", path, nil, 200).Body.String(); got != "hello" {
 		t.Fatal(got)
@@ -85,7 +105,10 @@ func TestDatabaseCRUDAndPagination(t *testing.T) {
 	request(t, s, "POST", base, []byte(`{"ok":true} trailing`), 400)
 	created := request(t, s, "POST", base, []byte(`{"ok":true}`), 201)
 	var doc hex.Document
-	json.Unmarshal(created.Body.Bytes(), &doc)
+	if err := json.Unmarshal(created.Body.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+
 	request(t, s, "GET", base+"/"+doc.ID, nil, 200)
 	request(t, s, "DELETE", base+"/a", nil, 204)
 	request(t, s, "GET", base+"/a", nil, 404)
@@ -117,7 +140,8 @@ func storedFile(t *testing.T, store hex.ObjectStore, key string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer closeResource(t, f)
+
 	data, err := io.ReadAll(f)
 	if err != nil {
 		t.Fatal(err)
@@ -129,7 +153,7 @@ func missingFile(t *testing.T, store hex.ObjectStore, key string) {
 	t.Helper()
 	f, err := store.Open(context.Background(), key)
 	if err == nil {
-		f.Close()
+		closeResource(t, f)
 		t.Fatalf("unexpected file %s", key)
 	}
 	if !errors.Is(err, hex.ErrNotFound) {
@@ -139,16 +163,55 @@ func missingFile(t *testing.T, store hex.ObjectStore, key string) {
 
 func TestPublishingWritesPublicFolderAndRejectsInvalidArchives(t *testing.T) {
 	s, store := setup(t)
-	deploy := "/api/sites/demo/deploy"
-	request(t, s, "POST", deploy, zipFiles(t, map[string]string{"index.html": "first", "old.js": "old"}), 201)
-	request(t, s, "POST", deploy, zipFiles(t, map[string]string{"index.html": "bad", "../outside": "bad"}), 400)
-	request(t, s, "POST", deploy, zipFiles(t, map[string]string{"index.html": strings.Repeat("x", 4097)}), 413)
-	request(t, s, "POST", deploy, zipFiles(t, map[string]string{"missing.html": "bad"}), 400)
-	request(t, s, "POST", deploy, zipFiles(t, map[string]string{"index.html": "bad", "a": "file", "a/b": "conflict"}), 400)
+	deployFiles(t, s, map[string]string{
+		"index.html": "first",
+		"old.js":     "old",
+	}, http.StatusCreated)
+
+	invalidArchives := []struct {
+		name   string
+		files  map[string]string
+		status int
+	}{
+		{
+			name: "path traversal",
+			files: map[string]string{
+				"index.html": "bad",
+				"../outside": "bad",
+			},
+			status: http.StatusBadRequest,
+		},
+		{
+			name:   "expanded size limit",
+			files:  map[string]string{"index.html": strings.Repeat("x", 4097)},
+			status: http.StatusRequestEntityTooLarge,
+		},
+		{
+			name:   "missing index",
+			files:  map[string]string{"missing.html": "bad"},
+			status: http.StatusBadRequest,
+		},
+		{
+			name: "conflicting paths",
+			files: map[string]string{
+				"index.html": "bad",
+				"a":          "file",
+				"a/b":        "conflict",
+			},
+			status: http.StatusBadRequest,
+		},
+	}
+	for _, testCase := range invalidArchives {
+		t.Run(testCase.name, func(t *testing.T) {
+			deployFiles(t, s, testCase.files, testCase.status)
+		})
+	}
+
 	if got := storedFile(t, store, "public/sites/demo/index.html"); got != "first" {
 		t.Fatal(got)
 	}
-	request(t, s, "POST", deploy, zipFiles(t, map[string]string{"index.html": "second"}), 201)
+
+	deployFiles(t, s, map[string]string{"index.html": "second"}, http.StatusCreated)
 	missingFile(t, store, "public/sites/demo/old.js")
 	if got := storedFile(t, store, "public/sites/demo/index.html"); got != "second" {
 		t.Fatal(got)
@@ -161,32 +224,50 @@ func TestPublishingWritesPublicFolderAndRejectsInvalidArchives(t *testing.T) {
 
 func TestRepublishingHandlesFileDirectoryTransitions(t *testing.T) {
 	s, store := setup(t)
-	deploy := "/api/sites/demo/deploy"
-	request(t, s, "POST", deploy, zipFiles(t, map[string]string{"index.html": "one", "asset": "file"}), 201)
-	request(t, s, "POST", deploy, zipFiles(t, map[string]string{"index.html": "two", "asset/nested.js": "nested"}), 201)
+	deployFiles(t, s, map[string]string{
+		"index.html": "one",
+		"asset":      "file",
+	}, http.StatusCreated)
+
+	deployFiles(t, s, map[string]string{
+		"index.html":      "two",
+		"asset/nested.js": "nested",
+	}, http.StatusCreated)
 	if got := storedFile(t, store, "public/sites/demo/asset/nested.js"); got != "nested" {
 		t.Fatal(got)
 	}
-	request(t, s, "POST", deploy, zipFiles(t, map[string]string{"index.html": "three", "asset": "file again"}), 201)
+
+	deployFiles(t, s, map[string]string{
+		"index.html": "three",
+		"asset":      "file again",
+	}, http.StatusCreated)
 	if got := storedFile(t, store, "public/sites/demo/asset"); got != "file again" {
 		t.Fatal(got)
 	}
 }
 
-type failingStore struct{ hex.ObjectStore }
+type failingStore struct {
+	hex.ObjectStore
+}
 
 func (s failingStore) Put(ctx context.Context, key string, reader io.Reader) error {
 	if strings.HasSuffix(key, "broken.js") {
 		return errors.New("storage unavailable")
 	}
+
 	return s.ObjectStore.Put(ctx, key, reader)
 }
 
 func TestStagingFailureDoesNotChangePublicFolder(t *testing.T) {
 	s, store := setup(t)
-	request(t, s, "POST", "/api/sites/demo/deploy", zipFiles(t, map[string]string{"index.html": "working"}), 201)
+	deployFiles(t, s, map[string]string{"index.html": "working"}, http.StatusCreated)
+
 	failing := hex.New(hex.Config{Sites: failingStore{store}})
-	request(t, failing, "POST", "/api/sites/demo/deploy", zipFiles(t, map[string]string{"index.html": "broken", "broken.js": "broken"}), 500)
+	deployFiles(t, failing, map[string]string{
+		"index.html": "broken",
+		"broken.js":  "broken",
+	}, http.StatusInternalServerError)
+
 	if got := storedFile(t, store, "public/sites/demo/index.html"); got != "working" {
 		t.Fatal(got)
 	}
@@ -194,9 +275,16 @@ func TestStagingFailureDoesNotChangePublicFolder(t *testing.T) {
 
 func TestGoDoesNotServePublishedSites(t *testing.T) {
 	s, _ := setup(t)
-	request(t, s, "POST", "/api/sites/demo/deploy", zipFiles(t, map[string]string{"index.html": "hello"}), 201)
+	deployFiles(t, s, map[string]string{"index.html": "hello"}, http.StatusCreated)
+
 	request(t, s, "GET", "/sites/demo/", nil, 404)
 	request(t, s, "GET", "/sites/demo/index.html", nil, 404)
+}
+
+func deployFiles(t *testing.T, handler http.Handler, files map[string]string, expectedStatus int) {
+	t.Helper()
+	archive := zipFiles(t, files)
+	request(t, handler, http.MethodPost, "/api/sites/demo/deploy", archive, expectedStatus)
 }
 
 func TestDisabledCapabilitiesAndCrossOriginProtection(t *testing.T) {
@@ -225,28 +313,20 @@ func TestRealtimeBroadcastAndRoomIsolation(t *testing.T) {
 	s, _ := setup(t)
 	httpServer := httptest.NewServer(s)
 	defer httpServer.Close()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
 	url := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/api/sites/demo/realtime/room"
-	a, _, err := websocket.Dial(ctx, url, nil)
-	if err != nil {
+	sender := dialWebSocket(t, ctx, url)
+	subscriber := dialWebSocket(t, ctx, url)
+	other := dialWebSocket(t, ctx, strings.Replace(url, "/demo/", "/other/", 1))
+
+	if err := sender.Write(ctx, websocket.MessageText, []byte(`{"message":"hello"}`)); err != nil {
 		t.Fatal(err)
 	}
-	defer a.CloseNow()
-	b, _, err := websocket.Dial(ctx, url, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer b.CloseNow()
-	other, _, err := websocket.Dial(ctx, strings.Replace(url, "/demo/", "/other/", 1), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer other.CloseNow()
-	if err := a.Write(ctx, websocket.MessageText, []byte(`{"message":"hello"}`)); err != nil {
-		t.Fatal(err)
-	}
-	for _, conn := range []*websocket.Conn{a, b} {
+
+	for _, conn := range []*websocket.Conn{sender, subscriber} {
 		_, data, err := conn.Read(ctx)
 		if err != nil {
 			t.Fatal(err)
@@ -255,9 +335,25 @@ func TestRealtimeBroadcastAndRoomIsolation(t *testing.T) {
 			t.Fatal(string(data))
 		}
 	}
+
 	short, stop := context.WithTimeout(ctx, 100*time.Millisecond)
 	defer stop()
 	if _, _, err := other.Read(short); err == nil {
 		t.Fatal("message leaked across sites")
 	}
+}
+
+func dialWebSocket(t *testing.T, ctx context.Context, url string) *websocket.Conn {
+	t.Helper()
+	connection, _, err := websocket.Dial(ctx, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() {
+		if err := connection.CloseNow(); err != nil {
+			t.Logf("test WebSocket already closed: %v", err)
+		}
+	})
+	return connection
 }

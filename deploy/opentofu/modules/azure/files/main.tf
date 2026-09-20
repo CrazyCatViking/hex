@@ -1,16 +1,39 @@
 terraform {
   required_providers {
-    azapi = { source = "Azure/azapi", version = "~> 2.0" }
+    azapi = {
+      source  = "Azure/azapi"
+      version = "~> 2.0"
+    }
   }
 }
 
-variable "storage_name" { type = string }
-variable "resource_group_id" { type = string }
-variable "location" { type = string }
-variable "network_id" { type = string }
-variable "subnet_id" { type = string }
-variable "principal_id" { type = string }
-variable "subscription_id" { type = string }
+variable "storage_name" {
+  type = string
+}
+
+variable "resource_group_id" {
+  type = string
+}
+
+variable "location" {
+  type = string
+}
+
+variable "network_id" {
+  type = string
+}
+
+variable "subnet_id" {
+  type = string
+}
+
+variable "principal_id" {
+  type = string
+}
+
+variable "subscription_id" {
+  type = string
+}
 
 module "storage" {
   source            = "../private-storage"
@@ -32,7 +55,12 @@ resource "azapi_resource" "container" {
   type      = "Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01"
   name      = "uploads"
   parent_id = azapi_resource.service.id
-  body      = { properties = { publicAccess = "None" } }
+
+  body = {
+    properties = {
+      publicAccess = "None"
+    }
+  }
 }
 
 resource "azapi_resource" "access" {

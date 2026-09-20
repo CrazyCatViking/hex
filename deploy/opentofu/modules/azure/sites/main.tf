@@ -1,21 +1,41 @@
 terraform {
   required_providers {
-    azapi = { source = "Azure/azapi", version = "~> 2.12" }
+    azapi = {
+      source  = "Azure/azapi"
+      version = "~> 2.12"
+    }
   }
 }
 
-variable "storage_name" { type = string }
-variable "resource_group_id" { type = string }
-variable "location" { type = string }
-variable "network_id" { type = string }
-variable "subnet_id" { type = string }
+variable "storage_name" {
+  type = string
+}
+
+variable "resource_group_id" {
+  type = string
+}
+
+variable "location" {
+  type = string
+}
+
+variable "network_id" {
+  type = string
+}
+
+variable "subnet_id" {
+  type = string
+}
+
 variable "quota_gib" {
   type    = number
   default = 100
 }
+
 variable "access_tier" {
   type    = string
   default = "Hot"
+
   validation {
     condition     = contains(["Hot", "TransactionOptimized", "Cool"], var.access_tier)
     error_message = "Choose a supported standard Azure Files access tier."
@@ -42,7 +62,14 @@ resource "azapi_resource" "share" {
   type      = "Microsoft.Storage/storageAccounts/fileServices/shares@2023-05-01"
   name      = "sites"
   parent_id = azapi_resource.service.id
-  body      = { properties = { shareQuota = var.quota_gib, enabledProtocols = "SMB", accessTier = var.access_tier } }
+
+  body = {
+    properties = {
+      shareQuota       = var.quota_gib
+      enabledProtocols = "SMB"
+      accessTier       = var.access_tier
+    }
+  }
 }
 
 data "azapi_resource_action" "keys" {
@@ -62,5 +89,8 @@ output "mount" {
 }
 
 output "environment" {
-  value = { HEX_SITES_PROVIDER = "filesystem", HEX_SITES_DIR = "/mnt/sites" }
+  value = {
+    HEX_SITES_PROVIDER = "filesystem"
+    HEX_SITES_DIR      = "/mnt/sites"
+  }
 }

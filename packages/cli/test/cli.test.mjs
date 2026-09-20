@@ -1,6 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile, mkdir, symlink, rm } from "node:fs/promises";
+import {
+  mkdtemp,
+  readFile,
+  writeFile,
+  mkdir,
+  symlink,
+  rm,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,20 +19,31 @@ import { archiveDirectory } from "../src/cli.mjs";
 const exec = promisify(execFile);
 const cli = fileURLToPath(new URL("../src/cli.mjs", import.meta.url));
 
-test("init creates a working static project and skill without replacing existing configuration", async t => {
+test("init creates a working static project and skill without replacing existing configuration", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "hex-init-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   await exec(process.execPath, [cli, "init", root, "--name", "demo"]);
   const config = JSON.parse(await readFile(join(root, "hex.json"), "utf8"));
   assert.equal(config.directory, "public");
   assert.equal(config.name, "demo");
-  assert.match(await readFile(join(root, "public/hex-client.js"), "utf8"), /createHexClient/);
-  assert.match(await readFile(join(root, ".agents/skills/hex/SKILL.md"), "utf8"), /hex\.files\.upload/);
-  await assert.rejects(exec(process.execPath, [cli, "init", root, "--name", "different"]));
-  assert.equal(JSON.parse(await readFile(join(root, "hex.json"), "utf8")).name, "demo");
+  assert.match(
+    await readFile(join(root, "public/hex-client.js"), "utf8"),
+    /createHexClient/,
+  );
+  assert.match(
+    await readFile(join(root, ".agents/skills/hex/SKILL.md"), "utf8"),
+    /hex\.files\.upload/,
+  );
+  await assert.rejects(
+    exec(process.execPath, [cli, "init", root, "--name", "different"]),
+  );
+  assert.equal(
+    JSON.parse(await readFile(join(root, "hex.json"), "utf8")).name,
+    "demo",
+  );
 });
 
-test("CLI runs through a symlink like an npm-installed binary", async t => {
+test("CLI runs through a symlink like an npm-installed binary", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "hex-bin-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const link = join(root, "hex");
@@ -34,7 +52,7 @@ test("CLI runs through a symlink like an npm-installed binary", async t => {
   assert.match(result.stdout, /hex publish/);
 });
 
-test("archive skips hidden files and dependencies, rejects symlinks and oversize payloads", async t => {
+test("archive skips hidden files and dependencies, rejects symlinks and oversize payloads", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "hex-zip-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   await writeFile(join(root, "index.html"), "hello");

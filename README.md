@@ -98,20 +98,39 @@ import (
 )
 
 func main() {
+    if err := run(); err != nil {
+        log.Fatal(err)
+    }
+}
+
+func run() error {
     files, err := local.New("data/files")
-    if err != nil { log.Fatal(err) }
-    defer files.Close()
+    if err != nil {
+        return err
+    }
+    defer func() {
+        if err := files.Close(); err != nil {
+            log.Printf("close file storage: %v", err)
+        }
+    }()
+
     sites, err := local.New("data/sites")
-    if err != nil { log.Fatal(err) }
-    defer sites.Close()
+    if err != nil {
+        return err
+    }
+    defer func() {
+        if err := sites.Close(); err != nil {
+            log.Printf("close site storage: %v", err)
+        }
+    }()
 
     handler := hex.New(hex.Config{
-        Files: files,
-        Sites: sites,
+        Files:    files,
+        Sites:    sites,
         Database: memory.NewDatabase(),
         Realtime: memory.NewRealtime(),
     })
-    log.Fatal(http.ListenAndServe("127.0.0.1:8080", handler))
+    return http.ListenAndServe("127.0.0.1:8080", handler)
 }
 ```
 
@@ -143,6 +162,16 @@ Use `database = "external"` with your own PostgreSQL URL, or `"none"` to disable
 The infrastructure is an example to copy and adapt, not the only way to host Hex. The framework/client do not depend on Container Apps, Azure resource IDs, or Entra. A future GCP/Quick-style deployment can use the same API with GCP providers and a different authenticated hosting layer.
 
 ## Verification
+
+Use `gofmt` for Go, Prettier for JS/TS and project files, and `tofu fmt` for infrastructure. Formatting handles layout; the structure and naming principles in [AGENTS.md](AGENTS.md) still apply.
+
+```sh
+gofmt -w cmd server
+npm run format
+tofu fmt -recursive deploy/opentofu
+```
+
+`npm run format:check` checks JS/TS formatting without editing files.
 
 ```sh
 go test -race ./...
