@@ -289,7 +289,8 @@ func (a *App) publish(ctx context.Context, project Project, name string) error {
 	defer a.removeTemporary(temporary)
 	metadata := hex.SiteMetadata{
 		Title: project.Title, Description: project.Description, Author: project.Author,
-		PublishedAt: time.Now().UTC(),
+		Discoverable: project.Discoverable,
+		PublishedAt:  time.Now().UTC(),
 	}
 	data, err := json.MarshalIndent(metadata, "", "  ")
 	if err != nil {

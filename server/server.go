@@ -14,6 +14,7 @@ type Config struct {
 	Realtime       Realtime
 	MaxUploadBytes int64
 	Connection     *ConnectionConfig
+	CLIReleaseURL  string
 }
 
 type Server struct {
@@ -39,9 +40,16 @@ func New(config Config) *Server {
 }
 
 func (s *Server) registerRoutes() {
+	s.mux.HandleFunc("GET /{$}", s.landingPage)
+	s.mux.HandleFunc("GET /api/hex/overview", s.overview)
+	s.mux.HandleFunc("GET /api/hex/catalog", s.catalog)
+	s.mux.HandleFunc("GET /api/hex/htmx.min.js", s.portalAsset)
+	s.mux.HandleFunc("GET /api/hex/portal.css", s.portalAsset)
+	s.mux.HandleFunc("GET /api/hex/portal.js", s.portalAsset)
 	s.mux.HandleFunc("GET /api/hex/capabilities", s.capabilities)
 	if s.config.Connection != nil {
 		s.mux.HandleFunc("GET /api/hex/config", s.connectionConfig)
+		s.mux.HandleFunc("GET /api/hex/install/{os}", s.installer)
 	}
 
 	if s.config.Files != nil {
@@ -73,7 +81,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if strings.HasPrefix(r.URL.Path, "/api/") {
 		w.Header().Set("Cache-Control", "no-store")
-		if !connectionDownloadNavigation(r) && !validateRequestOrigin(w, r) {
+		if !platformDownloadNavigation(r) && !validateRequestOrigin(w, r) {
 			return
 		}
 	}
@@ -81,9 +89,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
 
-func connectionDownloadNavigation(r *http.Request) bool {
+func platformDownloadNavigation(r *http.Request) bool {
 	isRead := r.Method == http.MethodGet || r.Method == http.MethodHead
-	return isRead && r.URL.Path == "/api/hex/config" &&
+	isDownload := r.URL.Path == "/api/hex/config" ||
+		r.URL.Path == "/api/hex/install/macos" ||
+		r.URL.Path == "/api/hex/install/linux" ||
+		r.URL.Path == "/api/hex/install/windows"
+	return isRead && isDownload &&
 		r.Header.Get("Sec-Fetch-Mode") == "navigate" &&
 		r.Header.Get("Sec-Fetch-Dest") == "document"
 }

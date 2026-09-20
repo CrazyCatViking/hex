@@ -32,7 +32,8 @@ func Open(ctx context.Context) (*Environment, error) {
 	environment := &Environment{
 		Address: settings.address,
 		Config: hex.Config{
-			SiteBaseURL: value("HEX_SITE_BASE_URL", "http://localhost:8080"),
+			SiteBaseURL:   value("HEX_SITE_BASE_URL", "http://localhost:8080"),
+			CLIReleaseURL: os.Getenv("HEX_CLI_RELEASE_URL"),
 		},
 	}
 	if err := environment.openProviders(ctx, settings); err != nil {

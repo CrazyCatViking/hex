@@ -2,6 +2,12 @@
 
 ## End-user flow
 
+Visit your company's main Hex domain, such as `https://hex.smartdok.dev`. The landing page lists apps and offers an OS-specific installer under **Get started**. Download it in the signed-in browser and run the displayed command. It installs the latest CLI and automatically saves the platform configuration. Then open a new terminal and run `hex init my-app`. See [landing page and installers](portal.md).
+
+## Manual setup and additional platforms
+
+For an already installed CLI, automation, or an additional platform, the explicit setup workflow remains available:
+
 ```sh
 hex setup
 ```

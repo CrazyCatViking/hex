@@ -52,6 +52,8 @@ just publish-cli 0.2.0
 
 Run the recipe from the tagged checkout. It rebuilds the binaries and creates a GitHub release in `crazycatviking/hex`, requiring the remote tag to exist. It does not commit, tag, or push source changes itself.
 
+Stable CLI releases are marked latest so company landing-page installers can download them automatically. Versions containing a prerelease suffix are marked prerelease and do not replace latest. Keep the four binary asset names and `SHA256SUMS` stable: the [platform installers](portal.md) use that contract. Publish at least one stable release before onboarding employees, and reserve the repository's latest release for CLI assets (or configure a dedicated release mirror).
+
 Download the appropriate artifact and rename it to `hex` (or `hex.exe` on Windows) in a directory on PATH. On macOS/Linux, mark it executable with `chmod +x hex`; on Windows, use a user-owned tools directory on PATH. Download `SHA256SUMS` alongside the original artifact names to verify checksums before renaming.
 
 For source installs on the development machine, use `just install`.

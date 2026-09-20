@@ -1,0 +1,46 @@
+{{define "catalog"}}
+<div id="catalog">
+  <section class="statistics" aria-label="Discoverable site statistics">
+    <div>
+      <strong id="site-count">{{.Statistics.Sites}}</strong
+      ><span>Published apps</span>
+    </div>
+    <div>
+      <strong id="author-count">{{.Statistics.Authors}}</strong
+      ><span>Contributors</span>
+    </div>
+    <div>
+      <strong id="recent-count">{{.Statistics.UpdatedRecently}}</strong
+      ><span>Updated in the last 30 days</span>
+    </div>
+  </section>
+  <p id="site-status" role="status" aria-live="polite">
+    {{len .Sites}} apps{{if .Search}} matching your search{{else}} to
+    explore{{end}}
+  </p>
+  <div id="site-list" class="site-grid">
+    {{range .Sites}}
+    <article class="site-card">
+      <div class="card-top">
+        <span class="site-label">{{.Name}}</span
+        ><span aria-hidden="true">↗</span>
+      </div>
+      <h3><a class="site-link" href="{{.URL}}">{{.Title}}</a></h3>
+      <p class="site-description">{{.Description}}</p>
+      <div class="card-details">
+        <span class="site-author">{{.Author}}</span>{{if .PublishedISO}}<time
+          class="site-date"
+          datetime="{{.PublishedISO}}"
+          >{{.Published}}</time
+        >{{else}}<span class="site-date">{{.Published}}</span>{{end}}
+      </div>
+    </article>
+    {{else}}
+    <p>
+      {{if .Search}}No apps match your search.{{else}}No apps are listed yet.
+      Build the first one, or make an existing app discoverable.{{end}}
+    </p>
+    {{end}}
+  </div>
+</div>
+{{end}}

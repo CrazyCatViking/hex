@@ -79,7 +79,9 @@ The default `hex.json` contains only the site name. Publishing uses `dist` and t
 
 ## Connect to a company platform
 
-Run `hex setup` and enter the platform URL. Hex downloads connection settings directly if available. If hosting authentication is required, it opens the browser download URL and accepts the downloaded file's path, including terminal drag-and-drop quoting. Authentication stays with the browser's hosting provider and AzCopy for publishing.
+Visit the platform's main domain, such as **https://hex.smartdok.dev/**. Its Go-rendered landing page uses HTMX to browse apps and shows site counts, contributors, and recent publications. The **Get started** section offers an installer for the visitor's OS. Download it in the signed-in browser and run the displayed command: it installs the latest CLI and saves the correct platform profile automatically. Employees do not need to run `hex setup` or edit configuration.
+
+Set `"discoverable": false` in an app's hex.json and republish to hide its listing and exclude it from statistics. Its URL continues to work. See [landing page and installers](docs/portal.md) for hosting, configuration, and release prerequisites. Locally, the landing page is at **http://localhost:8080/**.
 
 Agents such as Claude Code can use `hex setup <url> --json` and, when user sign-in is required, `hex setup --file <downloaded-file> --json`. Setup saves a non-secret default profile; publishing resolves it from that cache without contacting Hex. See [Setup and authentication handoff](docs/setup.md).
 

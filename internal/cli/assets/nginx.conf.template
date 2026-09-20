@@ -21,6 +21,11 @@ http {
         '' close;
     }
 
+    map $host $hex_platform {
+        default 0;
+        "~^${HEX_SITE_DOMAIN_PATTERN}$" 1;
+    }
+
     server {
         listen 8080;
         client_max_body_size 32m;
@@ -36,6 +41,10 @@ http {
         }
 
         location / {
+            error_page 418 = @hex_platform;
+            if ($hex_platform = 1) {
+                return 418;
+            }
             if ($hex_site = "") {
                 return 404;
             }
@@ -47,6 +56,11 @@ http {
             add_header Cache-Control no-cache always;
             add_header Origin-Agent-Cluster "?1" always;
             try_files $uri $uri/ =404;
+        }
+
+        location @hex_platform {
+            proxy_pass http://127.0.0.1:8081;
+            proxy_set_header Host $http_host;
         }
 
         location /api/ {

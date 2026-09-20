@@ -86,6 +86,7 @@ locals {
     },
     var.site_base_url == null ? {} : { HEX_SITE_BASE_URL = var.site_base_url },
     var.platform_url == null ? {} : { HEX_PUBLIC_URL = var.platform_url },
+    var.cli_release_url == null ? {} : { HEX_CLI_RELEASE_URL = var.cli_release_url },
     var.capabilities.sites ? module.sites[0].environment : {},
     var.capabilities.files ? module.files[0].environment : {}
   )

@@ -53,7 +53,14 @@ build-cli version: (_validate-version version)
 
 # Upload binaries to a GitHub release for an existing, pushed cli-v<version> tag.
 publish-cli version: (build-cli version)
-    gh release create 'cli-v{{ version }}' dist/cli/{{ version }}/* --repo crazycatviking/hex --verify-tag --title 'Hex CLI {{ version }}' --generate-notes
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ '{{ version }}' == *-* ]]; then
+        flags=(--prerelease)
+    else
+        flags=(--latest)
+    fi
+    gh release create 'cli-v{{ version }}' dist/cli/{{ version }}/* --repo crazycatviking/hex --verify-tag --title 'Hex CLI {{ version }}' --generate-notes "${flags[@]}"
 
 [private]
 _validate-version version:

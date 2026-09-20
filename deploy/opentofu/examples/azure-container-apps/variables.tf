@@ -114,3 +114,14 @@ variable "platform_url" {
   type    = string
   default = null
 }
+
+variable "cli_release_url" {
+  description = "Optional HTTPS CLI release download directory for an organization mirror. Defaults to the latest public Hex CLI release."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.cli_release_url == null || can(regex("^https://[^?#@]+$", var.cli_release_url))
+    error_message = "CLI release mirrors require an HTTPS directory URL without credentials, query parameters, or fragments."
+  }
+}

@@ -28,9 +28,11 @@ func TestPublishedMetadataDoesNotExposeConfiguration(t *testing.T) {
 	t.Setenv("HEX_CONFIG_DIR", filepath.Join(directory, "profiles"))
 	run(t, directory, "init", project, "--publish-root", destination)
 	createBuild(t, project)
+	discoverable := false
 	config := Project{
 		Name: "demo", Title: "Team dashboard", Description: "Daily work", Author: "Alex",
-		Server: "http://localhost:8080", Resource: "private-resource",
+		Discoverable: &discoverable,
+		Server:       "http://localhost:8080", Resource: "private-resource",
 		Publishing: &Publishing{Provider: "filesystem", Root: destination},
 	}
 	configPath := filepath.Join(project, "hex.json")
@@ -55,6 +57,9 @@ func TestPublishedMetadataDoesNotExposeConfiguration(t *testing.T) {
 		}
 		if metadata.Title != config.Title || metadata.Description != config.Description || metadata.Author != config.Author {
 			t.Fatalf("unexpected metadata: %+v", metadata)
+		}
+		if metadata.Discoverable == nil || *metadata.Discoverable {
+			t.Fatal("publishing lost the discovery opt-out")
 		}
 		if metadata.PublishedAt.Before(before) || metadata.PublishedAt.After(time.Now()) || !metadata.PublishedAt.After(previous) {
 			t.Fatalf("incorrect publication timestamp: %s", metadata.PublishedAt)

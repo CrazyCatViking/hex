@@ -48,7 +48,7 @@ Other reference executable settings:
 
 For a provider not supported by this executable, write a small executable that imports `server/`, constructs the providers and calls `hex.New`. The cloud SDK is then a dependency of that provider/composition, not the HTTP framework. The browser client and publishing protocol remain unchanged.
 
-An embedded server can set `Config.Connection` to expose non-secret platform settings. This endpoint uses the same hosting authentication as other APIs; `hex setup` either downloads directly or asks the user to download through their browser. No user tokens are issued or stored by Hex. See [Setup](setup.md).
+An embedded server sets `Config.Connection` to expose non-secret platform settings and OS-specific installers from its built-in main-domain landing page. Employees download a script through their signed-in browser; it installs the CLI and imports those settings automatically. All platform pages and download endpoints use the existing hosting authentication. No user tokens are issued or stored by Hex. See [landing page and installers](portal.md) and [manual setup](setup.md).
 
 ## A future GCP deployment
 

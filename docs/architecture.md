@@ -12,6 +12,7 @@ Browser / CLI
 Azure Container Apps ingress + Entra authentication
     │ port 8080
 NGINX container
+    ├── hex.example.com/ → Go-rendered platform landing page
     ├── <site>.hex.example.com/* → that site's mounted directory
     └── /api/* → Go server on loopback port 8081
                     ├── Azure Files read-only mount: site discovery
@@ -22,7 +23,7 @@ NGINX container
 
 NGINX and Go run as two containers in the same Container App replica. Only port 8080 is exposed by ingress; Go binds to loopback. The full composition is shown above; the example defaults to site hosting only. Optional capability modules provision private storage/database resources only when selected. External PostgreSQL can be supplied instead of provisioning a server. Public storage access is disabled.
 
-Azure Container Apps mounts Azure Files, not Blob Storage. Like Quick, NGINX reads static files directly from a mounted filesystem. Go handles application APIs and read-only site discovery; it does not serve or receive website files. NGINX readiness uses its own `/healthz` response rather than the API.
+Azure Container Apps mounts Azure Files, not Blob Storage. Like Quick, NGINX reads published static app files directly from a mounted filesystem. Go handles application APIs, read-only site discovery, and the built-in main-domain landing page and installers. Go does not serve or receive published app files. NGINX readiness uses its own `/healthz` response rather than the API.
 
 The CLI publishes directly: `hex publish → provider adapter → Azure Files HTTPS endpoint`. A publisher supplies its own storage credentials and private network connectivity. No Hex API call is made during publishing or unpublishing. See [Publishing](publishing.md).
 
@@ -53,7 +54,11 @@ As browser request hygiene, state-changing API requests require `X-Hex-Request: 
 | --- | --- | --- |
 | GET | `/api/hex/capabilities` | Enabled built-ins, contract version and upload limit |
 | GET | `/api/hex/config` | Optional non-secret connection document for CLI setup; JSON attachment |
-| GET | `/api/sites` | Directory-derived array of `{name,url}`; length is the count |
+| GET | `/` on the main domain | Go-rendered landing page with app browsing and onboarding |
+| GET | `/api/hex/catalog` | HTMX catalog HTML fragment; `search` and `sort` query parameters |
+| GET | `/api/hex/overview` | Platform name, visible sites, statistics, and installer availability |
+| GET | `/api/hex/install/{os}` | Platform-configured installer attachment for `macos`, `linux`, or `windows` |
+| GET | `/api/sites` | Discoverable sites as `{name,url,metadata?}`; hidden listings are omitted |
 | GET/HEAD | `https://{site}.<site-domain>/{asset}` | NGINX static file; directory indexes use `index.html` |
 | GET | `/api/sites/{site}/files` | Array of `{key,size}` |
 | PUT | `/api/sites/{site}/files/{key}` | Raw binary body → `{key,size}` |
@@ -66,7 +71,7 @@ As browser request hygiene, state-changing API requests require `X-Hex-Request: 
 | DELETE | `/api/sites/{site}/db/{collection}/{id}` | Delete (204) |
 | GET | `/api/sites/{site}/realtime/{channel}` | WebSocket upgrade |
 
-Registered API handlers return errors as `{ "error": "..." }`. Unknown API routes and methods use standard Go HTTP routing responses. Disabled capabilities have no routes. Website responses, redirects, MIME types, conditional requests and range requests are handled by NGINX. The Go handler returns 404 for website paths. The client handles both JSON and non-JSON errors.
+Registered API handlers return errors as `{ "error": "..." }`. Unknown API routes and methods use standard Go HTTP routing responses. Disabled capability APIs have no routes; the platform landing page remains available. Published website responses, redirects, MIME types, conditional requests and range requests are handled by NGINX. Go serves only its built-in platform UI and assets, not published website paths. The client handles both JSON and non-JSON errors.
 
 Published site names are DNS labels: 1–63 lowercase letters, digits or hyphens, starting and ending with a letter or digit. Other API identifiers remain 1–64 ASCII letters, digits, underscores or hyphens, starting with a letter or digit. Application file keys are relative paths without dot-prefixed segments, backslashes or NULs. There are no site upload/delete routes; the former publishing endpoints return 404.
 

@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{.Name}} · Your team's apps</title>
+    <meta
+      name="htmx-config"
+      content='{"selfRequestsOnly":true,"allowEval":false,"includeIndicatorStyles":false}'
+    />
+    <link rel="stylesheet" href="/api/hex/portal.css" />
+    <script src="/api/hex/htmx.min.js" defer></script>
+    <script src="/api/hex/portal.js" defer></script>
+  </head>
+  <body>
+    <header class="header">
+      <a class="brand" href="/" aria-label="Hex home"
+        ><span class="mark" aria-hidden="true">⬡</span>
+        <span id="platform-name">{{.Name}}</span></a
+      >
+      <nav aria-label="Main navigation">
+        <a href="#sites">Explore apps</a><a href="#start">Get started</a>
+      </nav>
+    </header>
+    <main>
+      <section class="hero" aria-labelledby="welcome">
+        <p class="eyebrow">Built by your team, for your team</p>
+        <h1 id="welcome">Small apps.<br />Shared possibilities.</h1>
+        <p class="intro">
+          Find the tools your colleagues have built, or bring your own idea to
+          life with Hex.
+        </p>
+        <a class="button" href="#start"
+          >Build something useful <span aria-hidden="true">↗</span></a
+        >
+      </section>
+      <section id="sites" aria-labelledby="sites-heading">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Your team's toolkit</p>
+            <h2 id="sites-heading">Explore apps</h2>
+          </div>
+          <button
+            id="refresh"
+            class="secondary"
+            type="submit"
+            form="site-filters"
+          >
+            Refresh
+          </button>
+        </div>
+        <form
+          id="site-filters"
+          class="filters"
+          action="/"
+          method="get"
+          hx-get="/api/hex/catalog"
+          hx-target="#catalog"
+          hx-swap="outerHTML"
+          hx-trigger="submit, input changed delay:250ms, change"
+          hx-sync="this:replace"
+          hx-disabled-elt="#refresh"
+        >
+          <label class="search"
+            >Search apps, descriptions, or authors<input
+              id="search"
+              name="search"
+              type="search"
+              placeholder="Find something useful…"
+              value="{{.Search}}"
+          /></label>
+          <label
+            >Sort by<select id="sort" name="sort">
+              <option value="recent">Recently published</option>
+              {{if eq .Sort "name"}}
+              <option value="name" selected>Name A–Z</option>
+              {{else}}
+              <option value="name">Name A–Z</option>
+              {{end}}
+            </select></label
+          >
+        </form>
+        <p id="catalog-error" role="alert" hidden></p>
+        {{template "catalog" .}}
+      </section>
+      <section
+        id="start"
+        class="getting-started"
+        aria-labelledby="start-heading"
+      >
+        <div>
+          <p class="eyebrow">From idea to app</p>
+          <h2 id="start-heading">Make it yours.</h2>
+          <p>
+            Install the Hex CLI, then let your coding agent help build your next
+            internal tool.
+          </p>
+        </div>
+        <div class="steps">
+          <article>
+            <span class="step">01</span>
+            <div>
+              <h3>Install and connect</h3>
+              <p>
+                Download your platform's installer in this browser, then run the
+                command below. It installs the latest CLI and connects it to
+                this platform automatically.
+              </p>
+              <label for="os">Your operating system</label
+              ><select id="os">
+                <option value="macos">macOS · Apple Silicon / Intel</option>
+                <option value="windows">Windows · x86-64</option>
+                <option value="linux" selected>Linux · x86-64</option>
+              </select>
+              {{if .InstallersAvailable}}
+              <p id="installer-status" role="status">
+                Choose your OS, download, and run. Your platform settings are
+                included.
+              </p>
+              <div id="installer-controls">
+                <a
+                  id="download-installer"
+                  class="button"
+                  href="/api/hex/install/linux"
+                  download
+                  >Download installer</a
+                >
+                <p class="hint">
+                  Run after downloading. If your browser saves elsewhere, use
+                  that file's path.
+                </p>
+                <div class="command">
+                  <pre><code id="install-command">bash "$HOME/Downloads/install-hex-linux.sh"</code></pre>
+                  <button id="copy-command" type="button" class="secondary">
+                    Copy
+                  </button>
+                </div>
+                <p id="copy-status" role="status" aria-live="polite"></p>
+                <p class="hint">
+                  Downloads use your browser's company sign-in. No administrator
+                  access or manual platform configuration is needed.
+                </p>
+              </div>
+              {{else}}
+              <p id="installer-status">
+                Your platform operator needs to configure connection settings
+                before installers are available.
+              </p>
+              {{end}}
+            </div>
+          </article>
+          <article>
+            <span class="step">02</span>
+            <div>
+              <h3>Start a project</h3>
+              <p>Open a new terminal and initialize your app:</p>
+              <pre><code>hex init my-app</code></pre>
+              <p>
+                Open the project in your editor. Hex installs an agent skill
+                that explains the platform and the
+                <code>@crazycatviking/hex</code> npm client.
+              </p>
+            </div>
+          </article>
+          <article>
+            <span class="step">03</span>
+            <div>
+              <h3>Build, then share</h3>
+              <p>
+                Ask your agent to build the app. Once the build is ready in
+                <code>dist</code>, publish from your project directory:
+              </p>
+              <pre><code>hex publish</code></pre>
+              <p>
+                For Azure Files publishing, install AzCopy and use
+                <code>hex login</code> to sign in to storage when needed.
+              </p>
+              <p>
+                Add a title, description, and author in <code>hex.json</code>.
+                Set <code>"discoverable": false</code> to keep the app out of
+                this overview. Change it to <code>true</code> and republish when
+                it is ready to show. Hiding a listing does not restrict access
+                to its URL.
+              </p>
+            </div>
+          </article>
+        </div>
+      </section>
+    </main>
+    <footer>
+      <span>Hex · Useful ideas, made real.</span
+      ><span>Statistics include discoverable apps only.</span>
+    </footer>
+  </body>
+</html>

@@ -5,10 +5,12 @@
     "packages/client"
   ],
   "scripts": {
-    "format": "prettier --write \"packages/**/*.{ts,js,mjs,json}\" \"internal/cli/assets/*.yaml\" \"scripts/**/*.mjs\" package.json",
-    "format:check": "prettier --check \"packages/**/*.{ts,js,mjs,json}\" \"internal/cli/assets/*.yaml\" \"scripts/**/*.mjs\" package.json",
+    "format": "prettier --write \"packages/**/*.{ts,js,mjs,json}\" \"internal/cli/assets/*.yaml\" \"scripts/**/*.mjs\" \"server/portal/*.{html,css}\" server/portal/portal.js package.json",
+    "format:check": "prettier --check \"packages/**/*.{ts,js,mjs,json}\" \"internal/cli/assets/*.yaml\" \"scripts/**/*.mjs\" \"server/portal/*.{html,css}\" server/portal/portal.js package.json",
     "dev": "go run ./cmd/hex dev --package ./examples/custom-server --data-dir .hex-data",
-    "build": "npm run build --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present && npm run build:portal",
+    "build:portal": "node scripts/sync-portal-assets.mjs",
+    "check:portal": "node scripts/sync-portal-assets.mjs --check",
     "test": "npm run test --workspaces --if-present",
     "test:e2e": "npm run build && node scripts/e2e.mjs",
     "test:browser": "npm run build && node scripts/e2e.mjs --browser",
@@ -16,6 +18,7 @@
     "test:services": "npm run build && node scripts/test-services.mjs"
   },
   "devDependencies": {
+    "htmx.org": "2.0.10",
     "playwright": "1.63.0",
     "prettier": "3.9.8",
     "undici": "7.29.1",

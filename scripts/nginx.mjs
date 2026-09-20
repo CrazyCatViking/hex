@@ -68,7 +68,7 @@ export async function startNginx({
     .replace("user nginx;", "")
     .replace("include /etc/nginx/mime.types;", `include ${quote(mimeTypes)};`)
     .replace("listen 8080;", `listen 127.0.0.1:${port};`)
-    .replace("http://127.0.0.1:8081", `http://127.0.0.1:${backendPort}`)
+    .replaceAll("http://127.0.0.1:8081", `http://127.0.0.1:${backendPort}`)
     .replace(
       "root /mnt/sites/public/sites/$hex_site;",
       `root ${quote(join(sitesDirectory, "public/sites", "__HEX_SITE__")).replace("__HEX_SITE__", "$hex_site")};`,

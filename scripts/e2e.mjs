@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, mkdir, rm, writeFile, symlink } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  rm,
+  writeFile,
+  symlink,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -212,6 +219,8 @@ async function main() {
         HEX_ADDR: `127.0.0.1:${backendPort}`,
         HEX_SITES_DIR: sitesDirectory,
         HEX_SITE_BASE_URL: `http://localhost:${port}`,
+        HEX_PUBLIC_URL: `http://localhost:${port}`,
+        HEX_PLATFORM_NAME: "Test Hex",
         DATABASE_URL: "",
         AZURE_BLOB_ENDPOINT: "",
       },
@@ -250,6 +259,20 @@ async function main() {
       "console.log('test asset');",
     );
     const invoke = (args) => exec(cli, args, { cwd: projectDirectory });
+    const configurationPath = join(projectDirectory, "hex.json");
+    const configuration = JSON.parse(await readFile(configurationPath, "utf8"));
+    configuration.title = "Team dashboard";
+    configuration.description = "Daily reports";
+    configuration.author = "Alex";
+    configuration.discoverable = false;
+    await writeFile(configurationPath, JSON.stringify(configuration));
+    await invoke(["publish"]);
+    assert.equal((await siteRequest(origin)).status, 200);
+    assert.deepEqual(JSON.parse((await invoke(["sites"])).stdout), []);
+    const hiddenOverview = await fetch(`${origin}/api/hex/overview`);
+    assert.equal((await hiddenOverview.json()).statistics.sites, 0);
+    configuration.discoverable = true;
+    await writeFile(configurationPath, JSON.stringify(configuration));
     const published = await invoke(["publish"]);
     assert.equal(published.stdout.trim(), `http://demo.localhost:${port}/`);
 
@@ -286,6 +309,8 @@ async function main() {
         const { verifyBrowserIsolation } =
           await import("./browser-isolation.mjs");
         await verifyBrowserIsolation(port);
+        const { verifyPortal } = await import("./test-portal.mjs");
+        await verifyPortal(port);
       } finally {
         await rm(otherSite, { recursive: true });
       }

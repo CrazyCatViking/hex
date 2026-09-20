@@ -21,10 +21,11 @@ type Site struct {
 }
 
 type SiteMetadata struct {
-	Title       string    `json:"title,omitempty"`
-	Description string    `json:"description,omitempty"`
-	Author      string    `json:"author,omitempty"`
-	PublishedAt time.Time `json:"publishedAt"`
+	Title        string    `json:"title,omitempty"`
+	Description  string    `json:"description,omitempty"`
+	Author       string    `json:"author,omitempty"`
+	Discoverable *bool     `json:"discoverable,omitempty"`
+	PublishedAt  time.Time `json:"publishedAt"`
 }
 
 type SiteMetadataReader interface {
@@ -32,16 +33,25 @@ type SiteMetadataReader interface {
 }
 
 func (s *Server) listSites(w http.ResponseWriter, r *http.Request) {
-	baseURL, err := parseSiteBaseURL(s.config.SiteBaseURL)
+	sites, err := s.discoverSites(r.Context())
 	if err != nil {
 		writeServerError(w, err)
 		return
 	}
+	writeJSON(w, http.StatusOK, sites)
+}
 
-	names, err := s.config.Sites.ListSites(r.Context())
+func (s *Server) discoverSites(ctx context.Context) ([]Site, error) {
+	baseURL, err := parseSiteBaseURL(s.config.SiteBaseURL)
 	if err != nil {
-		writeServerError(w, err)
-		return
+		return nil, err
+	}
+	if s.config.Sites == nil {
+		return []Site{}, nil
+	}
+	names, err := s.config.Sites.ListSites(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	slices.Sort(names)
@@ -59,16 +69,18 @@ func (s *Server) listSites(w http.ResponseWriter, r *http.Request) {
 			URL:  siteURL.String(),
 		}
 		if reader, ok := s.config.Sites.(SiteMetadataReader); ok {
-			site.Metadata, err = reader.ReadSiteMetadata(r.Context(), name)
+			site.Metadata, err = reader.ReadSiteMetadata(ctx, name)
 			if err != nil {
-				writeServerError(w, err)
-				return
+				return nil, err
 			}
+		}
+		if site.Metadata != nil && site.Metadata.Discoverable != nil && !*site.Metadata.Discoverable {
+			continue
 		}
 		sites = append(sites, site)
 	}
 
-	writeJSON(w, http.StatusOK, sites)
+	return sites, nil
 }
 
 func parseSiteBaseURL(value string) (*url.URL, error) {

@@ -31,21 +31,32 @@ type connectionDocument struct {
 }
 
 func (s *Server) connectionConfig(w http.ResponseWriter, r *http.Request) {
-	connection := s.config.Connection
-	if err := validateConnection(connection, s.config.SiteBaseURL); err != nil {
-		writeServerError(w, fmt.Errorf("invalid platform connection settings: %w", err))
+	document, err := s.connectionSettings()
+	if err != nil {
+		writeServerError(w, err)
 		return
 	}
 
 	w.Header().Set("Content-Disposition", `attachment; filename="hex-platform.json"`)
-	writeJSON(w, http.StatusOK, connectionDocument{
+	writeJSON(w, http.StatusOK, document)
+}
+
+func (s *Server) connectionSettings() (connectionDocument, error) {
+	connection := s.config.Connection
+	if connection == nil {
+		return connectionDocument{}, fmt.Errorf("platform connection settings are not configured")
+	}
+	if err := validateConnection(connection, s.config.SiteBaseURL); err != nil {
+		return connectionDocument{}, fmt.Errorf("invalid platform connection settings: %w", err)
+	}
+	return connectionDocument{
 		Version:      1,
 		Name:         connection.Name,
 		Server:       connection.Server,
 		SiteBaseURL:  s.config.SiteBaseURL,
 		Publishing:   connection.Publishing,
 		Capabilities: s.capabilityDescription(),
-	})
+	}, nil
 }
 
 func validateConnection(connection *ConnectionConfig, siteBaseURL string) error {

@@ -73,6 +73,7 @@ type Project struct {
 	Title        string        `json:"title,omitempty"`
 	Description  string        `json:"description,omitempty"`
 	Author       string        `json:"author,omitempty"`
+	Discoverable *bool         `json:"discoverable,omitempty"`
 	Directory    string        `json:"directory,omitempty"`
 	Platform     string        `json:"platform,omitempty"`
 	Server       string        `json:"server,omitempty"`

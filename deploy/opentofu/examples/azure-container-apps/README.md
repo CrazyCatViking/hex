@@ -88,6 +88,8 @@ Before browsing a site such as `demo.hex.example.com`, configure its DNS, certif
 
 This example uses explicit domain bindings/callbacks; it does not assume a wildcard DNS record enables wildcard Container Apps routing or Entra redirects. See [Subdomain hosting](../../../../docs/subdomains.md) for setup and the distinction between hosting configuration and direct-to-storage publishing.
 
+The base domain now serves the built-in Go/HTMX landing page. For example, set both `platform_url` and `site_base_url` to `https://hex.smartdok.dev`, then configure DNS, TLS, an ingress binding, and the Entra callback for that main domain alongside site domains. Employees use its platform-configured installer downloads rather than manual CLI setup. Set optional `cli_release_url` for an organization mirror; otherwise installers use the latest public CLI release. See [landing page and installers](../../../../docs/portal.md).
+
 For CLI access, configure an exposed API scope and appropriate consent on the Entra registration. Use v2 access tokens to match the issuer. Projects can set `resource: "api://<client-id>"` after authorizing Azure CLI as a client, or supply an appropriate token through `HEX_TOKEN`. Hex does not implement identity or claims APIs.
 
 Before destroying a deployed environment, disable its Container App ingress (for example `az containerapp ingress disable --name <name>-gateway --resource-group <name>-example`) before `tofu destroy`. Authentication and application deletion are separate Azure operations, and the authentication resource is removed first during teardown. Do not publish data into a partially configured or unverified deployment.

@@ -4,7 +4,7 @@
 
 `hex sites` and capability refreshes use the Hex API, with the gateway's authentication. Storage authentication for publishing is independent of that gateway session or `HEX_TOKEN`.
 
-For normal onboarding, use [hex setup](setup.md) to download a profile rather than manually enter the settings below. Projects initialized with a profile use cached capabilities by default; `hex capabilities --refresh` explicitly calls the API. `hex login` delegates publishing sign-in to AzCopy. Neither setup nor login copies a browser session into the CLI.
+For normal onboarding, download the installer from the [company landing page](portal.md); it installs the CLI and configures the default profile automatically. [Manual setup](setup.md) remains available for additional platforms. Projects use cached capabilities by default; `hex capabilities --refresh` explicitly calls the API. `hex login` delegates publishing sign-in to AzCopy. Neither installation nor login copies a browser session into the CLI.
 
 ## Local filesystem
 
@@ -73,6 +73,8 @@ Anything that places files in that layout can publish a site. Metadata is option
 ## Site metadata
 
 Add optional `title`, `description`, and `author` strings to the source `hex.json`. The CLI publishes those fields and a generated UTC `publishedAt` timestamp in `.hex-site.json`. It leaves the source configuration and build output untouched, and never copies platform settings, storage destinations, or local paths into metadata. The generated file is limited to 64 KiB.
+
+Set `"discoverable": false` in hex.json and republish to exclude a site from the company overview, statistics, and discovery API. Set it to true or remove it and republish to list the site. The default is visible, including older sites without metadata. Its URL and backend APIs remain accessible; visibility is not an authorization boundary.
 
 ```json
 {

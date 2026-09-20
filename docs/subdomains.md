@@ -22,7 +22,7 @@ The gateway does not provide the old shared `/sites/<name>/` web routes. A site 
 
 The CLI falls back to its `server` origin if `siteBaseURL` is absent. The server defaults to `http://localhost:8080` for development. Public site URLs are always derived from this configured base and the directory name, not from an untrusted Host header.
 
-The NGINX Docker image generates its configuration from `internal/cli/assets/nginx.conf.template` at startup. The Go CLI embeds and uses the same template, so it works outside the Hex checkout. The image's domain validation/escaping script runs before the official envsubst step. Unrecognized hosts cannot serve static assets. The configured base domain is for API access, not a catch-all website directory.
+The NGINX Docker image generates its configuration from `internal/cli/assets/nginx.conf.template` at startup. The Go CLI embeds and uses the same template, so it works outside the Hex checkout. The image's domain validation/escaping script runs before the official envsubst step. Unrecognized hosts cannot serve static assets. The configured base domain forwards to Go for the built-in landing page, with API access under `/api/`; each site subdomain still serves its own files directly.
 
 ## Browser boundaries
 
@@ -32,7 +32,7 @@ Origin separation is not backend authorization. The current shared APIs allow ad
 
 ## Local development
 
-`hex dev` serves sites at `http://<name>.localhost:8080/` and the management API at `http://localhost:8080/api/`. `npm run dev` in the framework repository delegates to the same tooling. Many browsers resolve the entire `.localhost` suffix to loopback; environments that do not need local DNS/hosts entries. Keep all sites on the same development port to test hostname isolation, rather than relying on different ports.
+`hex dev` serves the landing page at `http://localhost:8080/`, sites at `http://<name>.localhost:8080/`, and the management API at `http://localhost:8080/api/`. `npm run dev` in the framework repository delegates to the same tooling. Many browsers resolve the entire `.localhost` suffix to loopback; environments that do not need local DNS/hosts entries. Keep all sites on the same development port to test hostname isolation, rather than relying on different ports.
 
 Run the actual browser-isolation check with:
 
