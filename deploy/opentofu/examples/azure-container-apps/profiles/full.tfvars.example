@@ -1,0 +1,6 @@
+capabilities = {
+  sites    = true
+  files    = true
+  database = "managed"
+  realtime = true
+}

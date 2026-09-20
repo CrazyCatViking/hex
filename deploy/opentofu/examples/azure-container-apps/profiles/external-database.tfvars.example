@@ -1,0 +1,6 @@
+capabilities = {
+  sites    = true
+  files    = false
+  database = "external"
+  realtime = false
+}

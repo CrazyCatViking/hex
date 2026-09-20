@@ -1,0 +1,10 @@
+{
+  "name": "@hex-platform/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": { "hex": "./src/cli.mjs" },
+  "files": ["src", "skills"],
+  "engines": { "node": ">=20" },
+  "scripts": { "test": "node --test test/*.test.mjs" },
+  "dependencies": { "@hex-platform/client": "0.1.0", "fflate": "^0.8.2" }
+}
