@@ -32,11 +32,10 @@ An optional `--server https://hex.company.example` checks that an imported file 
 Successful setup sets the saved profile as the default. Then:
 
 ```sh
-hex login
 hex init my-app
 ```
 
-Run `hex publish` from the generated app directory. For Azure Files, `hex login` launches Microsoft's `azcopy login` with its normal interactive output. AzCopy owns sign-in and credential caching; Hex neither implements OAuth nor reads or stores the resulting tokens. Install AzCopy v10 and obtain storage permissions/network connectivity from your operator. Filesystem publishing needs no login.
+Run `hex publish` from the app directory. Plain sites need only index.html and assets; build bundled apps first. For Azure Files, Hex installs its publishing tool automatically if needed, reuses the cached storage session, and starts Microsoft sign-in when necessary. No separate login command is required. AzCopy owns credential caching; Hex does not implement OAuth or copy tokens. Storage permissions and network connectivity are supplied by the operator. Filesystem publishing needs no login.
 
 ## Claude Code and other agents
 
@@ -88,7 +87,7 @@ By default, initialization creates only the site name and commands use the curre
 }
 ```
 
-`hex init other-app --platform staging` writes `platform: "staging"` to pin a saved profile. Without a pin, changing the default with `hex setup` changes the destination used by subsequent commands. `hex publish --platform staging` selects a profile for that invocation. Publishing defaults to the `dist` directory; an optional `directory` field selects another build output. Explicit legacy `server`, `siteBaseURL` and `publishing` settings still work. Rerun setup to refresh a profile after the operator changes its configuration. Profiles are per user; for a pinned project, another developer imports the profile under the project's expected name.
+`hex init other-app --platform staging` writes `platform: "staging"` to pin a saved profile. Without a pin, changing the default with `hex setup` changes the destination used by subsequent commands. `hex publish --platform staging` selects a profile for that invocation. Publishing detects dist/, public/, or the project root; an optional `directory` field pins a source. Explicit legacy `server`, `siteBaseURL` and `publishing` settings still work. Rerun setup to refresh a profile after the operator changes its configuration. Profiles are per user; for a pinned project, another developer imports the profile under the project's expected name.
 
 Publishing and unpublishing only read the cached profile. They do not contact the Hex API for discovery, credentials, registration or completion. `hex capabilities` uses cached capabilities when a profile supplies them; `--refresh` explicitly requests the current API response.
 

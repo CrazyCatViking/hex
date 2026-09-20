@@ -127,8 +127,11 @@ func (a *App) loginCommand() *cobra.Command {
 				fmt.Fprintln(a.Out, "Filesystem publishing does not require a storage login.")
 				return nil
 			}
-			fmt.Fprintln(a.Out, "AzCopy will sign you in to Azure Storage. Hex does not handle your credentials.")
-			return a.external(cmd.Context(), a.Dir, nil, "azcopy", "login")
+			binary, err := a.azCopyExecutable(cmd.Context())
+			if err != nil {
+				return err
+			}
+			return a.azureLogin(cmd.Context(), binary)
 		},
 	}
 	command.Flags().StringVar(&profile, "platform", "", "Saved platform profile")

@@ -58,7 +58,7 @@ The browser download is intentional: terminal `curl`/PowerShell requests cannot 
 
 Unix scripts require Bash, curl, base64, and sha256sum or shasum. They add the bin directory to common shell startup files idempotently. The Windows script uses PowerShell and adds its bin directory to the user's PATH. Neither requires administrator privileges. The displayed PowerShell command sets execution policy only for that installation process.
 
-The installer verifies SHA-256 before installing the CLI, imports settings without network access to the platform, and removes temporary files. Rerunning installs the latest release and refreshes the profile. Download the script again when the operator changes platform settings. Storage publishing authentication remains with the provider; Azure Files publishers still use AzCopy and `hex login`.
+The installer verifies SHA-256 before installing the CLI, imports settings without network access to the platform, and removes temporary files. After installation, `hex update` installs newer binaries while preserving profiles. Rerunning a newly downloaded installer also refreshes platform settings. `hex publish` automatically prepares AzCopy and starts Microsoft storage sign-in when required, so employees do not need separate tool installation or login commands.
 
 ## Release source
 
@@ -71,6 +71,8 @@ https://github.com/crazycatviking/hex/releases/latest/download
 Publish the first stable CLI release before distributing installers to employees. Use the [Just release recipes](releases.md); stable CLI releases are marked latest, while prereleases are not. Do not mark unrelated releases latest in this repository. A concurrent release change between downloading the checksum and binary can cause a safe checksum failure; rerun the installer.
 
 An operator can set `hex.Config.CLIReleaseURL` or `HEX_CLI_RELEASE_URL` to an organization mirror's HTTPS download directory. The Azure example exposes `cli_release_url`. The directory must provide the same four binary filenames and `SHA256SUMS` used by `just build-cli`, and be reachable without browser-only authentication. HTTP is accepted only on loopback for local installer tests.
+
+Configured mirrors are included as optional `cliReleaseURL` in connection settings, allowing `hex update` to keep using the organization's source automatically. Release the updated CLI before deploying servers that advertise this field, so downloaded installers use a compatible client.
 
 ## Development and verification
 

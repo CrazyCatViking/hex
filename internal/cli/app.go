@@ -104,6 +104,7 @@ func (a *App) Execute(ctx context.Context, args []string, version string) error 
 	root.SetArgs(args)
 	root.CompletionOptions.DisableDefaultCmd = true
 	root.AddCommand(a.setupCommand(), a.initCommand(), a.devCommand())
+	root.AddCommand(a.updateCommand())
 	root.AddCommand(a.publishCommand(), a.deleteCommand(), a.loginCommand())
 	root.AddCommand(a.sitesCommand(), a.capabilitiesCommand(), a.skillsCommand())
 	err := root.ExecuteContext(ctx)

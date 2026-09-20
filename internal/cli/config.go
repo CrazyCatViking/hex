@@ -60,12 +60,13 @@ func (c *Capabilities) UnmarshalJSON(data []byte) error {
 }
 
 type Connection struct {
-	Version      int           `json:"version"`
-	Name         string        `json:"name"`
-	Server       string        `json:"server"`
-	SiteBaseURL  string        `json:"siteBaseURL"`
-	Publishing   *Publishing   `json:"publishing,omitempty"`
-	Capabilities *Capabilities `json:"capabilities"`
+	Version       int           `json:"version"`
+	Name          string        `json:"name"`
+	Server        string        `json:"server"`
+	SiteBaseURL   string        `json:"siteBaseURL"`
+	CLIReleaseURL string        `json:"cliReleaseURL,omitempty"`
+	Publishing    *Publishing   `json:"publishing,omitempty"`
+	Capabilities  *Capabilities `json:"capabilities"`
 }
 
 type Project struct {
@@ -189,6 +190,11 @@ func parseConnection(data []byte, expectedServer string) (Connection, error) {
 		}
 		if connection.Publishing.Provider == "filesystem" && (!isLocalHost(server.Hostname()) || !absoluteAnyOS(connection.Publishing.Root)) {
 			return connection, errors.New("filesystem profiles require a local platform and an absolute publishing root")
+		}
+	}
+	if connection.CLIReleaseURL != "" {
+		if err := validateReleaseDirectory(connection.CLIReleaseURL); err != nil {
+			return connection, fmt.Errorf("invalid CLI release directory: %w", err)
 		}
 	}
 	connection.Server = server.String()

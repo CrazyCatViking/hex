@@ -72,6 +72,7 @@ func TestAzureToolsAreDelegatedWithoutHexRequests(t *testing.T) {
 	directory := t.TempDir()
 	t.Setenv("HEX_CONFIG_DIR", filepath.Join(directory, "profiles"))
 	tools := filepath.Join(directory, "tools")
+	t.Setenv("HEX_AZCOPY_PATH", filepath.Join(tools, "azcopy"))
 	if err := os.Mkdir(tools, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -80,13 +81,23 @@ func TestAzureToolsAreDelegatedWithoutHexRequests(t *testing.T) {
 	t.Setenv("HEX_METADATA_LOG", metadataLog)
 	t.Setenv("HEX_TOOL_LOG", logFile)
 	t.Setenv("PATH", tools+string(os.PathListSeparator)+os.Getenv("PATH"))
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$HEX_TOOL_LOG\"\nif [ \"$1\" = sync ]; then cp \"$2/.hex-site.json\" \"$HEX_METADATA_LOG\"; fi\n"
+	script := `#!/bin/sh
+set -eu
+printf '%s\n' "$@" > "$HEX_TOOL_LOG"
+if [ "$1" = sync ]; then
+    test -f "$2/index.html"
+    test -f "$2/styles/main.css"
+    test ! -e "$2/hex.json"
+    test ! -e "$2/.agents"
+    cp "$2/.hex-site.json" "$HEX_METADATA_LOG"
+fi
+`
 	if err := os.WriteFile(filepath.Join(tools, "azcopy"), []byte(script), 0755); err != nil {
 		t.Fatal(err)
 	}
 	project := filepath.Join(directory, "demo")
 	run(t, directory, "init", project, "--publish-url", "https://account.file.core.windows.net/sites/public/sites")
-	createBuild(t, project)
+	writePublishFixture(t, project, map[string]string{"index.html": "plain site", "styles/main.css": "body {}"})
 	run(t, project, "publish")
 	args, err := os.ReadFile(logFile)
 	if err != nil {

@@ -22,12 +22,13 @@ type PublishingConfig struct {
 }
 
 type connectionDocument struct {
-	Version      int               `json:"version"`
-	Name         string            `json:"name"`
-	Server       string            `json:"server"`
-	SiteBaseURL  string            `json:"siteBaseURL"`
-	Publishing   *PublishingConfig `json:"publishing,omitempty"`
-	Capabilities map[string]any    `json:"capabilities"`
+	Version       int               `json:"version"`
+	Name          string            `json:"name"`
+	Server        string            `json:"server"`
+	SiteBaseURL   string            `json:"siteBaseURL"`
+	CLIReleaseURL string            `json:"cliReleaseURL,omitempty"`
+	Publishing    *PublishingConfig `json:"publishing,omitempty"`
+	Capabilities  map[string]any    `json:"capabilities"`
 }
 
 func (s *Server) connectionConfig(w http.ResponseWriter, r *http.Request) {
@@ -49,13 +50,17 @@ func (s *Server) connectionSettings() (connectionDocument, error) {
 	if err := validateConnection(connection, s.config.SiteBaseURL); err != nil {
 		return connectionDocument{}, fmt.Errorf("invalid platform connection settings: %w", err)
 	}
+	if _, err := s.cliReleaseURL(); err != nil {
+		return connectionDocument{}, err
+	}
 	return connectionDocument{
-		Version:      1,
-		Name:         connection.Name,
-		Server:       connection.Server,
-		SiteBaseURL:  s.config.SiteBaseURL,
-		Publishing:   connection.Publishing,
-		Capabilities: s.capabilityDescription(),
+		Version:       1,
+		Name:          connection.Name,
+		Server:        connection.Server,
+		SiteBaseURL:   s.config.SiteBaseURL,
+		CLIReleaseURL: s.config.CLIReleaseURL,
+		Publishing:    connection.Publishing,
+		Capabilities:  s.capabilityDescription(),
 	}, nil
 }
 

@@ -52,7 +52,7 @@ hex setup http://localhost:8080 --name local
 hex init my-app
 ```
 
-Open `my-app` in your editor. Initialization creates only `hex.json` and `.agents/skills/hex/SKILL.md`. Have your coding agent build the app using your preferred framework, install `@crazycatviking/hex` with the project's package manager, and produce a `dist/index.html` build. See [client installation](packages/client/README.md) for a local tarball workflow before a registry release. From that project directory, after building:
+Open `my-app` in your editor. Initialization creates only `hex.json` and `.agents/skills/hex/SKILL.md`. A plain site can put index.html and its assets directly in the project root. For a bundled app, have your coding agent install `@crazycatviking/hex` and build the app with your preferred tooling. See [client installation](packages/client/README.md) for a local tarball workflow before a registry release. From the project directory:
 
 ```sh
 hex capabilities
@@ -62,7 +62,7 @@ hex sites
 
 Open `http://my-app.localhost:8080/`. Each site has its own hostname and browser origin. Modern browsers resolve `*.localhost` to loopback; if your environment does not, add local DNS/hosts entries. Point your coding agent to the installed skill if it does not discover `.agents/skills` automatically. `hex skills` refreshes the Hex-owned skill file without modifying existing project instructions.
 
-The default `hex.json` contains only the site name. Publishing uses `dist` and the current default profile from `hex setup`. Set optional `directory` for a different build output or `platform` to pin a saved profile. Add descriptive metadata as needed:
+The default `hex.json` contains only the site name. Publishing detects index.html in dist/, public/, or the project root, using the current default platform profile. Projects with a package.json build script need their build output before automatic publishing. Set optional `directory` to pin a source (`"."` for the root) or `platform` to pin a saved profile. Add descriptive metadata as needed:
 
 ```json
 {
@@ -73,11 +73,13 @@ The default `hex.json` contains only the site name. Publishing uses `dist` and t
 }
 ```
 
-`hex publish` synchronizes directly to `publishing`, and `hex delete my-app --yes` deletes that site's directory directly. Neither command calls the Hex API or obtains credentials from it. Azure Files uses AzCopy; local publishing uses filesystem operations. See [Publishing](docs/publishing.md) for configuration and storage authentication.
+`hex publish` synchronizes directly to storage, and `hex delete my-app --yes` deletes that site's directory directly. Neither command calls the Hex API. Hex automatically prepares AzCopy and starts Microsoft storage sign-in when needed for Azure Files. Local publishing uses filesystem operations. See [Publishing](docs/publishing.md) for directory selection and authentication.
 
 `hex sites` calls the read-only discovery API, which enumerates site directories containing `index.html` and returns names, subdomain URLs, and optional metadata. Publishing writes title, description, author, and a generated UTC `publishedAt` to `.hex-site.json` alongside the site; it excludes connection settings and local paths. Existing sites without metadata remain discoverable. Set `siteBaseURL` when the API origin differs from the parent site domain. App uploads and database data survive unpublishing.
 
 ## Connect to a company platform
+
+Use `hex update` to install the latest verified CLI binary while preserving platform profiles. Older releases without this command need one more installation from the landing page first.
 
 Visit the platform's main domain, such as **https://hex.smartdok.dev/**. Its Go-rendered landing page uses HTMX to browse apps and shows site counts, contributors, and recent publications. The **Get started** section offers an installer for the visitor's OS. Download it in the signed-in browser and run the displayed command: it installs the latest CLI and saves the correct platform profile automatically. Employees do not need to run `hex setup` or edit configuration.
 

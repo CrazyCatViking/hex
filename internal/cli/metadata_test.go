@@ -97,7 +97,7 @@ func TestInitializationPreservesAppAndCanPinProfile(t *testing.T) {
 	}
 	app, _ := testApp(t, project)
 	resolved, err := app.commandConfig("", true)
-	if err != nil || resolved.Directory != "dist" || resolved.Server != "http://localhost:8080" {
+	if err != nil || resolved.Directory != "" || resolved.Server != "http://localhost:8080" {
 		t.Fatalf("unexpected resolved configuration: %+v, %v", resolved, err)
 	}
 	data, err = os.ReadFile(filepath.Join(project, "dist", "index.html"))

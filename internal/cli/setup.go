@@ -155,9 +155,6 @@ func (a *App) setup(ctx context.Context, server, file, name string, interactive 
 	}
 	if connection.Publishing != nil {
 		result.Publishing = &connection.Publishing.Provider
-		if connection.Publishing.Provider == "azure-files" {
-			result.NextCommand = "hex login --platform " + profile
-		}
 	}
 	return result, nil
 }

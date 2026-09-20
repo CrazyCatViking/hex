@@ -9,7 +9,6 @@ import (
 	"io/fs"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -53,19 +52,20 @@ func containsPath(parent, child string) bool {
 
 func readSource(project, directory string) (sourceDirectory, error) {
 	var source sourceDirectory
-	if directory == "" {
-		return source, errors.New("project directory is required")
-	}
 	project, err := filepath.EvalSymlinks(project)
+	if err != nil {
+		return source, err
+	}
+	directory, err = publishDirectory(project, directory)
 	if err != nil {
 		return source, err
 	}
 	source.Directory, err = filepath.EvalSymlinks(resolvePath(project, directory))
 	if err != nil {
-		return source, err
+		return source, fmt.Errorf("open publish directory %q: %w", directory, err)
 	}
-	if source.Directory == project || !containsPath(project, source.Directory) {
-		return source, errors.New("publish directory must be a subdirectory of the project")
+	if !containsPath(project, source.Directory) {
+		return source, errors.New("publish directory must be the project root or a subdirectory of the project")
 	}
 	foundIndex := false
 	err = filepath.WalkDir(source.Directory, func(path string, entry fs.DirEntry, walkError error) error {
@@ -75,7 +75,13 @@ func readSource(project, directory string) (sourceDirectory, error) {
 		if path == source.Directory {
 			return nil
 		}
-		if strings.HasPrefix(entry.Name(), ".") || entry.Name() == "node_modules" {
+		if strings.HasPrefix(entry.Name(), ".") || strings.EqualFold(entry.Name(), "node_modules") {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if source.Directory == project && filepath.Dir(path) == project && rootProjectFile(entry.Name()) {
 			if entry.IsDir() {
 				return filepath.SkipDir
 			}
@@ -325,15 +331,6 @@ func (a *App) publish(ctx context.Context, project Project, name string) error {
 		}
 	}
 	return a.storageCommand(ctx, "sync", temporary, destination, "--recursive=true", "--delete-destination=true")
-}
-
-func (a *App) storageCommand(ctx context.Context, args ...string) error {
-	command := exec.CommandContext(ctx, "azcopy", args...)
-	command.Dir = a.Dir
-	if err := command.Run(); err != nil {
-		return fmt.Errorf("AzCopy failed; check its installation, storage connectivity, login and job logs: %w", err)
-	}
-	return nil
 }
 
 func (a *App) publishCommand() *cobra.Command {

@@ -1,10 +1,24 @@
 # Direct publishing
 
-`hex publish` interacts directly with the provider resolved from the default profile, an explicit `platform`, or settings in `hex.json`. It uploads `dist` by default; optional `directory` selects another build output. It does not call Hex for capabilities, credentials, upload, registration or completion. `siteBaseURL` (falling back to `server`) prints the resulting subdomain URL. `hex delete <site> --yes` likewise deletes directly from the publishing destination.
+`hex publish` interacts directly with the provider resolved from the default profile, an explicit `platform`, or settings in `hex.json`. It detects the website directory automatically; optional `directory` pins the source. It does not call Hex for capabilities, credentials, upload, registration or completion. `siteBaseURL` (falling back to `server`) prints the resulting subdomain URL. `hex delete <site> --yes` likewise deletes directly from the publishing destination.
 
 `hex sites` and capability refreshes use the Hex API, with the gateway's authentication. Storage authentication for publishing is independent of that gateway session or `HEX_TOKEN`.
 
-For normal onboarding, download the installer from the [company landing page](portal.md); it installs the CLI and configures the default profile automatically. [Manual setup](setup.md) remains available for additional platforms. Projects use cached capabilities by default; `hex capabilities --refresh` explicitly calls the API. `hex login` delegates publishing sign-in to AzCopy. Neither installation nor login copies a browser session into the CLI.
+For normal onboarding, download the installer from the [company landing page](portal.md); it installs the CLI and configures the default profile automatically. Then use `hex init` and `hex publish`. Azure publishing prepares its storage tool and starts Microsoft sign-in when needed, without separate installation or login commands. [Manual setup](setup.md) remains available for additional platforms. Projects use cached capabilities by default; `hex capabilities --refresh` explicitly calls the API. Neither installation nor login copies a browser session into the CLI.
+
+## Plain sites and build output
+
+With no `directory` setting, Hex looks for a regular `index.html` in this order:
+
+1. `dist/`
+2. `public/`
+3. The project root
+
+A plain HTML/CSS/JavaScript site can therefore contain `hex.json`, `index.html`, and its assets in the same directory. Run `hex publish` directly: no build or artificial `dist` folder is required. Asset contents and relative paths are preserved.
+
+If package.json declares a nonempty `scripts.build` and `dist/index.html` is missing, Hex asks you to build first instead of falling back to source files. For another build output, set `"directory": "build"`, for example. An explicit setting always wins and never silently falls back. Set `"directory": "."` to deliberately publish the root, or remove an old `"directory": "dist"` setting to enable detection.
+
+Hidden files/directories and `node_modules` are excluded everywhere. Root publishing also excludes `hex.json`, `hex.dev.json`, `AGENTS.md`, `package.json`, and npm/pnpm/Yarn/Bun lockfiles. Other regular files are website content; use a dedicated directory if the repository also contains unrelated files. Symlinks and paths outside the project are rejected.
 
 ## Local filesystem
 
@@ -37,9 +51,11 @@ The provider synchronizes the build directory to `<root>/<name>/`. Relative root
 }
 ```
 
-Install a recent AzCopy v10 with Azure Files OAuth support. The OpenTofu example outputs this configuration using `tofu output -json publishing`. Copy the object into `hex.json`, or initialize a project with `hex init demo --server https://hex.example.com --publish-url https://ACCOUNT.file.core.windows.net/sites/public/sites`.
+Hex uses an existing AzCopy on PATH if available. Otherwise it downloads the supported official AzCopy release, verifies its pinned SHA-256, and extracts the executable into the OS user cache under `hex/tools/azcopy/<version>/<os>-<arch>/`. No administrator access, shell extraction tools, or PATH changes are needed. `HEX_AZCOPY_PATH` is an optional explicit override for managed installations. Updating Hex supplies updated managed-tool versions when needed.
 
-Authorize the publishing user or group with **Storage File Data Privileged Contributor** at an appropriate Azure Files scope, then run `azcopy login --tenant-id=<tenant-id>`. Alternatively use an existing Azure CLI session by setting `AZCOPY_AUTO_LOGIN_TYPE=AZCLI` and `AZCOPY_TENANT_ID` after `az login`. The Hex CLI does not perform that login or mint storage tokens. Use a pre-established login rather than an interactive device prompt inside a publish command.
+The operator must authorize publishers with **Storage File Data Privileged Contributor** at an appropriate Azure Files scope. During `hex publish` or `hex delete`, Hex checks the cached storage session. If sign-in is needed in an interactive terminal, it opens Microsoft's device-login page, shows AzCopy's sign-in instructions, and continues the operation after authentication. AzCopy owns tokens and credential caching. `hex login` remains available for explicitly changing or refreshing the storage login, but is not a prerequisite for publishing.
+
+Non-interactive commands never silently wait for a first-time sign-in: they report that the command should be rerun in an interactive terminal. Automation can supply `HEX_PUBLISH_SAS` or `AZCOPY_AUTO_LOGIN_TYPE`; Hex then leaves authentication to that configured mechanism. For example, `AZCOPY_AUTO_LOGIN_TYPE=AZCLI` uses an existing Azure CLI session. `AZCOPY_TENANT_ID` selects a tenant for the automatic device login when needed. Progress and sign-in instructions go to stderr; successful publish stdout remains the site URL.
 
 If the operator supplies a SAS instead, set `HEX_PUBLISH_SAS` in the publisher's environment. Do not put a SAS in `hex.json` or frontend code. It needs the permissions required for reading/listing the destination and writing/deleting files. Azure Files SAS is not a per-site directory authorization boundary. Publishing authorization is controlled by Azure Storage, not by an API capability flag.
 
@@ -89,7 +105,7 @@ The local site provider reads metadata on each discovery request; custom provide
 
 ## Synchronization behavior
 
-- The build directory must be a subdirectory of the app project and contain `index.html` at its root.
+- The website directory must be the project root or a subdirectory and contain a regular `index.html` at its root.
 - Hidden paths and `node_modules` are excluded; symlinks and special files are rejected before transfer.
 - A publish mirrors one site, including deleting obsolete destination files. Other site directories are untouched.
 - Whole-site synchronization is not atomic. A failed or concurrent publish can leave mixed content. Republish to recover, and serialize deployment jobs for a site in your CI system.

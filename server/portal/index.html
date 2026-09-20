@@ -140,6 +140,10 @@
                   Downloads use your browser's company sign-in. No administrator
                   access or manual platform configuration is needed.
                 </p>
+                <p class="hint">
+                  Already installed? Run <code>hex update</code> to get the
+                  latest CLI.
+                </p>
               </div>
               {{else}}
               <p id="installer-status">
@@ -167,13 +171,17 @@
             <div>
               <h3>Build, then share</h3>
               <p>
-                Ask your agent to build the app. Once the build is ready in
-                <code>dist</code>, publish from your project directory:
+                Plain HTML, CSS, and JavaScript sites can keep
+                <code>index.html</code> and assets in the project root or
+                <code>public</code>. Bundled apps use their build output,
+                normally <code>dist</code>. Publish from your project directory:
               </p>
               <pre><code>hex publish</code></pre>
               <p>
-                For Azure Files publishing, install AzCopy and use
-                <code>hex login</code> to sign in to storage when needed.
+                Hex prepares the Azure publishing tools automatically and starts
+                Microsoft sign-in when needed. Complete the sign-in and Hex
+                continues publishing; no separate tool installation or login
+                command is required.
               </p>
               <p>
                 Add a title, description, and author in <code>hex.json</code>.

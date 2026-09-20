@@ -109,9 +109,6 @@ func (a *App) readProject(optional bool) (Project, error) {
 	if err := json.Unmarshal(data, &project); err != nil {
 		return project, fmt.Errorf("parse project configuration: %w", err)
 	}
-	if project.Directory == "" {
-		project.Directory = "dist"
-	}
 	if project.Platform != "" {
 		connection, _, err := loadProfile(project.Platform, false)
 		if err != nil {

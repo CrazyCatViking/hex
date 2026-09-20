@@ -365,10 +365,11 @@ hex dev --package ./examples/custom-server --data-dir .hex-data</code></pre>
         <pre><code>hex setup http://localhost:8080 --name local
 hex init my-app</code></pre>
         <p>
-          Initialization creates configuration and agent skills. Build the app
-          with your preferred tooling, install <code>@crazycatviking/hex</code>
-          through its package manager, and produce <code>dist/index.html</code>.
-          Then publish from the app directory:
+          Initialization creates configuration and agent skills. Plain sites
+          can put <code>index.html</code> and assets in the project root or
+          <code>public</code>. Bundled apps use their build output, normally
+          <code>dist</code>. Hex prepares Azure publishing and sign-in
+          automatically when needed. Publish from the app directory:
         </p>
         <pre><code>hex publish</code></pre>
         <p>
