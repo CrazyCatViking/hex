@@ -4,7 +4,17 @@ export interface Capabilities {
   database: boolean;
   realtime: boolean;
   sites: boolean;
+  identity?: boolean;
+  accessControl?: boolean;
   maxUploadBytes: number;
+}
+
+export interface Identity {
+  provider?: string;
+  id: string;
+  name?: string;
+  groups?: string[];
+  roles?: string[];
 }
 
 export interface StoredFile {
@@ -194,6 +204,20 @@ export function createHexClient(options: ClientOptions) {
   return {
     capabilities() {
       return requestJSON<Capabilities>("/api/hex/capabilities");
+    },
+    async identity(): Promise<Identity | null> {
+      try {
+        return await requestJSON<Identity>("/api/hex/me");
+      } catch (error) {
+        const unavailable =
+          error instanceof HexError &&
+          (error.status === 404 || error.status === 401);
+        if (unavailable) {
+          return null;
+        }
+
+        throw error;
+      }
     },
     files: {
       list() {

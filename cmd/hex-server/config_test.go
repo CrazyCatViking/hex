@@ -85,6 +85,65 @@ func TestExplicitProviderConfigurationFailsEarly(t *testing.T) {
 	}
 }
 
+func TestIdentityConfiguration(t *testing.T) {
+	environments := map[string]struct {
+		values         map[string]string
+		expectIdentity bool
+		expectAccess   bool
+	}{
+		"default off": {
+			values: map[string]string{"HEX_SITES_PROVIDER": "none"},
+		},
+		"static uses ephemeral access entries": {
+			values: map[string]string{
+				"HEX_SITES_PROVIDER":    "none",
+				"HEX_IDENTITY_PROVIDER": "static",
+				"HEX_IDENTITY_GROUPS":   "sales, ops",
+			},
+			expectIdentity: true,
+			expectAccess:   true,
+		},
+		"easyauth without postgres disables access control": {
+			values: map[string]string{
+				"HEX_SITES_PROVIDER":    "none",
+				"HEX_IDENTITY_PROVIDER": "easyauth",
+				"HEX_ADMIN_GROUPS":      "admin-group",
+			},
+			expectIdentity: true,
+			expectAccess:   false,
+		},
+	}
+
+	for name, environment := range environments {
+		t.Run(name, func(t *testing.T) {
+			getenv := func(key string) string {
+				return environment.values[key]
+			}
+			config, cleanup, err := configure(context.Background(), getenv)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer cleanup()
+
+			if (config.Identity != nil) != environment.expectIdentity {
+				t.Fatalf("identity resolver configured: %v", config.Identity != nil)
+			}
+			if (config.Access != nil) != environment.expectAccess {
+				t.Fatalf("access store configured: %v", config.Access != nil)
+			}
+		})
+	}
+
+	if _, _, err := configure(context.Background(), func(key string) string {
+		if key == "HEX_IDENTITY_PROVIDER" {
+			return "oauth"
+		}
+		return "none"
+	}); err == nil {
+		t.Fatal("expected an unsupported identity provider error")
+	}
+}
+
 func TestSiteOnlyConfiguration(t *testing.T) {
 	values := map[string]string{
 		"HEX_SITES_PROVIDER":    "filesystem",

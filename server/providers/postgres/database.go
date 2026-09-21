@@ -34,7 +34,7 @@ func (d *Database) Close() {
 }
 
 func (d *Database) Migrate(ctx context.Context) error {
-	const query = `
+	const documents = `
 		CREATE TABLE IF NOT EXISTS hex_documents (
 			site text NOT NULL,
 			collection text NOT NULL,
@@ -43,8 +43,19 @@ func (d *Database) Migrate(ctx context.Context) error {
 			PRIMARY KEY (site, collection, id)
 		)`
 
-	if _, err := d.pool.Exec(ctx, query); err != nil {
+	if _, err := d.pool.Exec(ctx, documents); err != nil {
 		return fmt.Errorf("create documents table: %w", err)
+	}
+
+	const siteAccess = `
+		CREATE TABLE IF NOT EXISTS hex_site_access (
+			site text PRIMARY KEY,
+			owners jsonb NOT NULL,
+			groups jsonb NOT NULL
+		)`
+
+	if _, err := d.pool.Exec(ctx, siteAccess); err != nil {
+		return fmt.Errorf("create site access table: %w", err)
 	}
 
 	return nil

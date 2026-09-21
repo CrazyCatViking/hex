@@ -107,6 +107,7 @@ func (a *App) Execute(ctx context.Context, args []string, version string) error 
 	root.AddCommand(a.updateCommand())
 	root.AddCommand(a.publishCommand(), a.deleteCommand(), a.loginCommand())
 	root.AddCommand(a.sitesCommand(), a.capabilitiesCommand(), a.skillsCommand())
+	root.AddCommand(a.accessCommand(), a.whoamiCommand())
 	err := root.ExecuteContext(ctx)
 	a.writes.mu.Lock()
 	defer a.writes.mu.Unlock()

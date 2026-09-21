@@ -33,7 +33,7 @@ type SiteMetadataReader interface {
 }
 
 func (s *Server) listSites(w http.ResponseWriter, r *http.Request) {
-	sites, err := s.discoverSites(r.Context())
+	sites, err := s.discoverSites(r.Context(), s.requestIdentity(r))
 	if err != nil {
 		writeServerError(w, err)
 		return
@@ -41,7 +41,7 @@ func (s *Server) listSites(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, sites)
 }
 
-func (s *Server) discoverSites(ctx context.Context) ([]Site, error) {
+func (s *Server) discoverSites(ctx context.Context, viewer *Identity) ([]Site, error) {
 	baseURL, err := parseSiteBaseURL(s.config.SiteBaseURL)
 	if err != nil {
 		return nil, err
@@ -58,6 +58,14 @@ func (s *Server) discoverSites(ctx context.Context) ([]Site, error) {
 	sites := make([]Site, 0, len(names))
 	for _, name := range slices.Compact(names) {
 		if !siteNamePattern.MatchString(name) {
+			continue
+		}
+
+		visible, err := s.canViewSite(ctx, viewer, name)
+		if err != nil {
+			return nil, err
+		}
+		if !visible {
 			continue
 		}
 

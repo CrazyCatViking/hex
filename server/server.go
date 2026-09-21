@@ -12,6 +12,9 @@ type Config struct {
 	SiteBaseURL    string
 	Database       Database
 	Realtime       Realtime
+	Identity       IdentityResolver
+	Access         AccessStore
+	AdminGroups    []string
 	MaxUploadBytes int64
 	Connection     *ConnectionConfig
 	CLIReleaseURL  string
@@ -47,28 +50,39 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/hex/portal.css", s.portalAsset)
 	s.mux.HandleFunc("GET /api/hex/portal.js", s.portalAsset)
 	s.mux.HandleFunc("GET /api/hex/capabilities", s.capabilities)
+	s.mux.HandleFunc("GET /api/hex/authz", s.staticAuthz)
 	if s.config.Connection != nil {
 		s.mux.HandleFunc("GET /api/hex/config", s.connectionConfig)
 		s.mux.HandleFunc("GET /api/hex/install/{os}", s.installer)
 	}
 
+	if s.config.Identity != nil {
+		s.mux.HandleFunc("GET /api/hex/me", s.me)
+	}
+
+	if s.config.Identity != nil && s.config.Access != nil {
+		s.mux.HandleFunc("GET /api/hex/sites/{site}/access", s.getSiteAccess)
+		s.mux.HandleFunc("PUT /api/hex/sites/{site}/access", s.putSiteAccess)
+		s.mux.HandleFunc("DELETE /api/hex/sites/{site}/access", s.deleteSiteAccess)
+	}
+
 	if s.config.Files != nil {
-		s.mux.HandleFunc("GET /api/sites/{site}/files", s.listFiles)
-		s.mux.HandleFunc("PUT /api/sites/{site}/files/{key...}", s.putFile)
-		s.mux.HandleFunc("GET /api/sites/{site}/files/{key...}", s.getFile)
-		s.mux.HandleFunc("DELETE /api/sites/{site}/files/{key...}", s.deleteFile)
+		s.mux.HandleFunc("GET /api/sites/{site}/files", s.siteScoped(s.listFiles))
+		s.mux.HandleFunc("PUT /api/sites/{site}/files/{key...}", s.siteScoped(s.putFile))
+		s.mux.HandleFunc("GET /api/sites/{site}/files/{key...}", s.siteScoped(s.getFile))
+		s.mux.HandleFunc("DELETE /api/sites/{site}/files/{key...}", s.siteScoped(s.deleteFile))
 	}
 
 	if s.config.Database != nil {
-		s.mux.HandleFunc("GET /api/sites/{site}/db/{collection}", s.listDocuments)
-		s.mux.HandleFunc("POST /api/sites/{site}/db/{collection}", s.createDocument)
-		s.mux.HandleFunc("PUT /api/sites/{site}/db/{collection}/{id}", s.putDocument)
-		s.mux.HandleFunc("GET /api/sites/{site}/db/{collection}/{id}", s.getDocument)
-		s.mux.HandleFunc("DELETE /api/sites/{site}/db/{collection}/{id}", s.deleteDocument)
+		s.mux.HandleFunc("GET /api/sites/{site}/db/{collection}", s.siteScoped(s.listDocuments))
+		s.mux.HandleFunc("POST /api/sites/{site}/db/{collection}", s.siteScoped(s.createDocument))
+		s.mux.HandleFunc("PUT /api/sites/{site}/db/{collection}/{id}", s.siteScoped(s.putDocument))
+		s.mux.HandleFunc("GET /api/sites/{site}/db/{collection}/{id}", s.siteScoped(s.getDocument))
+		s.mux.HandleFunc("DELETE /api/sites/{site}/db/{collection}/{id}", s.siteScoped(s.deleteDocument))
 	}
 
 	if s.config.Realtime != nil {
-		s.mux.HandleFunc("GET /api/sites/{site}/realtime/{channel}", s.websocket)
+		s.mux.HandleFunc("GET /api/sites/{site}/realtime/{channel}", s.siteScoped(s.websocket))
 	}
 
 	if s.config.Sites != nil {
@@ -81,12 +95,22 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if strings.HasPrefix(r.URL.Path, "/api/") {
 		w.Header().Set("Cache-Control", "no-store")
-		if !platformDownloadNavigation(r) && !validateRequestOrigin(w, r) {
+		if !platformDownloadNavigation(r) && !authorizationSubrequest(r) && !validateRequestOrigin(w, r) {
 			return
 		}
 	}
 
 	s.mux.ServeHTTP(w, r)
+}
+
+// authorizationSubrequest recognizes NGINX auth_request subrequests for
+// static assets. They inherit the original request's headers, so a visitor
+// navigating in from another origin carries cross-site Fetch Metadata that
+// the API's origin validation would otherwise reject. The endpoint is
+// read-only and answers with a status code alone, so exempting it is safe.
+func authorizationSubrequest(r *http.Request) bool {
+	isRead := r.Method == http.MethodGet || r.Method == http.MethodHead
+	return isRead && r.URL.Path == "/api/hex/authz"
 }
 
 func platformDownloadNavigation(r *http.Request) bool {
@@ -139,6 +163,8 @@ func (s *Server) capabilityDescription() map[string]any {
 		"database":       s.config.Database != nil,
 		"realtime":       s.config.Realtime != nil,
 		"sites":          s.config.Sites != nil,
+		"identity":       s.config.Identity != nil,
+		"accessControl":  s.config.Identity != nil && s.config.Access != nil,
 		"maxUploadBytes": s.config.MaxUploadBytes,
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	hex "github.com/crazycatviking/hex/server"
@@ -89,6 +90,7 @@ type settings struct {
 	files    string
 	database string
 	realtime string
+	identity string
 }
 
 func readSettings() (settings, error) {
@@ -99,6 +101,7 @@ func readSettings() (settings, error) {
 		files:    value("HEX_FILES_PROVIDER", "memory"),
 		database: value("HEX_DATABASE_PROVIDER", "memory"),
 		realtime: value("HEX_REALTIME_PROVIDER", "memory"),
+		identity: value("HEX_IDENTITY_PROVIDER", "static"),
 	}
 	selections := []struct {
 		name    string
@@ -109,6 +112,7 @@ func readSettings() (settings, error) {
 		{"HEX_FILES_PROVIDER", settings.files, []string{"none", "memory", "filesystem", "azureblob"}},
 		{"HEX_DATABASE_PROVIDER", settings.database, []string{"none", "memory", "postgres"}},
 		{"HEX_REALTIME_PROVIDER", settings.realtime, []string{"none", "memory"}},
+		{"HEX_IDENTITY_PROVIDER", settings.identity, []string{"none", "static"}},
 	}
 	for _, selection := range selections {
 		if !slices.Contains(selection.allowed, selection.value) {
@@ -187,7 +191,44 @@ func (e *Environment) openProviders(ctx context.Context, settings settings) erro
 	if settings.realtime == "memory" {
 		e.Config.Realtime = memory.NewRealtime()
 	}
+
+	e.configureIdentity(settings)
 	return nil
+}
+
+// configureIdentity gives local development a fixed identity so apps can use
+// the identity and access APIs without an authenticating gateway. The local
+// developer administers access entries by default; entries live in the
+// database provider (PostgreSQL) or an in-memory store otherwise.
+func (e *Environment) configureIdentity(settings settings) {
+	if settings.identity != "static" {
+		return
+	}
+
+	identity := hex.Identity{
+		Provider: "static",
+		ID:       value("HEX_IDENTITY_ID", "local-dev"),
+		Name:     value("HEX_IDENTITY_NAME", "Local Developer"),
+		Groups:   splitList(os.Getenv("HEX_IDENTITY_GROUPS")),
+	}
+	e.Config.Identity = hex.StaticIdentity{Identity: identity}
+	e.Config.AdminGroups = splitList(value("HEX_ADMIN_GROUPS", identity.ID))
+
+	if database, ok := e.Config.Database.(*postgres.Database); ok {
+		e.Config.Access = database
+	} else {
+		e.Config.Access = memory.NewAccessStore()
+	}
+}
+
+func splitList(list string) []string {
+	var values []string
+	for _, entry := range strings.Split(list, ",") {
+		if trimmed := strings.TrimSpace(entry); trimmed != "" {
+			values = append(values, trimmed)
+		}
+	}
+	return values
 }
 
 func (e *Environment) openFilesystem(directory string) (*local.Store, error) {

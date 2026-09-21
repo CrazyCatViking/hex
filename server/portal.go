@@ -60,7 +60,7 @@ func (s *Server) catalog(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) renderPortal(w http.ResponseWriter, r *http.Request, name string) {
-	view, err := s.portalView(r.Context(), r.URL.Query())
+	view, err := s.portalView(r.Context(), s.requestIdentity(r), r.URL.Query())
 	if err != nil {
 		writeServerError(w, err)
 		return
@@ -76,8 +76,8 @@ func (s *Server) renderPortal(w http.ResponseWriter, r *http.Request, name strin
 	}
 }
 
-func (s *Server) portalView(ctx context.Context, query url.Values) (portalView, error) {
-	sites, err := s.discoverSites(ctx)
+func (s *Server) portalView(ctx context.Context, viewer *Identity, query url.Values) (portalView, error) {
+	sites, err := s.discoverSites(ctx, viewer)
 	if err != nil {
 		return portalView{}, err
 	}
@@ -157,7 +157,7 @@ func (s *Server) portalAsset(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
-	sites, err := s.discoverSites(r.Context())
+	sites, err := s.discoverSites(r.Context(), s.requestIdentity(r))
 	if err != nil {
 		writeServerError(w, err)
 		return

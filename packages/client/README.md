@@ -16,9 +16,13 @@ import { createHexClient } from '@crazycatviking/hex';
 const hex = createHexClient({ site: 'my-app' });
 const tasks = hex.db.collection('tasks');
 const task = await tasks.create({ title: 'Review the report' });
+
+// Who is viewing, as resolved by the hosting gateway; null when the
+// platform has no identity resolver.
+const identity = await hex.identity();
 ```
 
-Deployed applications use same-origin `/api/` requests. The hosting gateway handles authentication.
+Deployed applications use same-origin `/api/` requests. The hosting gateway handles authentication. `identity()` is for personalization and convenience branching; authorization is enforced by the platform's site access entries, never by frontend checks.
 
 See the [Hex documentation](https://github.com/crazycatviking/hex) and the skill installed by `hex init` or `hex skills` for API examples.
 

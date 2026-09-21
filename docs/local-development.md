@@ -90,7 +90,7 @@ http://localhost:8080/api/* → NGINX → your server on 127.0.0.1:8081
 http://demo.localhost:8080/ → NGINX → .hex-dev/sites/public/sites/demo/
 ```
 
-Both listeners are loopback-only. Local requests are unauthenticated. Ctrl+C stops NGINX and the server, and removes temporary build/config files. The server's working directory is your repository; persistent local files stay in `.hex-dev/` by default. Add `.hex-dev/` and your local environment files to that repository's `.gitignore`.
+Both listeners are loopback-only. Local requests are unauthenticated; the local helper resolves every request to a fixed `Local Developer` identity (admin by default) so apps can exercise `hex.identity()` and [site access entries](access-control.md), whose local store is in-memory unless PostgreSQL is selected. Configure it with `HEX_IDENTITY_ID`, `HEX_IDENTITY_NAME`, `HEX_IDENTITY_GROUPS`, and `HEX_ADMIN_GROUPS`. Ctrl+C stops NGINX and the server, and removes temporary build/config files. The server's working directory is your repository; persistent local files stay in `.hex-dev/` by default. Add `.hex-dev/` and your local environment files to that repository's `.gitignore`.
 
 ## 3. Publish a test app
 

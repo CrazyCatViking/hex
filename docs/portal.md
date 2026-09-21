@@ -37,7 +37,7 @@ To keep an app out of the overview, set this in its source `hex.json` and republ
 }
 ```
 
-Set `discoverable` to `true` or remove it and republish to list the app. Missing metadata and omitted visibility fields retain the default visible behavior. Hidden apps are excluded server-side from the HTML catalog, `/api/sites`, and overview statistics. Their URLs and app APIs continue to work; this is a listing preference, not authorization. The CLI includes the setting in `.hex-site.json` alongside the descriptive metadata.
+Set `discoverable` to `true` or remove it and republish to list the app. Missing metadata and omitted visibility fields retain the default visible behavior. Hidden apps are excluded server-side from the HTML catalog, `/api/sites`, and overview statistics. Their URLs and app APIs continue to work; this is a listing preference, not authorization. The CLI includes the setting in `.hex-site.json` alongside the descriptive metadata. For actual authorization, restrict the site with a [site access entry](access-control.md); the catalog, discovery API and statistics then omit the site for viewers outside its groups.
 
 ## Employee onboarding
 

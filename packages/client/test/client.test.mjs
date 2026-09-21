@@ -27,6 +27,43 @@ test("client encodes keys, sends the request marker and preserves binary data", 
   assert.throws(() => hex.files.url("../secret"));
 });
 
+test("identity resolves the caller and degrades to null when unavailable", async () => {
+  const responses = new Map([
+    [
+      200,
+      new Response('{"provider":"aad","id":"user-id","groups":["sales"]}', {
+        headers: { "Content-Type": "application/json" },
+      }),
+    ],
+    [404, new Response('{"error":"not found"}', { status: 404 })],
+    [401, new Response('{"error":"not authenticated"}', { status: 401 })],
+    [500, new Response('{"error":"broken"}', { status: 500 })],
+  ]);
+  let status = 200;
+  const hex = createHexClient({
+    site: "demo",
+    fetch: async (url) => {
+      assert.equal(url, "/api/hex/me");
+      return responses.get(status).clone();
+    },
+  });
+
+  assert.deepEqual(await hex.identity(), {
+    provider: "aad",
+    id: "user-id",
+    groups: ["sales"],
+  });
+  status = 404;
+  assert.equal(await hex.identity(), null);
+  status = 401;
+  assert.equal(await hex.identity(), null);
+  status = 500;
+  await assert.rejects(
+    hex.identity(),
+    (error) => error instanceof HexError && error.status === 500,
+  );
+});
+
 test("database operations preserve envelopes and report structured failures", async () => {
   const calls = [];
   const hex = createHexClient({

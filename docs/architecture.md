@@ -42,9 +42,11 @@ Previously published public directories remain valid. Old metadata and release d
 
 ## Trust model
 
-The API does not verify identity-provider tokens or implement user authorization. The hosting layer authenticates API requests, site assets and WebSocket upgrades. In the Azure example this is Container Apps' built-in Entra authentication, with no excluded paths. Direct publishing is authorized by the storage provider separately. Local development deliberately has no authentication.
+The API does not verify identity-provider tokens. The hosting layer authenticates API requests, site assets and WebSocket upgrades. In the Azure example this is Container Apps' built-in Entra authentication, with no excluded paths. Direct publishing is authorized by the storage provider separately. Local development deliberately has no authentication.
 
-Each site has a separate browser origin, isolating browser storage. Every admitted user can still access all API namespaces under the initial trust model. A site name supplied by a client is an organizational namespace, not an authenticated app identity. See [Subdomain hosting](subdomains.md) for cookie and authentication considerations.
+An optional identity resolver reads the caller that the trusted gateway forwarded (Easy Auth headers in the Azure example) and enables per-site authorization: a server-owned access entry can limit a site's assets, APIs and discovery listing to identity-provider groups. Without that configuration, every admitted user can access all API namespaces. Site access entries protect content from viewers, not from publishers, whose storage permissions are share-wide. See [Identity and site access control](access-control.md).
+
+Each site has a separate browser origin, isolating browser storage. A site name supplied by a client is an organizational namespace, not an authenticated app identity. See [Subdomain hosting](subdomains.md) for cookie and authentication considerations.
 
 As browser request hygiene, state-changing API requests require `X-Hex-Request: 1`. Requests with a foreign `Origin` or a cross-site Fetch Metadata header are rejected. The client and CLI supply the marker automatically; it is not a credential. No CORS permissions are granted. A reverse proxy must preserve the external `Host` header for same-origin and WebSocket checks.
 
@@ -58,7 +60,10 @@ As browser request hygiene, state-changing API requests require `X-Hex-Request: 
 | GET | `/api/hex/catalog` | HTMX catalog HTML fragment; `search` and `sort` query parameters |
 | GET | `/api/hex/overview` | Platform name, visible sites, statistics, and installer availability |
 | GET | `/api/hex/install/{os}` | Platform-configured installer attachment for `macos`, `linux`, or `windows` |
-| GET | `/api/sites` | Discoverable sites as `{name,url,metadata?}`; hidden listings are omitted |
+| GET | `/api/hex/me` | The caller's resolved identity; 401 for anonymous callers, no route without a resolver |
+| GET | `/api/hex/authz` | NGINX `auth_request` endpoint for static assets; 204 or 403 for the `X-Hex-Site` header value |
+| GET/PUT/DELETE | `/api/hex/sites/{site}/access` | Owner- and admin-managed site access entry; no routes without identity and access configuration |
+| GET | `/api/sites` | Discoverable sites as `{name,url,metadata?}`; hidden and inaccessible listings are omitted |
 | GET/HEAD | `https://{site}.<site-domain>/{asset}` | NGINX static file; directory indexes use `index.html` |
 | GET | `/api/sites/{site}/files` | Array of `{key,size}` |
 | PUT | `/api/sites/{site}/files/{key}` | Raw binary body → `{key,size}` |
@@ -96,6 +101,12 @@ Providers must be safe for concurrent requests and return `hex.ErrNotFound` for 
 Documents are keyed by `(site, collection, id)`. `Put` replaces or inserts one JSON object. `List` uses exclusive `after`, ascending bytewise ID ordering, and a caller-supplied limit of 1–100. Empty results are `[]`. Random generated IDs do not encode creation time. Put timestamps in document data if the application needs them.
 
 The PostgreSQL provider exposes `Migrate`; the reference executable calls it on startup to create `hex_documents` if absent. Embedders can run migration separately and give runtime connections reduced privileges.
+
+### Identity and site access
+
+`IdentityResolver.ResolveIdentity(r)` translates what the trusted gateway forwarded into an `Identity`; nil with a nil error means anonymous, and resolver failures are treated as anonymous so access decisions fail closed. The `easyauth` provider reads Azure Easy Auth's `X-MS-CLIENT-PRINCIPAL` headers and must only run behind that gateway. `StaticIdentity` serves local development.
+
+`AccessStore` persists one `SiteAccess` entry per site and returns `hex.ErrNotFound` for unregistered sites, which stay open. The PostgreSQL provider stores entries in `hex_site_access`; the in-memory store is for development and tests. Enforcement covers the `/api/sites/{site}/` namespace, discovery, and — through NGINX `auth_request` against `/api/hex/authz` — static assets. Entries are managed through the access API by their owners and by `Config.AdminGroups` members.
 
 ### Realtime
 

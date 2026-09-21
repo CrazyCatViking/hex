@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	hex "github.com/crazycatviking/hex/server"
 	"github.com/crazycatviking/hex/server/providers/azureblob"
+	"github.com/crazycatviking/hex/server/providers/easyauth"
 	"github.com/crazycatviking/hex/server/providers/local"
 	"github.com/crazycatviking/hex/server/providers/memory"
 	"github.com/crazycatviking/hex/server/providers/postgres"
@@ -20,6 +22,7 @@ type providerSelection struct {
 	files    string
 	database string
 	realtime string
+	identity string
 }
 
 func readProviderSelection(getenv func(string) string) (providerSelection, error) {
@@ -38,6 +41,7 @@ func readProviderSelection(getenv func(string) string) (providerSelection, error
 		files:    environmentValue(getenv, "HEX_FILES_PROVIDER", filesDefault),
 		database: environmentValue(getenv, "HEX_DATABASE_PROVIDER", databaseDefault),
 		realtime: environmentValue(getenv, "HEX_REALTIME_PROVIDER", "memory"),
+		identity: environmentValue(getenv, "HEX_IDENTITY_PROVIDER", "none"),
 	}
 	settings := []struct {
 		name    string
@@ -48,6 +52,7 @@ func readProviderSelection(getenv func(string) string) (providerSelection, error
 		{"HEX_FILES_PROVIDER", selection.files, []string{"none", "memory", "filesystem", "azureblob"}},
 		{"HEX_DATABASE_PROVIDER", selection.database, []string{"none", "memory", "postgres"}},
 		{"HEX_REALTIME_PROVIDER", selection.realtime, []string{"none", "memory"}},
+		{"HEX_IDENTITY_PROVIDER", selection.identity, []string{"none", "easyauth", "static"}},
 	}
 
 	for _, setting := range settings {
@@ -150,6 +155,8 @@ func configure(ctx context.Context, getenv func(string) string) (hex.Config, fun
 		config.Realtime = memory.NewRealtime()
 	}
 
+	configureIdentity(&config, selection, getenv)
+
 	if serverURL := getenv("HEX_PUBLIC_URL"); serverURL != "" {
 		config.Connection = &hex.ConnectionConfig{
 			Name:   environmentValue(getenv, "HEX_PLATFORM_NAME", "Hex"),
@@ -165,6 +172,55 @@ func configure(ctx context.Context, getenv func(string) string) (hex.Config, fun
 
 	configured = true
 	return config, closeProviders, nil
+}
+
+// configureIdentity wires the identity resolver, admin groups and the access
+// store. Access entries need durable storage, so site access control only
+// activates alongside the PostgreSQL database provider; the ephemeral static
+// setup accepts the in-memory store for local experimentation.
+func configureIdentity(config *hex.Config, selection providerSelection, getenv func(string) string) {
+	switch selection.identity {
+	case "none":
+		return
+
+	case "easyauth":
+		config.Identity = easyauth.Resolver{}
+
+	case "static":
+		config.Identity = hex.StaticIdentity{Identity: hex.Identity{
+			Provider: "static",
+			ID:       environmentValue(getenv, "HEX_IDENTITY_ID", "local-dev"),
+			Name:     environmentValue(getenv, "HEX_IDENTITY_NAME", "Local Developer"),
+			Groups:   splitList(getenv("HEX_IDENTITY_GROUPS")),
+		}}
+	}
+	config.AdminGroups = splitList(getenv("HEX_ADMIN_GROUPS"))
+
+	switch database := config.Database.(type) {
+	case *postgres.Database:
+		config.Access = database
+
+	case *memory.Database:
+		if selection.identity == "static" {
+			config.Access = memory.NewAccessStore()
+			slog.Warn("using ephemeral in-memory site access entries")
+			return
+		}
+		slog.Warn("site access control disabled: the postgres database provider is required to store access entries")
+
+	default:
+		slog.Warn("site access control disabled: the postgres database provider is required to store access entries")
+	}
+}
+
+func splitList(value string) []string {
+	var values []string
+	for _, entry := range strings.Split(value, ",") {
+		if trimmed := strings.TrimSpace(entry); trimmed != "" {
+			values = append(values, trimmed)
+		}
+	}
+	return values
 }
 
 func openBlobStorage(getenv func(string) string) (*azureblob.Store, error) {

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,10 @@ import (
 )
 
 func (a *App) apiRequest(ctx context.Context, project Project, path string) (json.RawMessage, error) {
+	return a.apiCall(ctx, project, http.MethodGet, path, nil)
+}
+
+func (a *App) apiCall(ctx context.Context, project Project, method, path string, body any) (json.RawMessage, error) {
 	server, err := origin(project.Server, false)
 	if err != nil {
 		return nil, err
@@ -29,11 +34,22 @@ func (a *App) apiRequest(ctx context.Context, project Project, path string) (jso
 		}
 		token = strings.TrimSpace(string(output))
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, server.String()+path, nil)
+	var payload io.Reader
+	if body != nil {
+		data, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		payload = bytes.NewReader(data)
+	}
+	request, err := http.NewRequestWithContext(ctx, method, server.String()+path, payload)
 	if err != nil {
 		return nil, err
 	}
 	request.Header.Set("X-Hex-Request", "1")
+	if body != nil {
+		request.Header.Set("Content-Type", "application/json")
+	}
 	if token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -45,7 +61,13 @@ func (a *App) apiRequest(ctx context.Context, project Project, path string) (jso
 	if requiresBrowser(response.StatusCode) {
 		return nil, fmt.Errorf("gateway access requires authentication or permission (HTTP %d); use the browser or HEX_TOKEN. hex login authenticates storage only", response.StatusCode)
 	}
+	if response.StatusCode == http.StatusNoContent {
+		return nil, nil
+	}
 	if response.StatusCode != http.StatusOK {
+		if message := apiErrorMessage(response); message != "" {
+			return nil, fmt.Errorf("Hex API returned HTTP %d: %s", response.StatusCode, message)
+		}
 		return nil, fmt.Errorf("Hex API returned HTTP %d", response.StatusCode)
 	}
 	if !strings.Contains(response.Header.Get("Content-Type"), "application/json") {
@@ -59,6 +81,20 @@ func (a *App) apiRequest(ctx context.Context, project Project, path string) (jso
 		return nil, errors.New("invalid JSON response from Hex")
 	}
 	return data, nil
+}
+
+func apiErrorMessage(response *http.Response) string {
+	if !strings.Contains(response.Header.Get("Content-Type"), "application/json") {
+		return ""
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	data, err := io.ReadAll(io.LimitReader(response.Body, 8<<10))
+	if err != nil || json.Unmarshal(data, &body) != nil {
+		return ""
+	}
+	return body.Error
 }
 
 func (a *App) sitesCommand() *cobra.Command {

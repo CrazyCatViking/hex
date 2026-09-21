@@ -91,3 +91,95 @@ func TestNginxLocalRuntimePaths(t *testing.T) {
 		t.Fatalf("buffered upload failed: status %d, received %d bytes", response.StatusCode, len(data))
 	}
 }
+
+func TestNginxStaticAssetAuthorization(t *testing.T) {
+	binary := os.Getenv("NGINX_BIN")
+	if binary == "" {
+		binary = "nginx"
+	}
+	if _, err := exec.LookPath(binary); err != nil {
+		t.Skipf("NGINX unavailable: %v", err)
+	}
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/hex/authz" {
+			t.Errorf("unexpected backend path: %s", r.URL.Path)
+			http.Error(w, "unexpected path", http.StatusInternalServerError)
+			return
+		}
+		if r.Header.Get("X-Hex-Site") == "secret" {
+			http.Error(w, "restricted", http.StatusForbidden)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer backend.Close()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	for _, site := range []string{"open", "secret"} {
+		siteDirectory := filepath.Join(directory, "sites", "public", "sites", site)
+		if err := os.MkdirAll(siteDirectory, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(siteDirectory, "index.html"), []byte(site), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	app, err := New(strings.NewReader(""), io.Discard, os.Stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	settings := devSettings{
+		Port: port, APIPort: backend.Listener.Addr().(*net.TCPAddr).Port,
+		DataDirectory: directory,
+	}
+	nginx, err := app.startNginx(ctx, settings, directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := nginx.stop(); err != nil {
+			t.Error(err)
+		}
+	}()
+	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
+	if err := waitForHTTP(ctx, baseURL+"/healthz", nginx); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		host string
+		path string
+		want int
+	}{
+		{"open.localhost", "/", http.StatusOK},
+		{"secret.localhost", "/", http.StatusForbidden},
+		{"secret.localhost", "/index.html", http.StatusForbidden},
+		{"open.localhost", "/.hex/authz", http.StatusNotFound},
+	}
+	for _, testCase := range cases {
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+testCase.path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Host = testCase.host
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := response.Body.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if response.StatusCode != testCase.want {
+			t.Fatalf("%s%s: got %d, want %d", testCase.host, testCase.path, response.StatusCode, testCase.want)
+		}
+	}
+}

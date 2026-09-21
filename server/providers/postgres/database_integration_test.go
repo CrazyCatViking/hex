@@ -75,3 +75,60 @@ func TestPostgresDatabase(t *testing.T) {
 		t.Fatalf("expected not found, got %v", err)
 	}
 }
+
+func TestPostgresSiteAccess(t *testing.T) {
+	connection := os.Getenv("HEX_TEST_POSTGRES_URL")
+	if connection == "" {
+		t.Skip("set HEX_TEST_POSTGRES_URL to run against PostgreSQL")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	database, err := New(ctx, connection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := database.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	site := "test-" + rand.Text()
+	defer func() {
+		cleanup, stop := context.WithTimeout(context.Background(), 10*time.Second)
+		defer stop()
+		if _, err := database.pool.Exec(cleanup, "DELETE FROM hex_site_access WHERE site=$1", site); err != nil {
+			t.Error(err)
+		}
+	}()
+
+	if _, err := database.GetSiteAccess(ctx, site); !errors.Is(err, hex.ErrNotFound) {
+		t.Fatalf("expected not found, got %v", err)
+	}
+	entry := hex.SiteAccess{Owners: []string{"owner-id"}, Groups: []string{"sales", "ops"}}
+	if err := database.PutSiteAccess(ctx, site, entry); err != nil {
+		t.Fatal(err)
+	}
+	replacement := hex.SiteAccess{Owners: []string{"owner-id", "backup-id"}, Groups: []string{}}
+	if err := database.PutSiteAccess(ctx, site, replacement); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := New(ctx, connection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	access, err := reopened.GetSiteAccess(ctx, site)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(access.Owners) != 2 || access.Owners[1] != "backup-id" || len(access.Groups) != 0 {
+		t.Fatalf("unexpected access entry: %+v", access)
+	}
+
+	if err := database.DeleteSiteAccess(ctx, site); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.DeleteSiteAccess(ctx, site); !errors.Is(err, hex.ErrNotFound) {
+		t.Fatalf("expected not found, got %v", err)
+	}
+}

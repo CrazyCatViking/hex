@@ -76,6 +76,8 @@ The hosting module creates the Container App with **internal ingress**, creates 
 
 Add the output `redirect_uri` as a Web redirect URI to the Entra app registration. Configure enterprise-application assignments if access should be restricted to particular employees/groups. There are no authentication exclusions. The Go listener is loopback-only. Storage public network access is disabled; both NGINX and Go get read-only SMB mounts when sites are enabled.
 
+The server resolves each caller from the gateway's Easy Auth headers (`HEX_IDENTITY_PROVIDER=easyauth`), which enables `/api/hex/me` and, together with the database capability, [per-site access entries](../../../../docs/access-control.md). Set `admin_group_ids` to the Entra group object IDs that administer access entries. Group claims are not emitted by default: on the app registration either set `groupMembershipClaims` to `ApplicationGroup` and assign the relevant groups to the enterprise application (assigned groups avoid claims overage), or define app roles and use their values in access entries. Prefer a dedicated app registration for Hex before changing claims configuration shared with other applications.
+
 ## Direct publishing and site domains
 
 The example advertises connection settings at `/api/hex/config` behind the existing Entra authentication. Users run `hex setup <gateway-url>`; if authentication blocks the direct download, they download through the browser and import the file. Set `platform_url` if users connect through a custom gateway hostname rather than the generated Azure URL. It must match the setup origin. No custom Hex CLI Entra registration is introduced. See [Setup](../../../../docs/setup.md).

@@ -34,6 +34,8 @@ type Capabilities struct {
 	Files          bool  `json:"files"`
 	Database       bool  `json:"database"`
 	Realtime       bool  `json:"realtime"`
+	Identity       bool  `json:"identity,omitempty"`
+	AccessControl  bool  `json:"accessControl,omitempty"`
 	MaxUploadBytes int64 `json:"maxUploadBytes"`
 }
 

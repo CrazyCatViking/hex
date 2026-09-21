@@ -81,9 +81,11 @@ locals {
       HEX_FILES_PROVIDER    = "none"
       HEX_DATABASE_PROVIDER = var.capabilities.database == "none" ? "none" : "postgres"
       HEX_REALTIME_PROVIDER = var.capabilities.realtime ? "memory" : "none"
+      HEX_IDENTITY_PROVIDER = "easyauth"
       AZURE_CLIENT_ID       = azapi_resource.identity.output.properties.clientId
       HEX_PLATFORM_NAME     = var.name
     },
+    length(var.admin_group_ids) == 0 ? {} : { HEX_ADMIN_GROUPS = join(",", var.admin_group_ids) },
     var.site_base_url == null ? {} : { HEX_SITE_BASE_URL = var.site_base_url },
     var.platform_url == null ? {} : { HEX_PUBLIC_URL = var.platform_url },
     var.cli_release_url == null ? {} : { HEX_CLI_RELEASE_URL = var.cli_release_url },

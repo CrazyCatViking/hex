@@ -40,6 +40,15 @@ http {
             return 404;
         }
 
+        location = /.hex/authz {
+            internal;
+            proxy_pass http://127.0.0.1:8081/api/hex/authz;
+            proxy_pass_request_body off;
+            proxy_set_header Content-Length "";
+            proxy_set_header Host $http_host;
+            proxy_set_header X-Hex-Site $hex_site;
+        }
+
         location / {
             error_page 418 = @hex_platform;
             if ($hex_platform = 1) {
@@ -48,6 +57,7 @@ http {
             if ($hex_site = "") {
                 return 404;
             }
+            auth_request /.hex/authz;
             root /mnt/sites/public/sites/$hex_site;
             index index.html;
             autoindex off;

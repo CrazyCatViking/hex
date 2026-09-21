@@ -32,7 +32,7 @@ The CLI uses the OS certificate trust store for HTTPS. On Unix, local processes 
 
 Remove the old global npm CLI installation/link if it shadows the Go executable, then put the new executable on PATH. `hex --version` reports the binary version (development builds report `dev`).
 
-Commands include `setup`, `login`, `init`, `publish`, `delete`, `sites`, `capabilities`, `skills`, `dev`, and `update`. Existing `hex.json`, `hex.dev.json`, and version-1 profile/connection files can be reused, including explicit directory settings and pinned profiles. Without a directory setting, publishing detects dist/, public/, or a plain site in the project root. Explicit settings take precedence. Remove an old `directory: "dist"` setting when converting a project to a plain site. Commands resolve the default platform profile unless one is explicitly selected.
+Commands include `setup`, `login`, `init`, `publish`, `delete`, `sites`, `capabilities`, `skills`, `dev`, `update`, `whoami`, and `access`. `hex whoami` shows the identity the platform resolves for the caller, and `hex access show|set|clear <site>` manages a site's [access entry](access-control.md); both use the same API authentication as `sites` (`HEX_TOKEN`, or `resource` with a signed-in Azure CLI). Existing `hex.json`, `hex.dev.json`, and version-1 profile/connection files can be reused, including explicit directory settings and pinned profiles. Without a directory setting, publishing detects dist/, public/, or a plain site in the project root. Explicit settings take precedence. Remove an old `directory: "dist"` setting when converting a project to a plain site. Commands resolve the default platform profile unless one is explicitly selected.
 
 ## Updating an installed CLI
 

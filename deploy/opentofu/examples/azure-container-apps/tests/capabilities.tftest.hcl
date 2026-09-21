@@ -83,6 +83,30 @@ run "sites_only" {
     condition     = length(local.server_secrets) == 0
     error_message = "Site-only hosting must not carry database credentials."
   }
+
+  assert {
+    condition = (
+      local.server_environment.HEX_IDENTITY_PROVIDER == "easyauth" &&
+      !contains(keys(local.server_environment), "HEX_ADMIN_GROUPS")
+    )
+    error_message = "The gateway authenticates with Easy Auth, so the server must resolve identities from it; admin groups stay unset unless configured."
+  }
+}
+
+run "admin_groups" {
+  command = plan
+
+  variables {
+    admin_group_ids = [
+      "00000000-0000-0000-0000-00000000000a",
+      "00000000-0000-0000-0000-00000000000b",
+    ]
+  }
+
+  assert {
+    condition     = local.server_environment.HEX_ADMIN_GROUPS == "00000000-0000-0000-0000-00000000000a,00000000-0000-0000-0000-00000000000b"
+    error_message = "Configured admin groups must reach the server as a comma-separated list."
+  }
 }
 
 run "full_platform" {

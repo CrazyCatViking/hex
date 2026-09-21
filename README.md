@@ -9,7 +9,7 @@ This is the [github.com/crazycatviking/hex](https://github.com/crazycatviking/he
 | Path | Purpose |
 | --- | --- |
 | `server/` | Embeddable Go HTTP API framework |
-| `server/providers/` | Local storage, Azure Blob Storage, PostgreSQL and in-memory providers |
+| `server/providers/` | Local storage, Azure Blob Storage, PostgreSQL, in-memory and Easy Auth identity providers |
 | `server/dev/` | Optional local provider adapter for consuming Go applications |
 | `cmd/hex-server/` | Configurable reference server executable |
 | `packages/client/` | `@crazycatviking/hex`, a dependency-free browser JS/TS client |
@@ -95,6 +95,10 @@ import { createHexClient } from '@crazycatviking/hex';
 const hex = createHexClient({ site: 'my-app' });
 const capabilities = await hex.capabilities();
 
+// Who is viewing, as resolved by the hosting gateway; null when the
+// deployment has no identity resolver.
+const identity = await hex.identity();
+
 await hex.files.upload('notes.txt', new Blob(['Hello']));
 const file = await hex.files.download('notes.txt');
 const files = await hex.files.list();
@@ -175,6 +179,7 @@ The interfaces are defined in `server/storage.go`:
 - `ObjectStore`: uploaded application objects, with writes, reads, prefix listing and deletion. This is separate from publishing; Azure Blob supplies app upload storage in the example.
 - `Database`: site-scoped JSON documents with keyset pagination. The PostgreSQL provider works with Azure Database for PostgreSQL or another PostgreSQL installation.
 - `Realtime`: subscriptions and JSON broadcasts, allowing a future distributed broker implementation without changing the browser API.
+- `IdentityResolver` and `AccessStore` (in `server/identity.go` and `server/access.go`): optional gateway-forwarded caller identity and per-site access entries. See [Identity and site access control](docs/access-control.md).
 
 See [the architecture and API contract](docs/architecture.md) for provider semantics and [the hosting contract](docs/hosting.md) for platform independence and reference-server configuration.
 
@@ -221,9 +226,10 @@ The end-to-end test requires NGINX. It starts Go and NGINX, publishes directly t
 
 ## Initial scope
 
-- Sites use separate origins such as `https://demo.hex.example.com/`, isolating localStorage, sessionStorage and IndexedDB. The former shared `/sites/<name>/` web routes are gone. Shared backend APIs still follow the initial all-authenticated-users trust model; subdomains are not per-site data authorization. See [Subdomain hosting](docs/subdomains.md).
+- Sites use separate origins such as `https://demo.hex.example.com/`, isolating localStorage, sessionStorage and IndexedDB. The former shared `/sites/<name>/` web routes are gone. Subdomains are not per-site data authorization. See [Subdomain hosting](docs/subdomains.md).
+- Sites are open to every authenticated user unless an owner restricts them to identity-provider groups with a [site access entry](docs/access-control.md), which then covers the site's assets, APIs and discovery listing. Apps read the viewer through `hex.identity()`. Access entries restrict viewers, not publishers: publishing permissions remain storage-wide.
 - The in-process realtime provider requires one backend replica. Messages are transient; clients handle reconnects and refresh state themselves.
 - Documents are JSON objects, at most 1 MiB. `set` replaces the entire document. Lists are ordered by ID, with up to 100 results per page. There is no query language or automatic database-change feed.
 - Application file uploads through the API default to 32 MiB and are buffered in memory. Direct site publishing is not subject to that API limit. File and site listings are currently unpaginated.
 - Publishing mirrors one site's directory and deletes obsolete files. It is not a transactional whole-site replacement. Local publishing replaces files atomically and writes `index.html` last; Azure Files synchronization follows AzCopy's ordering and semantics. Concurrent publishers are not coordinated. Republish after an interrupted synchronization.
-- No custom integrations, identity API, application permissions, code generation or AI proxy is included in this version.
+- No custom integrations, per-site publishing authorization, code generation or AI proxy is included in this version.

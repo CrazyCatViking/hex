@@ -92,7 +92,7 @@ Anything that places files in that layout can publish a site. Metadata is option
 
 Add optional `title`, `description`, and `author` strings to the source `hex.json`. The CLI publishes those fields and a generated UTC `publishedAt` timestamp in `.hex-site.json`. It leaves the source configuration and build output untouched, and never copies platform settings, storage destinations, or local paths into metadata. The generated file is limited to 64 KiB.
 
-Set `"discoverable": false` in hex.json and republish to exclude a site from the company overview, statistics, and discovery API. Set it to true or remove it and republish to list the site. The default is visible, including older sites without metadata. Its URL and backend APIs remain accessible; visibility is not an authorization boundary.
+Set `"discoverable": false` in hex.json and republish to exclude a site from the company overview, statistics, and discovery API. Set it to true or remove it and republish to list the site. The default is visible, including older sites without metadata. Its URL and backend APIs remain accessible; visibility is not an authorization boundary. To restrict who can view a site, use a [site access entry](access-control.md) — a server-owned record managed through `hex access`, never through published files. Publishing permissions themselves remain storage-wide: any publisher can overwrite any site, so access entries protect content from viewers, not from publishers.
 
 ```json
 {

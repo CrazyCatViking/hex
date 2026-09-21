@@ -102,6 +102,12 @@ variable "site_base_url" {
   }
 }
 
+variable "admin_group_ids" {
+  description = "Entra group object IDs whose members administer every site access entry. Site access control also requires the database capability for durable entries."
+  type        = list(string)
+  default     = []
+}
+
 variable "custom_domains" {
   type = list(object({
     name           = string
