@@ -123,6 +123,9 @@ func (a *App) readProject(optional bool) (Project, error) {
 		if project.Publishing == nil {
 			project.Publishing = connection.Publishing
 		}
+		if project.Resource == "" {
+			project.Resource = connection.Resource
+		}
 		project.Capabilities = connection.Capabilities
 	}
 	return project, nil
@@ -146,6 +149,7 @@ func (a *App) commandConfig(profile string, needsProject bool) (Project, error) 
 		project.Server = connection.Server
 		project.SiteBaseURL = connection.SiteBaseURL
 		project.Publishing = connection.Publishing
+		project.Resource = connection.Resource
 		project.Capabilities = connection.Capabilities
 	}
 	return project, nil

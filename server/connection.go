@@ -6,12 +6,14 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
 type ConnectionConfig struct {
 	Name       string
 	Server     string
+	Resource   string
 	Publishing *PublishingConfig
 }
 
@@ -27,6 +29,7 @@ type connectionDocument struct {
 	Server        string            `json:"server"`
 	SiteBaseURL   string            `json:"siteBaseURL"`
 	CLIReleaseURL string            `json:"cliReleaseURL,omitempty"`
+	Resource      string            `json:"resource,omitempty"`
 	Publishing    *PublishingConfig `json:"publishing,omitempty"`
 	Capabilities  map[string]any    `json:"capabilities"`
 }
@@ -59,14 +62,20 @@ func (s *Server) connectionSettings() (connectionDocument, error) {
 		Server:        connection.Server,
 		SiteBaseURL:   s.config.SiteBaseURL,
 		CLIReleaseURL: s.config.CLIReleaseURL,
+		Resource:      connection.Resource,
 		Publishing:    connection.Publishing,
 		Capabilities:  s.capabilityDescription(),
 	}, nil
 }
 
+var apiResourcePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9:/._-]{0,255}$`)
+
 func validateConnection(connection *ConnectionConfig, siteBaseURL string) error {
 	if strings.TrimSpace(connection.Name) == "" {
 		return fmt.Errorf("platform name is required")
+	}
+	if connection.Resource != "" && !apiResourcePattern.MatchString(connection.Resource) {
+		return fmt.Errorf("invalid API resource identifier")
 	}
 	server, err := connectionOrigin(connection.Server)
 	if err != nil {

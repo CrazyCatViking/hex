@@ -20,6 +20,8 @@ const connectionPath = "/api/hex/config"
 const maxConfigBytes = 64 * 1024
 
 var siteNamePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
+
+var apiResourcePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9:/._-]{0,255}$`)
 var profileNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{0,127}$`)
 
 type Publishing struct {
@@ -67,6 +69,7 @@ type Connection struct {
 	Server        string        `json:"server"`
 	SiteBaseURL   string        `json:"siteBaseURL"`
 	CLIReleaseURL string        `json:"cliReleaseURL,omitempty"`
+	Resource      string        `json:"resource,omitempty"`
 	Publishing    *Publishing   `json:"publishing,omitempty"`
 	Capabilities  *Capabilities `json:"capabilities"`
 }
@@ -164,6 +167,9 @@ func parseConnection(data []byte, expectedServer string) (Connection, error) {
 	}
 	if connection.Version != 1 || strings.TrimSpace(connection.Name) == "" || strings.ContainsFunc(connection.Name, unicode.IsControl) || connection.Capabilities == nil {
 		return connection, errors.New("connection file requires version 1, a printable name and capabilities")
+	}
+	if connection.Resource != "" && !apiResourcePattern.MatchString(connection.Resource) {
+		return connection, errors.New("invalid API resource identifier in connection file")
 	}
 	server, err := origin(connection.Server, true)
 	if err != nil {
