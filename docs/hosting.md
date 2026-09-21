@@ -41,6 +41,7 @@ Other reference executable settings:
 | `HEX_PUBLIC_URL` | Enables the reference executable's connection-settings download and declares its canonical gateway origin. |
 | `HEX_PLATFORM_NAME` | Human-readable connection name, default `Hex` (`Local Hex` in the local helper). |
 | `HEX_PUBLISH_URL` | Non-secret Azure Files publishing URL advertised in connection settings. |
+| `HEX_API_RESOURCE` | Non-secret Entra resource identifier (for example `api://<client-id>`) advertised in connection settings; profiles use it so `az account get-access-token` can authenticate CLI API commands. |
 | `HEX_FILES_DIR` | Filesystem root for local uploads; defaults to `.hex-data/files`. |
 | `AZURE_BLOB_ENDPOINT` | Blob service endpoint for the Azure upload provider. |
 | `AZURE_BLOB_CONTAINER` | Pre-existing container, default `uploads`. |

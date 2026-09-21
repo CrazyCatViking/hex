@@ -146,13 +146,27 @@ func TestProtectedSetupAndDroppedFile(t *testing.T) {
 
 func TestConnectionValidation(t *testing.T) {
 	connection := localConnection("http://localhost:8080", t.TempDir())
+	connection.Resource = "api://00000000-0000-0000-0000-000000000001"
 	data, err := json.Marshal(connection)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := parseConnection(data, "http://127.0.0.1:8080"); err != nil {
+	parsed, err := parseConnection(data, "http://127.0.0.1:8080")
+	if err != nil {
 		t.Fatal(err)
 	}
+	if parsed.Resource != connection.Resource {
+		t.Fatalf("resource not preserved: %+v", parsed)
+	}
+	connection.Resource = "api://bad resource"
+	data, err = json.Marshal(connection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := parseConnection(data, ""); err == nil {
+		t.Fatal("invalid API resource accepted")
+	}
+	connection.Resource = ""
 	if _, err := parseConnection(data, "https://other.example"); err == nil {
 		t.Fatal("wrong-platform file accepted")
 	}

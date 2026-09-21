@@ -45,7 +45,7 @@ hex access set my-app --owner <your-object-id> --group <group-object-id>
 hex access clear my-app
 ```
 
-`hex access set` replaces the whole entry. The resulting entry must keep the caller able to manage it (as an owner, or as an admin), so you cannot lock yourself out by accident. The first `set` for an unclaimed name registers it; claim your site's entry when you first publish. The CLI authenticates these calls like other API commands: `HEX_TOKEN`, or the profile's `resource` with a signed-in Azure CLI.
+`hex access set` replaces the whole entry. The resulting entry must keep the caller able to manage it (as an owner, or as an admin), so you cannot lock yourself out by accident. The first `set` for an unclaimed name registers it; claim your site's entry when you first publish. The CLI authenticates these calls like other API commands: `HEX_TOKEN`, or a `resource` with a signed-in Azure CLI. A platform that sets `HEX_API_RESOURCE` advertises the resource in its connection settings, so installer-created profiles authenticate without further configuration; the app registration must expose that identifier as an API scope with the Azure CLI client pre-authorized.
 
 The equivalent HTTP routes are `GET`/`PUT`/`DELETE /api/hex/sites/{site}/access`. Reading an entry requires owner or admin rights; group values are matched case-insensitively.
 

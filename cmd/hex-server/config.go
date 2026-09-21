@@ -159,8 +159,9 @@ func configure(ctx context.Context, getenv func(string) string) (hex.Config, fun
 
 	if serverURL := getenv("HEX_PUBLIC_URL"); serverURL != "" {
 		config.Connection = &hex.ConnectionConfig{
-			Name:   environmentValue(getenv, "HEX_PLATFORM_NAME", "Hex"),
-			Server: serverURL,
+			Name:     environmentValue(getenv, "HEX_PLATFORM_NAME", "Hex"),
+			Server:   serverURL,
+			Resource: getenv("HEX_API_RESOURCE"),
 		}
 		if publishingURL := getenv("HEX_PUBLISH_URL"); publishingURL != "" {
 			config.Connection.Publishing = &hex.PublishingConfig{

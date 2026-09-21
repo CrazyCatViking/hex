@@ -57,8 +57,9 @@ func (e *Environment) configureConnection(settings settings) error {
 		serverURL = "http://localhost:" + port
 	}
 	e.Config.Connection = &hex.ConnectionConfig{
-		Name:   value("HEX_PLATFORM_NAME", "Local Hex"),
-		Server: serverURL,
+		Name:     value("HEX_PLATFORM_NAME", "Local Hex"),
+		Server:   serverURL,
+		Resource: os.Getenv("HEX_API_RESOURCE"),
 	}
 	if settings.sites == "filesystem" {
 		directory := value("HEX_SITES_DIR", filepath.Join(settings.dataDir, "sites"))
