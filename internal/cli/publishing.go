@@ -315,7 +315,10 @@ func uploadToAzureFiles(ctx context.Context, target, path string) error {
 		return errors.New("the platform returned an invalid storage upload URL")
 	}
 
-	client, err := file.NewClientWithNoCredential(target, nil)
+	// Azure Files requires the backup request intent for user delegation SAS
+	// requests, as for other Entra-authorized ones.
+	intent := file.ShareTokenIntentBackup
+	client, err := file.NewClientWithNoCredential(target, &file.ClientOptions{FileRequestIntent: &intent})
 	if err != nil {
 		return err
 	}
