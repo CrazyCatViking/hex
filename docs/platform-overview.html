@@ -295,17 +295,17 @@
 
         <h3>Static hosting and publishing</h3>
         <pre><code>Publishing:
-hex publish → configured provider → site storage (no Hex API calls)
+hex publish → Hex API (owner check, upload targets) → site storage → Hex API (complete)
 
 Viewing:
 Browser → site subdomain → NGINX → that site's files directly</code></pre>
         <p>
-          The CLI synchronizes directly to a local directory or Azure Files
-          using AzCopy. It does not request credentials, upload, register, or
-          notify completion through Hex. The server only enumerates directories
-          containing a root index.html and reads optional descriptive metadata
-          from <code>.hex-site.json</code>. Folder synchronization is not
-          transactional.
+          The server checks that the caller owns the site, returns upload
+          targets for changed files (per-file SAS URLs on Azure Files), and
+          records the publication once every file has arrived. Discovery
+          enumerates directories containing a root index.html and reads
+          optional descriptive metadata from <code>.hex-site.json</code>.
+          Publications replace files in place and are not transactional.
         </p>
         <p>
           Each site has its own origin, such as
@@ -368,8 +368,8 @@ hex init my-app</code></pre>
           Initialization creates configuration and agent skills. Plain sites
           can put <code>index.html</code> and assets in the project root or
           <code>public</code>. Bundled apps use their build output, normally
-          <code>dist</code>. Hex prepares Azure publishing and sign-in
-          automatically when needed. Publish from the app directory:
+          <code>dist</code>. On company platforms Hex opens the browser to sign in
+          when needed. Publish from the app directory:
         </p>
         <pre><code>hex publish</code></pre>
         <p>
@@ -395,8 +395,9 @@ hex init my-app</code></pre>
         <p>
           For hosted subdomains, configure DNS, TLS bindings and Entra redirect
           URIs in the hosting layer. These are independent of file publishing.
-          Direct Azure Files publishing requires the publisher's own storage
-          authorization and network access to the private endpoint.
+          Publishers need no storage role: the platform signs per-file upload
+          URLs for site owners, which requires network access to the storage
+          account.
         </p>
       </section>
 

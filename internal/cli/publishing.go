@@ -2,18 +2,22 @@ package cli
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
+	"sync"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azfile/file"
 	hex "github.com/crazycatviking/hex/server"
 	"github.com/spf13/cobra"
 )
@@ -28,22 +32,23 @@ type sourceDirectory struct {
 	Files     []sourceFile
 }
 
-func validatePublishing(settings Publishing) error {
-	switch settings.Provider {
-	case "filesystem":
-		if settings.Root == "" || settings.URL != "" {
-			return errors.New("filesystem publishing requires a root and no URL")
-		}
-	case "azure-files":
-		parsed, err := url.Parse(settings.URL)
-		if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Path == "" || parsed.Path == "/" || settings.Root != "" {
-			return errors.New("Azure Files publishing requires an HTTPS share URL without credentials, query parameters or a filesystem root")
-		}
-	default:
-		return errors.New("configure publishing.provider as filesystem or azure-files; publishing does not use the Hex API")
-	}
-	return nil
+type publishRequest struct {
+	Files    []hex.SiteFile    `json:"files"`
+	Metadata *hex.SiteMetadata `json:"metadata,omitempty"`
+	Access   json.RawMessage   `json:"access,omitempty"`
 }
+
+type publishPlan struct {
+	Uploads   []hex.UploadTarget `json:"uploads"`
+	Unchanged int                `json:"unchanged"`
+}
+
+type publishResult struct {
+	URL     string `json:"url"`
+	Deleted int    `json:"deleted"`
+}
+
+const uploadConcurrency = 4
 
 func containsPath(parent, child string) bool {
 	relative, err := filepath.Rel(parent, child)
@@ -115,230 +120,234 @@ func readSource(project, directory string) (sourceDirectory, error) {
 		return source, errors.New("publish directory must contain index.html")
 	}
 	slices.SortFunc(source.Files, func(left, right sourceFile) int {
-		if left.Key == right.Key {
-			return 0
-		}
-		if left.Key == "index.html" {
-			return 1
-		}
-		if right.Key == "index.html" {
-			return -1
-		}
 		return strings.Compare(left.Key, right.Key)
 	})
 	return source, nil
 }
 
-func filesystemDestination(project, root, name string, create bool) (string, error) {
-	if err := validateSiteName(name); err != nil {
-		return "", err
-	}
-	root = resolvePath(project, root)
-	if create {
-		if err := os.MkdirAll(root, 0755); err != nil {
-			return "", err
-		}
-	}
-	root, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		return "", err
-	}
-	destination := filepath.Join(root, name)
-	info, err := os.Lstat(destination)
-	if create && errors.Is(err, fs.ErrNotExist) {
-		return destination, nil
-	}
-	if err != nil {
-		return "", err
-	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return "", errors.New("site destination must be a real directory")
-	}
-	return destination, nil
-}
-
-type destinationEntry struct {
-	Key       string
-	Directory bool
-}
-
-func destinationEntries(directory string) ([]destinationEntry, error) {
-	var entries []destinationEntry
-	err := filepath.WalkDir(directory, func(path string, entry fs.DirEntry, walkError error) error {
-		if walkError != nil {
-			return walkError
-		}
-		if path == directory {
-			return nil
-		}
-		if entry.Type()&os.ModeSymlink != 0 {
-			return fmt.Errorf("publishing destination contains a symlink: %s", path)
-		}
-		if !entry.IsDir() && !entry.Type().IsRegular() {
-			return fmt.Errorf("unsupported destination entry: %s", path)
-		}
-		key, err := filepath.Rel(directory, path)
+// manifest describes every source file by size and MD5, which lets the
+// platform skip files that are already published.
+func manifest(source sourceDirectory) ([]hex.SiteFile, error) {
+	files := make([]hex.SiteFile, 0, len(source.Files))
+	for _, entry := range source.Files {
+		size, digest, err := fileDigest(entry.Path)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		entries = append(entries, destinationEntry{Key: key, Directory: entry.IsDir()})
-		return nil
-	})
-	return entries, err
+		files = append(files, hex.SiteFile{Path: entry.Key, Size: size, MD5: digest})
+	}
+	return files, nil
 }
 
-func copyFile(source, destination string) (result error) {
-	if err := os.MkdirAll(filepath.Dir(destination), 0755); err != nil {
-		return err
-	}
-	input, err := os.Open(source)
+func fileDigest(path string) (int64, string, error) {
+	input, err := os.Open(path)
 	if err != nil {
-		return err
+		return 0, "", err
 	}
-	defer func() { result = errors.Join(result, input.Close()) }()
-	output, err := os.CreateTemp(filepath.Dir(destination), ".hex-*")
+	defer input.Close()
+
+	hash := md5.New()
+	size, err := io.Copy(hash, input)
 	if err != nil {
-		return err
+		return 0, "", fmt.Errorf("read %s: %w", path, err)
 	}
-	temporary := output.Name()
-	defer func() {
-		if err := os.Remove(temporary); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			result = errors.Join(result, err)
-		}
-	}()
-	_, copyError := io.Copy(output, input)
-	permissionError := output.Chmod(0644)
-	if err := errors.Join(copyError, permissionError, output.Close()); err != nil {
-		return err
-	}
-	return os.Rename(temporary, destination)
+	return size, base64.StdEncoding.EncodeToString(hash.Sum(nil)), nil
 }
 
-func syncFilesystem(ctx context.Context, source sourceDirectory, destination string) error {
-	if containsPath(source.Directory, destination) || containsPath(destination, source.Directory) {
-		return errors.New("source and destination directories must not overlap")
-	}
-	if err := os.MkdirAll(destination, 0755); err != nil {
-		return err
-	}
-	previous, err := destinationEntries(destination)
-	if err != nil {
-		return err
-	}
-	files := make(map[string]bool)
-	directories := make(map[string]bool)
-	for _, file := range source.Files {
-		key := filepath.FromSlash(file.Key)
-		files[key] = true
-		for parent := filepath.Dir(key); parent != "."; parent = filepath.Dir(parent) {
-			directories[parent] = true
-		}
-	}
-	for i := len(previous) - 1; i >= 0; i-- {
-		entry := previous[i]
-		keep := files[entry.Key]
-		if entry.Directory {
-			keep = directories[entry.Key]
-		}
-		if !keep {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			if err := os.RemoveAll(filepath.Join(destination, entry.Key)); err != nil {
-				return err
-			}
-		}
-	}
-	for _, file := range source.Files {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if err := copyFile(file.Path, filepath.Join(destination, filepath.FromSlash(file.Key))); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func azureSiteURL(settings Publishing, name string) (string, error) {
-	if err := validatePublishing(settings); err != nil {
-		return "", err
-	}
-	if err := validateSiteName(name); err != nil {
-		return "", err
-	}
-	destination, err := url.Parse(settings.URL)
-	if err != nil {
-		return "", err
-	}
-	destination.Path = strings.TrimRight(destination.Path, "/") + "/" + name
-	destination.RawPath = ""
-	destination.RawQuery = strings.TrimPrefix(os.Getenv("HEX_PUBLISH_SAS"), "?")
-	return destination.String(), nil
-}
-
-func (a *App) publish(ctx context.Context, project Project, name string) error {
-	if project.Publishing == nil {
-		return errors.New("configure a publishing provider with hex setup or in hex.json")
-	}
-	if err := validatePublishing(*project.Publishing); err != nil {
-		return err
-	}
+// publish asks the platform for upload targets, uploads the changed files
+// directly to them (index.html last), and completes the publication.
+func (a *App) publish(ctx context.Context, project Project, name string) (publishResult, error) {
+	var result publishResult
 	source, err := readSource(a.Dir, project.Directory)
 	if err != nil {
-		return err
+		return result, err
 	}
-	temporary, err := os.MkdirTemp("", "hex-publish-*")
+	files, err := manifest(source)
 	if err != nil {
-		return err
-	}
-	defer a.removeTemporary(temporary)
-	metadata := hex.SiteMetadata{
-		Title: project.Title, Description: project.Description, Author: project.Author,
-		Discoverable: project.Discoverable,
-		PublishedAt:  time.Now().UTC(),
-	}
-	data, err := json.MarshalIndent(metadata, "", "  ")
-	if err != nil {
-		return err
-	}
-	if len(data)+1 > maxConfigBytes {
-		return errors.New("site metadata exceeds 64 KiB")
-	}
-	metadataPath := filepath.Join(temporary, ".hex-site.json")
-	if err := os.WriteFile(metadataPath, append(data, '\n'), 0644); err != nil {
-		return fmt.Errorf("prepare site metadata: %w", err)
-	}
-	if project.Publishing.Provider == "filesystem" {
-		destination, err := filesystemDestination(a.Dir, project.Publishing.Root, name, true)
-		if err != nil {
-			return err
-		}
-		source.Files = append(source.Files, sourceFile{Key: ".hex-site.json", Path: metadataPath})
-		return syncFilesystem(ctx, source, destination)
+		return result, err
 	}
 
-	destination, err := azureSiteURL(*project.Publishing, name)
+	request := publishRequest{
+		Files: files,
+		Metadata: &hex.SiteMetadata{
+			Title:        project.Title,
+			Description:  project.Description,
+			Author:       project.Author,
+			Discoverable: project.Discoverable,
+		},
+		Access: project.Access,
+	}
+	sitePath := "/api/hex/sites/" + name + "/publish"
+
+	data, err := a.apiCall(ctx, project, http.MethodPost, sitePath, request)
+	if err != nil {
+		return result, publishError(err)
+	}
+	var plan publishPlan
+	if err := json.Unmarshal(data, &plan); err != nil {
+		return result, fmt.Errorf("unexpected publication plan: %w", err)
+	}
+
+	fmt.Fprintf(a.Err, "Uploading %d changed files (%d unchanged)\n", len(plan.Uploads), plan.Unchanged)
+	paths := make(map[string]string, len(source.Files))
+	for _, entry := range source.Files {
+		paths[entry.Key] = entry.Path
+	}
+	if err := a.uploadAll(ctx, project, plan.Uploads, paths); err != nil {
+		return result, err
+	}
+
+	data, err = a.apiCall(ctx, project, http.MethodPost, sitePath+"/complete", request)
+	if err != nil {
+		return result, publishError(err)
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return result, fmt.Errorf("unexpected publication result: %w", err)
+	}
+	return result, nil
+}
+
+func publishError(err error) error {
+	var status *apiStatusError
+	if errors.As(err, &status) && status.Status == http.StatusNotFound {
+		return errors.New("this platform does not accept publications through its API; update the platform or ask its operators")
+	}
+	return err
+}
+
+// uploadAll sends every file except index.html in parallel, then index.html,
+// so visitors never load a new page that references missing assets.
+func (a *App) uploadAll(ctx context.Context, project Project, uploads []hex.UploadTarget, paths map[string]string) error {
+	var index []hex.UploadTarget
+	var assets []hex.UploadTarget
+	for _, upload := range uploads {
+		if _, ok := paths[upload.Path]; !ok {
+			return fmt.Errorf("the platform requested an unknown file %q", upload.Path)
+		}
+		if upload.Path == "index.html" {
+			index = append(index, upload)
+		} else {
+			assets = append(assets, upload)
+		}
+	}
+
+	if err := a.uploadParallel(ctx, project, assets, paths); err != nil {
+		return err
+	}
+	return a.uploadParallel(ctx, project, index, paths)
+}
+
+func (a *App) uploadParallel(ctx context.Context, project Project, uploads []hex.UploadTarget, paths map[string]string) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	work := make(chan hex.UploadTarget)
+	var failure error
+	var once sync.Once
+	var workers sync.WaitGroup
+	for range min(uploadConcurrency, len(uploads)) {
+		workers.Go(func() {
+			for upload := range work {
+				if err := a.upload(ctx, project, upload, paths[upload.Path]); err != nil {
+					once.Do(func() {
+						failure = fmt.Errorf("upload %s: %w", upload.Path, err)
+						cancel()
+					})
+				}
+			}
+		})
+	}
+
+	for _, upload := range uploads {
+		select {
+		case work <- upload:
+		case <-ctx.Done():
+		}
+	}
+	close(work)
+	workers.Wait()
+
+	if failure != nil {
+		return failure
+	}
+	return ctx.Err()
+}
+
+func (a *App) upload(ctx context.Context, project Project, target hex.UploadTarget, path string) error {
+	switch target.Protocol {
+	case "hex":
+		return a.uploadThroughPlatform(ctx, project, target.URL, path)
+	case "azure-files":
+		return uploadToAzureFiles(ctx, target.URL, path)
+	default:
+		return fmt.Errorf("unsupported upload protocol %q; update the Hex CLI with hex update", target.Protocol)
+	}
+}
+
+// uploadThroughPlatform sends a file to the platform's own upload endpoint.
+// Only same-origin API paths are accepted, so the API token never leaves the
+// platform.
+func (a *App) uploadThroughPlatform(ctx context.Context, project Project, target, path string) error {
+	parsed, err := url.Parse(target)
+	if err != nil || parsed.IsAbs() || parsed.Host != "" || !strings.HasPrefix(parsed.Path, "/api/hex/sites/") {
+		return fmt.Errorf("refusing platform upload to %q", target)
+	}
+
+	input, err := os.Open(path)
 	if err != nil {
 		return err
 	}
-	for _, file := range source.Files {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if err := copyFile(file.Path, filepath.Join(temporary, filepath.FromSlash(file.Key))); err != nil {
-			return err
-		}
+	defer input.Close()
+	info, err := input.Stat()
+	if err != nil {
+		return err
 	}
-	return a.storageCommand(ctx, "sync", temporary, destination, "--recursive=true", "--delete-destination=true")
+
+	_, err = a.apiSend(ctx, project, http.MethodPut, parsed.RequestURI(), input, info.Size(), "application/octet-stream")
+	return err
+}
+
+// uploadToAzureFiles writes a file through a pre-signed Azure Files URL. The
+// URL carries its own authorization, so no Hex or Azure credential is sent.
+func uploadToAzureFiles(ctx context.Context, target, path string) error {
+	parsed, err := url.Parse(target)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && !(parsed.Scheme == "http" && isLocalHost(parsed.Hostname()))) {
+		return errors.New("the platform returned an invalid storage upload URL")
+	}
+
+	client, err := file.NewClientWithNoCredential(target, nil)
+	if err != nil {
+		return err
+	}
+	input, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer input.Close()
+	info, err := input.Stat()
+	if err != nil {
+		return err
+	}
+
+	// UploadFile only writes ranges; the file must first exist at its size.
+	if _, err := client.Create(ctx, info.Size(), nil); err != nil {
+		return fmt.Errorf("Azure Files upload failed; the upload link may have expired, so run hex publish again: %w", err)
+	}
+	if err := client.UploadFile(ctx, input, nil); err != nil {
+		return fmt.Errorf("Azure Files upload failed; the upload link may have expired, so run hex publish again: %w", err)
+	}
+	return nil
 }
 
 func (a *App) publishCommand() *cobra.Command {
 	var profile, server, baseURL string
 	command := &cobra.Command{
 		Use:   "publish [site]",
-		Short: "Synchronize directly to the configured storage provider",
-		Args:  cobra.MaximumNArgs(1),
+		Short: "Publish the site through the platform",
+		Long: "Publish the site through the platform. The platform checks that you own the site " +
+			"(the first publisher of a new name becomes its owner), then files are uploaded " +
+			"directly to storage. An access policy in hex.json is applied with the publication.",
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			project, err := a.commandConfig(profile, true)
 			if err != nil {
@@ -348,22 +357,30 @@ func (a *App) publishCommand() *cobra.Command {
 			if len(args) > 0 {
 				name = args[0]
 			}
-			base := project.SiteBaseURL
-			if base == "" {
-				base = project.Server
+			if err := validateSiteName(name); err != nil {
+				return err
 			}
-			if server != "" && project.SiteBaseURL == "" {
-				base = server
+			if server != "" {
+				project.Server = server
 			}
-			if baseURL != "" {
-				base = baseURL
-			}
-			website, err := siteURL(base, name)
+
+			result, err := a.publish(cmd.Context(), project, name)
 			if err != nil {
 				return err
 			}
-			if err := a.publish(cmd.Context(), project, name); err != nil {
-				return err
+			website := result.URL
+			if baseURL != "" || website == "" {
+				base := project.SiteBaseURL
+				if base == "" {
+					base = project.Server
+				}
+				if baseURL != "" {
+					base = baseURL
+				}
+				website, err = siteURL(base, name)
+				if err != nil {
+					return fmt.Errorf("published %s, but its URL could not be derived: %w", name, err)
+				}
 			}
 			fmt.Fprintln(a.Out, website)
 			return nil
@@ -380,7 +397,8 @@ func (a *App) deleteCommand() *cobra.Command {
 	var confirmed bool
 	command := &cobra.Command{
 		Use:   "delete [site]",
-		Short: "Unpublish a site directly from storage",
+		Short: "Unpublish a site you own",
+		Long:  "Unpublish a site you own. Its access policy is kept, so the name stays reserved for its owners.",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !confirmed {
@@ -397,28 +415,8 @@ func (a *App) deleteCommand() *cobra.Command {
 			if err := validateSiteName(name); err != nil {
 				return err
 			}
-			if project.Publishing == nil {
-				return errors.New("no publishing provider configured")
-			}
-			if err := validatePublishing(*project.Publishing); err != nil {
-				return err
-			}
-			if project.Publishing.Provider == "filesystem" {
-				destination, err := filesystemDestination(a.Dir, project.Publishing.Root, name, false)
-				if err != nil {
-					return err
-				}
-				if err := os.RemoveAll(destination); err != nil {
-					return err
-				}
-			} else {
-				destination, err := azureSiteURL(*project.Publishing, name)
-				if err != nil {
-					return err
-				}
-				if err := a.storageCommand(cmd.Context(), "remove", destination, "--recursive=true"); err != nil {
-					return err
-				}
+			if _, err := a.apiCall(cmd.Context(), project, http.MethodDelete, "/api/hex/sites/"+name, nil); err != nil {
+				return publishError(err)
 			}
 			fmt.Fprintln(a.Out, "Unpublished", name)
 			return nil

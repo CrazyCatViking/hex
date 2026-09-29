@@ -10,7 +10,7 @@
 | `server/dev` | Optional Go adapter that constructs local providers from environment variables |
 | `hex dev` | Builds/runs your executable, starts NGINX, supplies settings and stops owned processes |
 | Docker Compose | Optional PostgreSQL and Azurite containers with persistent volumes and health checks |
-| `hex publish` | Synchronizes directly into the local site directory; does not call the API |
+| `hex publish` | Publishes through your server's API, which writes the local site directory |
 
 The development adapter neither starts a server nor provisions cloud infrastructure. Production continues to use your chosen providers and your infrastructure code. The core Hex HTTP handler does not depend on the local tooling.
 
@@ -90,7 +90,7 @@ http://localhost:8080/api/* → NGINX → your server on 127.0.0.1:8081
 http://demo.localhost:8080/ → NGINX → .hex-dev/sites/public/sites/demo/
 ```
 
-Both listeners are loopback-only. Local requests are unauthenticated; the local helper resolves every request to a fixed `Local Developer` identity (admin by default) so apps can exercise `hex.identity()` and [site access entries](access-control.md), whose local store is in-memory unless PostgreSQL is selected. Configure it with `HEX_IDENTITY_ID`, `HEX_IDENTITY_NAME`, `HEX_IDENTITY_GROUPS`, and `HEX_ADMIN_GROUPS`. Ctrl+C stops NGINX and the server, and removes temporary build/config files. The server's working directory is your repository; persistent local files stay in `.hex-dev/` by default. Add `.hex-dev/` and your local environment files to that repository's `.gitignore`.
+Both listeners are loopback-only. Local requests are unauthenticated; the local helper resolves every request to a fixed `Local Developer` identity (admin by default) so apps can exercise `hex.identity()` and [site access policies](access-control.md), whose local store is in-memory unless PostgreSQL is selected. Configure it with `HEX_IDENTITY_ID`, `HEX_IDENTITY_NAME`, `HEX_IDENTITY_GROUPS`, and `HEX_ADMIN_GROUPS`. Ctrl+C stops NGINX and the server, and removes temporary build/config files. The server's working directory is your repository; persistent local files stay in `.hex-dev/` by default. Add `.hex-dev/` and your local environment files to that repository's `.gitignore`.
 
 ## 3. Publish a test app
 
@@ -101,7 +101,7 @@ hex setup http://localhost:8080 --name local
 hex init demo
 ```
 
-Initialization creates configuration and an agent skill. Plain HTML sites can use index.html and assets directly in the project root or public/. For bundled apps, install `@crazycatviking/hex` through the package manager and build with your preferred tooling. Hex detects dist/index.html first; set hex.json.directory for a different output. Then run `hex publish` and open `http://demo.localhost:8080/`. For custom gateway ports, give setup the matching URL. The launcher also prints the absolute publishing root for manual configuration. App code uses same-origin API requests. Modern browsers resolve `.localhost` subdomains to loopback; configure local DNS/hosts entries if your environment does not.
+Initialization creates configuration and an agent skill. Plain HTML sites can use index.html and assets directly in the project root or public/. For bundled apps, install `@crazycatviking/hex` through the package manager and build with your preferred tooling. Hex detects dist/index.html first; set hex.json.directory for a different output. Then run `hex publish` and open `http://demo.localhost:8080/`. For custom gateway ports, give setup the matching URL. The launcher also prints the local site directory. App code uses same-origin API requests. Modern browsers resolve `.localhost` subdomains to loopback; configure local DNS/hosts entries if your environment does not.
 
 ## 4. Choose your local services
 
@@ -118,7 +118,7 @@ This is the default. It does not invoke Docker:
 - Documents use an in-memory database that resets on restart.
 - Realtime uses the same in-process broker as the initial production example.
 
-Ordinary development needs no PostgreSQL, Azurite or other service containers. Published website assets remain on disk because the CLI and NGINX access them directly, independently of the API process. They survive server restarts. Database records and application uploads do not.
+Ordinary development needs no PostgreSQL, Azurite or other service containers. Published website assets remain on disk, where the server writes them and NGINX serves them directly. They survive server restarts. Database records and application uploads do not.
 
 To persist application uploads locally without adding a service, explicitly set `HEX_FILES_PROVIDER=filesystem` in the development environment file. This is optional; the default is `memory`.
 
@@ -217,7 +217,7 @@ npm run test:local
 npm run test:services
 ```
 
-`test:local` builds a temporary **independent Go module** importing Hex, verifies direct flag-free startup and CLI-managed startup, checks its custom route and provider configuration, publishes a site directly, restarts using a prebuilt binary, verifies that site files persist while in-memory documents/uploads reset, and checks process cleanup.
+`test:local` builds a temporary **independent Go module** importing Hex, verifies direct flag-free startup and CLI-managed startup, checks its custom route and provider configuration, publishes a site, restarts using a prebuilt binary, verifies that site files persist while in-memory documents/uploads reset, and checks process cleanup.
 
 `test:services` starts the Compose services, runs PostgreSQL and Azure Blob provider integration tests, then repeats the external-server workflow with those services. It stops the containers afterward while retaining their volumes. To test already-running services without invoking Docker, set `HEX_TEST_POSTGRES_URL` and `HEX_TEST_BLOB_CONNECTION_STRING`, then run:
 

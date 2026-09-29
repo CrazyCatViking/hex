@@ -1,6 +1,6 @@
 # Hex
 
-A small internal app platform: static sites, shared backend capabilities, a browser client, and a publishing CLI. The hosting gateway authenticates API and website visitors. Publishers authenticate directly to their storage provider; publishing never goes through the Hex API.
+A small internal app platform: static sites, shared backend capabilities, a browser client, and a publishing CLI. The hosting gateway authenticates API and website visitors. The server authorizes each publication against the site's owners, and files are uploaded directly to storage.
 
 This is the [github.com/crazycatviking/hex](https://github.com/crazycatviking/hex) monorepo: one root Go module for the server and CLI, a TypeScript browser-client package, and shared infrastructure examples and documentation.
 
@@ -9,7 +9,7 @@ This is the [github.com/crazycatviking/hex](https://github.com/crazycatviking/he
 | Path | Purpose |
 | --- | --- |
 | `server/` | Embeddable Go HTTP API framework |
-| `server/providers/` | Local storage, Azure Blob Storage, PostgreSQL, in-memory and Easy Auth identity providers |
+| `server/providers/` | Local storage, Azure Files publishing, Azure Blob Storage, PostgreSQL, in-memory and Easy Auth identity providers |
 | `server/dev/` | Optional local provider adapter for consuming Go applications |
 | `cmd/hex-server/` | Configurable reference server executable |
 | `packages/client/` | `@crazycatviking/hex`, a dependency-free browser JS/TS client |
@@ -43,7 +43,7 @@ go install ./cmd/hex
 hex dev --package ./examples/custom-server --data-dir .hex-data
 ```
 
-The development gateway binds to `127.0.0.1:8080`. NGINX serves published files directly and proxies `/api/` to Go on loopback port 8081. The NGINX routing template is shared with the Azure image and embedded in the CLI. Set `NGINX_BIN` if NGINX is not on PATH, and optionally `NGINX_MIME_TYPES` if its MIME type file is in a nonstandard location. Published site directories persist under `.hex-data/`; default application uploads and documents are in memory and reset on restart. The launcher prints the absolute local publishing root.
+The development gateway binds to `127.0.0.1:8080`. NGINX serves published files directly and proxies `/api/` to Go on loopback port 8081. The NGINX routing template is shared with the Azure image and embedded in the CLI. Set `NGINX_BIN` if NGINX is not on PATH, and optionally `NGINX_MIME_TYPES` if its MIME type file is in a nonstandard location. Published site directories persist under `.hex-data/`; default application uploads and documents are in memory and reset on restart. The launcher prints the local site directory.
 
 In another terminal:
 
@@ -73,9 +73,9 @@ The default `hex.json` contains only the site name. Publishing detects index.htm
 }
 ```
 
-`hex publish` synchronizes directly to storage, and `hex delete my-app --yes` deletes that site's directory directly. Neither command calls the Hex API. Hex automatically prepares AzCopy and starts Microsoft storage sign-in when needed for Azure Files. Local publishing uses filesystem operations. See [Publishing](docs/publishing.md) for directory selection and authentication.
+`hex publish` sends a manifest of the site's files to the platform, which checks that you own the site (the first publisher of a new name becomes its owner) and returns upload targets for changed files. Locally the files go through the server; on Azure they go straight to Azure Files through short-lived per-file SAS URLs. `hex delete my-app --yes` unpublishes a site you own. See [Publishing](docs/publishing.md) for directory selection, the protocol and authentication.
 
-`hex sites` calls the read-only discovery API, which enumerates site directories containing `index.html` and returns names, subdomain URLs, and optional metadata. Publishing writes title, description, author, and a generated UTC `publishedAt` to `.hex-site.json` alongside the site; it excludes connection settings and local paths. Existing sites without metadata remain discoverable. Set `siteBaseURL` when the API origin differs from the parent site domain. App uploads and database data survive unpublishing.
+`hex sites` calls the read-only discovery API, which enumerates site directories containing `index.html` and returns names, subdomain URLs, and optional metadata. The server writes title, description, author, and a UTC `publishedAt` to `.hex-site.json` alongside the site; connection settings and local paths are excluded. Existing sites without metadata remain discoverable. Set `siteBaseURL` when the API origin differs from the parent site domain. App uploads and database data survive unpublishing.
 
 ## Connect to a company platform
 
@@ -85,7 +85,7 @@ Visit the platform's main domain, such as **https://hex.smartdok.dev/**. Its Go-
 
 Set `"discoverable": false` in an app's hex.json and republish to hide its listing and exclude it from statistics. Its URL continues to work. See [landing page and installers](docs/portal.md) for hosting, configuration, and release prerequisites. Locally, the landing page is at **http://localhost:8080/**.
 
-Agents such as Claude Code can use `hex setup <url> --json` and, when user sign-in is required, `hex setup --file <downloaded-file> --json`. Setup saves a non-secret default profile; publishing resolves it from that cache without contacting Hex. See [Setup and authentication handoff](docs/setup.md).
+Agents such as Claude Code can use `hex setup <url> --json` and, when user sign-in is required, `hex setup --file <downloaded-file> --json`. Setup saves a non-secret default profile. API commands, including publishing, sign in through the browser the first time and reuse the saved session; `hex login` and `hex logout` manage it, and `HEX_TOKEN` overrides it. See [Setup and authentication handoff](docs/setup.md).
 
 ## Browser API
 
@@ -99,13 +99,17 @@ const capabilities = await hex.capabilities();
 // deployment has no identity resolver.
 const identity = await hex.identity();
 
+// What the viewer may do on this site, for showing or hiding controls. The
+// platform still checks every request.
+const permissions = await hex.permissions();
+
 await hex.files.upload('notes.txt', new Blob(['Hello']));
 const file = await hex.files.download('notes.txt');
 const files = await hex.files.list();
 await hex.files.delete('notes.txt');
 
 const tasks = hex.db.collection<{ title: string; done: boolean }>('tasks');
-const task = await tasks.create({ title: 'Ship the app', done: false });
+const task = await tasks.create({ title: 'Ship the app', done: false }); // task.createdBy is the creator's identity ID
 await tasks.set(task.id, { title: 'Ship the app', done: true });
 const page = await tasks.list({ limit: 100 });
 
@@ -162,24 +166,26 @@ func run() error {
     }()
 
     handler := hex.New(hex.Config{
-        Files:    files,
-        Sites:    sites,
-        Database: memory.NewDatabase(),
-        Realtime: memory.NewRealtime(),
+        Files:     files,
+        Sites:     sites,
+        Publisher: sites,
+        Database:  memory.NewDatabase(),
+        Realtime:  memory.NewRealtime(),
     })
     return http.ListenAndServe("127.0.0.1:8080", handler)
 }
 ```
 
-Omit a provider to disable that capability. `GET /api/hex/capabilities` reports which built-ins are enabled. `hex.New` returns an API-only `http.Handler`; provider credentials, connection pools and lifecycle remain under the host application's control. Mount site storage in NGINX and route each hostname to `public/sites/<name>/`. Set `Config.SiteBaseURL` for directory-derived URLs. The Go handler has no website-serving route.
+Omit a provider to disable that capability. `GET /api/hex/capabilities` reports which built-ins are enabled. `hex.New` returns an API-only `http.Handler`; provider credentials, connection pools and lifecycle remain under the host application's control. Mount site storage in NGINX and route each hostname to `public/sites/<name>/`. Set `Config.SiteBaseURL` for directory-derived URLs. The Go handler has no website-serving route; it receives publications only through `Config.Publisher`.
 
 The interfaces are defined in `server/storage.go`:
 
 - `SiteDirectory`: read-only enumeration of actual site directories. The local provider reads the Azure Files share mounted by Go and NGINX, or a local development directory.
+- `SitePublisher` and optional `DirectUploader` (in `server/publishing.go`): writes published site files for authorized publishers. `local.Store` writes a local directory; `azurefiles.Publisher` writes Azure Files with a managed identity and signs per-file upload URLs.
 - `ObjectStore`: uploaded application objects, with writes, reads, prefix listing and deletion. This is separate from publishing; Azure Blob supplies app upload storage in the example.
-- `Database`: site-scoped JSON documents with keyset pagination. The PostgreSQL provider works with Azure Database for PostgreSQL or another PostgreSQL installation.
+- `Database`: site-scoped JSON documents with keyset pagination and server-recorded creators. The PostgreSQL provider works with Azure Database for PostgreSQL or another PostgreSQL installation.
 - `Realtime`: subscriptions and JSON broadcasts, allowing a future distributed broker implementation without changing the browser API.
-- `IdentityResolver` and `AccessStore` (in `server/identity.go` and `server/access.go`): optional gateway-forwarded caller identity and per-site access entries. See [Identity and site access control](docs/access-control.md).
+- `IdentityResolver` and `AccessStore` (in `server/identity.go` and `server/access.go`): optional gateway-forwarded caller identity and per-site access policies. See [Identity and site access control](docs/access-control.md).
 
 See [the architecture and API contract](docs/architecture.md) for provider semantics and [the hosting contract](docs/hosting.md) for platform independence and reference-server configuration.
 
@@ -222,14 +228,15 @@ npm run test:e2e
 npm run test:local
 ```
 
-The end-to-end test requires NGINX. It starts Go and NGINX, publishes directly to the shared directory, exercises discovery and application APIs, then stops Go and verifies that publishing and unpublishing still work. CLI tests check that direct publishing makes zero requests to Hex, filters source files, and handles file/directory transitions. Go tests cover filesystem discovery, realtime, namespaces and application-upload limits. Azure Files adapter tests verify AzCopy invocation; live Azure publishing is not tested locally.
+The end-to-end test requires NGINX. It starts Go and NGINX, publishes through the API, exercises change detection, discovery, application APIs and WebSockets, unpublishes, then stops Go and verifies that publishing fails cleanly. CLI tests publish against a real in-process server, filter source files, handle file/directory transitions, and upload through pre-signed Azure Files URLs to a fake share without sending credentials. Go tests cover access policies, data rules, publishing authorization, filesystem discovery, realtime, namespaces and application-upload limits. Live Azure Files publishing is not tested locally.
 
 ## Initial scope
 
 - Sites use separate origins such as `https://demo.hex.example.com/`, isolating localStorage, sessionStorage and IndexedDB. The former shared `/sites/<name>/` web routes are gone. Subdomains are not per-site data authorization. See [Subdomain hosting](docs/subdomains.md).
-- Sites are open to every authenticated user unless an owner restricts them to identity-provider groups with a [site access entry](docs/access-control.md), which then covers the site's assets, APIs and discovery listing. Apps read the viewer through `hex.identity()`. Access entries restrict viewers, not publishers: publishing permissions remain storage-wide.
+- Sites are open to every authenticated user unless their [access policy](docs/access-control.md) says otherwise. A policy names owners, editors and viewers, restricts URL path prefixes, and sets read/write rules per collection, file prefix and realtime channel, including creator-only documents. It covers the site's assets, APIs and discovery listing. Apps read the viewer through `hex.identity()` and `hex.permissions()`.
+- Only a site's owners publish it. The first publisher of a new name becomes its owner; `HEX_PUBLISHER_GROUPS` limits who may claim names.
 - The in-process realtime provider requires one backend replica. Messages are transient; clients handle reconnects and refresh state themselves.
 - Documents are JSON objects, at most 1 MiB. `set` replaces the entire document. Lists are ordered by ID, with up to 100 results per page. There is no query language or automatic database-change feed.
-- Application file uploads through the API default to 32 MiB and are buffered in memory. Direct site publishing is not subject to that API limit. File and site listings are currently unpaginated.
-- Publishing mirrors one site's directory and deletes obsolete files. It is not a transactional whole-site replacement. Local publishing replaces files atomically and writes `index.html` last; Azure Files synchronization follows AzCopy's ordering and semantics. Concurrent publishers are not coordinated. Republish after an interrupted synchronization.
-- No custom integrations, per-site publishing authorization, code generation or AI proxy is included in this version.
+- Application file uploads through the API default to 32 MiB and are buffered in memory. Site publishing has its own limits (by default 256 MiB per file and 2 GiB per site). File and site listings are currently unpaginated.
+- Publishing replaces one site's changed files in place, uploads `index.html` last and deletes obsolete files on completion. It is not a transactional whole-site replacement. Concurrent publishers are not coordinated. Republish after an interrupted publication.
+- No custom integrations, code generation or AI proxy is included in this version.

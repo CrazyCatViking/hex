@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	hex "github.com/crazycatviking/hex/server"
 	"github.com/jackc/pgx/v5"
@@ -47,41 +48,104 @@ func (d *Database) Migrate(ctx context.Context) error {
 		return fmt.Errorf("create documents table: %w", err)
 	}
 
-	const siteAccess = `
-		CREATE TABLE IF NOT EXISTS hex_site_access (
-			site text PRIMARY KEY,
-			owners jsonb NOT NULL,
-			groups jsonb NOT NULL
-		)`
+	const creators = `
+		ALTER TABLE hex_documents
+		ADD COLUMN IF NOT EXISTS created_by text NOT NULL DEFAULT ''`
 
-	if _, err := d.pool.Exec(ctx, siteAccess); err != nil {
-		return fmt.Errorf("create site access table: %w", err)
+	if _, err := d.pool.Exec(ctx, creators); err != nil {
+		return fmt.Errorf("add document creators: %w", err)
 	}
 
+	const creatorIndex = `
+		CREATE INDEX IF NOT EXISTS hex_documents_creator
+		ON hex_documents (site, collection, created_by, id)`
+
+	if _, err := d.pool.Exec(ctx, creatorIndex); err != nil {
+		return fmt.Errorf("index document creators: %w", err)
+	}
+
+	return d.migrateSitePolicies(ctx)
+}
+
+// migrateSitePolicies creates the policy table and converts entries from the
+// former owners/groups table, whose groups become the policy's viewers.
+func (d *Database) migrateSitePolicies(ctx context.Context) error {
+	const policies = `
+		CREATE TABLE IF NOT EXISTS hex_site_policies (
+			site text PRIMARY KEY,
+			policy jsonb NOT NULL
+		)`
+
+	if _, err := d.pool.Exec(ctx, policies); err != nil {
+		return fmt.Errorf("create site policy table: %w", err)
+	}
+
+	var legacyTable *string
+	if err := d.pool.QueryRow(ctx, `SELECT to_regclass('hex_site_access')::text`).Scan(&legacyTable); err != nil {
+		return fmt.Errorf("look up legacy site access table: %w", err)
+	}
+	if legacyTable == nil {
+		return nil
+	}
+
+	const convert = `
+		INSERT INTO hex_site_policies (site, policy)
+		SELECT site, jsonb_build_object('owners', owners, 'editors', '[]'::jsonb, 'viewers', groups)
+		FROM hex_site_access
+		ON CONFLICT (site) DO NOTHING`
+
+	transaction, err := d.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin site access migration: %w", err)
+	}
+	defer func() {
+		if err := transaction.Rollback(ctx); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
+			slog.Error("roll back site access migration", "error", err)
+		}
+	}()
+
+	if _, err := transaction.Exec(ctx, convert); err != nil {
+		return fmt.Errorf("convert legacy site access entries: %w", err)
+	}
+	if _, err := transaction.Exec(ctx, `DROP TABLE hex_site_access`); err != nil {
+		return fmt.Errorf("drop legacy site access table: %w", err)
+	}
+	if err := transaction.Commit(ctx); err != nil {
+		return fmt.Errorf("commit site access migration: %w", err)
+	}
 	return nil
 }
 
-func (d *Database) Put(ctx context.Context, site, collection, id string, data json.RawMessage) error {
+func (d *Database) Put(ctx context.Context, site, collection, id string, data json.RawMessage, options hex.WriteOptions) (hex.Document, error) {
+	// The conditional update leaves other creators' documents untouched and
+	// then returns no row, which is how creator-only writes are refused.
 	const query = `
-		INSERT INTO hex_documents (site, collection, id, data)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO hex_documents (site, collection, id, data, created_by)
+		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (site, collection, id)
-		DO UPDATE SET data = EXCLUDED.data`
+		DO UPDATE SET data = EXCLUDED.data
+		WHERE NOT $6 OR hex_documents.created_by = $5
+		RETURNING created_by`
 
-	if _, err := d.pool.Exec(ctx, query, site, collection, id, data); err != nil {
-		return fmt.Errorf("save document %s/%s/%s: %w", site, collection, id, err)
+	document := hex.Document{ID: id, Data: data}
+	err := d.pool.QueryRow(ctx, query, site, collection, id, data, options.Creator, options.CreatorOnly).Scan(&document.CreatedBy)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return hex.Document{}, hex.ErrForbidden
+	}
+	if err != nil {
+		return hex.Document{}, fmt.Errorf("save document %s/%s/%s: %w", site, collection, id, err)
 	}
 
-	return nil
+	return document, nil
 }
 
 func (d *Database) Get(ctx context.Context, site, collection, id string) (hex.Document, error) {
 	const query = `
-		SELECT data FROM hex_documents
+		SELECT data, created_by FROM hex_documents
 		WHERE site = $1 AND collection = $2 AND id = $3`
 
 	document := hex.Document{ID: id}
-	err := d.pool.QueryRow(ctx, query, site, collection, id).Scan(&document.Data)
+	err := d.pool.QueryRow(ctx, query, site, collection, id).Scan(&document.Data, &document.CreatedBy)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return hex.Document{}, hex.ErrNotFound
 	}
@@ -92,14 +156,15 @@ func (d *Database) Get(ctx context.Context, site, collection, id string) (hex.Do
 	return document, nil
 }
 
-func (d *Database) List(ctx context.Context, site, collection, after string, limit int) ([]hex.Document, error) {
+func (d *Database) List(ctx context.Context, site, collection string, options hex.ListOptions) ([]hex.Document, error) {
 	const query = `
-		SELECT id, data FROM hex_documents
+		SELECT id, data, created_by FROM hex_documents
 		WHERE site = $1 AND collection = $2 AND id > $3
+		AND ($5 = '' OR created_by = $5)
 		ORDER BY id
 		LIMIT $4`
 
-	rows, err := d.pool.Query(ctx, query, site, collection, after, limit)
+	rows, err := d.pool.Query(ctx, query, site, collection, options.After, options.Limit, options.CreatedBy)
 	if err != nil {
 		return nil, fmt.Errorf("list documents in %s/%s: %w", site, collection, err)
 	}
@@ -108,7 +173,7 @@ func (d *Database) List(ctx context.Context, site, collection, after string, lim
 	documents := []hex.Document{}
 	for rows.Next() {
 		var document hex.Document
-		if err := rows.Scan(&document.ID, &document.Data); err != nil {
+		if err := rows.Scan(&document.ID, &document.Data, &document.CreatedBy); err != nil {
 			return nil, fmt.Errorf("decode document row: %w", err)
 		}
 		documents = append(documents, document)
@@ -121,18 +186,22 @@ func (d *Database) List(ctx context.Context, site, collection, after string, lim
 	return documents, nil
 }
 
-func (d *Database) Delete(ctx context.Context, site, collection, id string) error {
+func (d *Database) Delete(ctx context.Context, site, collection, id string, options hex.WriteOptions) error {
 	const query = `
 		DELETE FROM hex_documents
-		WHERE site = $1 AND collection = $2 AND id = $3`
+		WHERE site = $1 AND collection = $2 AND id = $3
+		AND (NOT $4 OR created_by = $5)`
 
-	result, err := d.pool.Exec(ctx, query, site, collection, id)
+	result, err := d.pool.Exec(ctx, query, site, collection, id, options.CreatorOnly, options.Creator)
 	if err != nil {
 		return fmt.Errorf("delete document %s/%s/%s: %w", site, collection, id, err)
 	}
-	if result.RowsAffected() == 0 {
-		return hex.ErrNotFound
+	if result.RowsAffected() > 0 {
+		return nil
 	}
 
-	return nil
+	if _, err := d.Get(ctx, site, collection, id); err != nil {
+		return err
+	}
+	return hex.ErrForbidden
 }

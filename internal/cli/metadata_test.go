@@ -24,16 +24,16 @@ func createBuild(t *testing.T, project string) {
 func TestPublishedMetadataDoesNotExposeConfiguration(t *testing.T) {
 	directory := t.TempDir()
 	project := filepath.Join(directory, "demo")
-	destination := filepath.Join(directory, "sites")
 	t.Setenv("HEX_CONFIG_DIR", filepath.Join(directory, "profiles"))
-	run(t, directory, "init", project, "--publish-root", destination)
+	platform := startPlatform(t, nil)
+	destination := platform.Sites
+	run(t, directory, "init", project, "--server", platform.URL)
 	createBuild(t, project)
 	discoverable := false
 	config := Project{
 		Name: "demo", Title: "Team dashboard", Description: "Daily work", Author: "Alex",
 		Discoverable: &discoverable,
-		Server:       "http://localhost:8080", Resource: "private-resource",
-		Publishing: &Publishing{Provider: "filesystem", Root: destination},
+		Server:       platform.URL,
 	}
 	configPath := filepath.Join(project, "hex.json")
 	if err := writeJSONFile(configPath, config); err != nil {
@@ -78,7 +78,7 @@ func TestPublishedMetadataDoesNotExposeConfiguration(t *testing.T) {
 func TestInitializationPreservesAppAndCanPinProfile(t *testing.T) {
 	directory := t.TempDir()
 	t.Setenv("HEX_CONFIG_DIR", filepath.Join(directory, "profiles"))
-	if _, err := saveProfile(localConnection("http://localhost:8080", filepath.Join(directory, "sites")), "local"); err != nil {
+	if _, err := saveProfile(localConnection("http://localhost:8080"), "local"); err != nil {
 		t.Fatal(err)
 	}
 	project := filepath.Join(directory, "demo")

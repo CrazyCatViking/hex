@@ -47,6 +47,7 @@ http {
             proxy_set_header Content-Length "";
             proxy_set_header Host $http_host;
             proxy_set_header X-Hex-Site $hex_site;
+            proxy_set_header X-Hex-Path $hex_path;
         }
 
         location / {
@@ -57,6 +58,10 @@ http {
             if ($hex_site = "") {
                 return 404;
             }
+            # Path rules are checked against the decoded, normalized URI.
+            # Inside the auth subrequest $uri is the subrequest's own path, so
+            # capture it here; subrequests share the main request's variables.
+            set $hex_path $uri;
             auth_request /.hex/authz;
             root /mnt/sites/public/sites/$hex_site;
             index index.html;

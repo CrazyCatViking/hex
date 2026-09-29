@@ -19,15 +19,14 @@ import (
 )
 
 type setupResult struct {
-	Status      string  `json:"status"`
-	Profile     string  `json:"profile,omitempty"`
-	Name        string  `json:"name,omitempty"`
-	Server      string  `json:"server,omitempty"`
-	Publishing  *string `json:"publishing,omitempty"`
-	DownloadURL string  `json:"downloadURL,omitempty"`
-	Reason      string  `json:"reason,omitempty"`
-	Message     string  `json:"message,omitempty"`
-	NextCommand string  `json:"nextCommand,omitempty"`
+	Status      string `json:"status"`
+	Profile     string `json:"profile,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Server      string `json:"server,omitempty"`
+	DownloadURL string `json:"downloadURL,omitempty"`
+	Reason      string `json:"reason,omitempty"`
+	Message     string `json:"message,omitempty"`
+	NextCommand string `json:"nextCommand,omitempty"`
 }
 
 func (a *App) setupCommand() *cobra.Command {
@@ -152,9 +151,6 @@ func (a *App) setup(ctx context.Context, server, file, name string, interactive 
 		Name:        connection.Name,
 		Server:      connection.Server,
 		NextCommand: "hex init my-app",
-	}
-	if connection.Publishing != nil {
-		result.Publishing = &connection.Publishing.Provider
 	}
 	return result, nil
 }

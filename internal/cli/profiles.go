@@ -120,11 +120,12 @@ func (a *App) readProject(optional bool) (Project, error) {
 		if project.SiteBaseURL == "" {
 			project.SiteBaseURL = connection.SiteBaseURL
 		}
-		if project.Publishing == nil {
-			project.Publishing = connection.Publishing
-		}
 		if project.Resource == "" {
 			project.Resource = connection.Resource
+		}
+		if project.Resource == connection.Resource {
+			project.ClientID = connection.ClientID
+			project.TenantID = connection.TenantID
 		}
 		project.Capabilities = connection.Capabilities
 	}
@@ -148,8 +149,9 @@ func (a *App) commandConfig(profile string, needsProject bool) (Project, error) 
 		project.Platform = name
 		project.Server = connection.Server
 		project.SiteBaseURL = connection.SiteBaseURL
-		project.Publishing = connection.Publishing
 		project.Resource = connection.Resource
+		project.ClientID = connection.ClientID
+		project.TenantID = connection.TenantID
 		project.Capabilities = connection.Capabilities
 	}
 	return project, nil

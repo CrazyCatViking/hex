@@ -2,7 +2,6 @@ package cli
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,7 +10,7 @@ import (
 )
 
 func (a *App) initCommand() *cobra.Command {
-	var name, server, profile, resource, baseURL, publishingRoot, publishingURL string
+	var name, server, profile, resource, baseURL string
 	command := &cobra.Command{
 		Use:   "init [directory]",
 		Short: "Initialize Hex configuration and the agent skill",
@@ -27,10 +26,6 @@ func (a *App) initCommand() *cobra.Command {
 			if err := validateSiteName(name); err != nil {
 				return err
 			}
-			if publishingRoot != "" && publishingURL != "" {
-				return errors.New("choose either --publish-root or --publish-url")
-			}
-
 			project := Project{Name: name, Resource: resource}
 			if profile != "" {
 				_, selected, err := loadProfile(profile, false)
@@ -40,10 +35,7 @@ func (a *App) initCommand() *cobra.Command {
 				project.Platform = selected
 			}
 
-			if server != "" || publishingRoot != "" || publishingURL != "" {
-				if server == "" {
-					server = "http://localhost:8080"
-				}
+			if server != "" {
 				parsed, err := origin(server, false)
 				if err != nil {
 					return err
@@ -56,13 +48,6 @@ func (a *App) initCommand() *cobra.Command {
 					return err
 				}
 				project.SiteBaseURL = parsed.String()
-			}
-
-			if publishingRoot != "" {
-				project.Publishing = &Publishing{Provider: "filesystem", Root: resolvePath(a.Dir, publishingRoot)}
-			}
-			if publishingURL != "" {
-				project.Publishing = &Publishing{Provider: "azure-files", URL: publishingURL}
 			}
 
 			if err := a.initializeProject(directory, project); err != nil {
@@ -79,8 +64,6 @@ func (a *App) initCommand() *cobra.Command {
 	flags.StringVar(&profile, "platform", "", "Saved platform profile")
 	flags.StringVar(&resource, "resource", "", "Optional Azure CLI API resource")
 	flags.StringVar(&baseURL, "site-base-url", "", "Parent site origin")
-	flags.StringVar(&publishingRoot, "publish-root", "", "Local publishing root")
-	flags.StringVar(&publishingURL, "publish-url", "", "Azure Files share/prefix URL")
 	return command
 }
 

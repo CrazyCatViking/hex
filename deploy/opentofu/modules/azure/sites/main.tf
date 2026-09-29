@@ -42,9 +42,10 @@ variable "access_tier" {
   }
 }
 
-# Publishing is CLI-to-storage, so publishers need network reachability to
-# this account. Enabling public access keeps Entra/SAS data-plane
-# authorization but removes the need for private connectivity when publishing.
+# Publishers upload files straight to this account with per-file SAS URLs
+# signed by the Hex server, so they need network reachability to it.
+# Enabling public access keeps Entra/SAS data-plane authorization but removes
+# the need for private connectivity when publishing.
 variable "public_network_access" {
   type    = bool
   default = false
@@ -97,17 +98,20 @@ output "mount" {
   sensitive = true
 }
 
-output "environment" {
-  value = {
-    HEX_SITES_PROVIDER = "filesystem"
-    HEX_SITES_DIR      = "/mnt/sites"
-    HEX_PUBLISH_URL    = "https://${module.storage.name}.file.core.windows.net/${azapi_resource.share.name}/public/sites"
-  }
+output "id" {
+  value = module.storage.id
 }
 
-output "publishing" {
+# Share URL for the server's azurefiles publisher (AZURE_FILES_SHARE_URL).
+output "share_url" {
+  value = "https://${module.storage.name}.file.core.windows.net/${azapi_resource.share.name}"
+}
+
+output "environment" {
   value = {
-    provider = "azure-files"
-    url      = "https://${module.storage.name}.file.core.windows.net/${azapi_resource.share.name}/public/sites"
+    HEX_SITES_PROVIDER     = "filesystem"
+    HEX_SITES_DIR          = "/mnt/sites"
+    HEX_PUBLISHER_PROVIDER = "azurefiles"
+    AZURE_FILES_SHARE_URL  = "https://${module.storage.name}.file.core.windows.net/${azapi_resource.share.name}"
   }
 }

@@ -79,7 +79,7 @@ func TestFilesystemPersistsAndMemoryDatabaseResets(t *testing.T) {
 	if err := environment.Config.Files.Put(ctx, "demo/hello.txt", strings.NewReader("hello")); err != nil {
 		t.Fatal(err)
 	}
-	if err := environment.Config.Database.Put(ctx, "demo", "notes", "one", json.RawMessage(`{"title":"temporary"}`)); err != nil {
+	if _, err := environment.Config.Database.Put(ctx, "demo", "notes", "one", json.RawMessage(`{"title":"temporary"}`), hex.WriteOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := environment.Close(); err != nil {
@@ -104,7 +104,7 @@ func TestFilesystemPersistsAndMemoryDatabaseResets(t *testing.T) {
 	if readError != nil || closeError != nil || string(content) != "hello" {
 		t.Fatalf("unexpected stored file: %s; read %v; close %v", content, readError, closeError)
 	}
-	documents, err := restarted.Config.Database.List(ctx, "demo", "notes", "", 100)
+	documents, err := restarted.Config.Database.List(ctx, "demo", "notes", hex.ListOptions{Limit: 100})
 	if err != nil || len(documents) != 0 {
 		t.Fatalf("memory database should reset: %v, %v", documents, err)
 	}
@@ -125,7 +125,7 @@ func TestDefaultLocalDataResetsOnRestart(t *testing.T) {
 	if err := environment.Config.Files.Put(ctx, "demo/file", strings.NewReader("temporary")); err != nil {
 		t.Fatal(err)
 	}
-	if err := environment.Config.Database.Put(ctx, "demo", "notes", "one", json.RawMessage(`{"value":1}`)); err != nil {
+	if _, err := environment.Config.Database.Put(ctx, "demo", "notes", "one", json.RawMessage(`{"value":1}`), hex.WriteOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := environment.Close(); err != nil {

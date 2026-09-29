@@ -64,6 +64,29 @@ test("identity resolves the caller and degrades to null when unavailable", async
   );
 });
 
+test("permissions describe the viewer for the configured site", async () => {
+  const body = {
+    role: "viewer",
+    admin: false,
+    publish: false,
+    paths: [{ prefix: "/admin/", allowed: false }],
+    collections: { "*": { read: "all", write: "none" } },
+    files: { "*": { read: "all", write: "none" } },
+    channels: { "*": { read: "all", write: "none" } },
+  };
+  const hex = createHexClient({
+    site: "demo",
+    fetch: async (url) => {
+      assert.equal(url, "/api/hex/sites/demo/permissions");
+      return new Response(JSON.stringify(body), {
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+  });
+
+  assert.deepEqual(await hex.permissions(), body);
+});
+
 test("database operations preserve envelopes and report structured failures", async () => {
   const calls = [];
   const hex = createHexClient({

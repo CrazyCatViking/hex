@@ -6,6 +6,7 @@ export interface Capabilities {
   sites: boolean;
   identity?: boolean;
   accessControl?: boolean;
+  publishing?: boolean;
   maxUploadBytes: number;
 }
 
@@ -25,6 +26,31 @@ export interface StoredFile {
 export interface Document<T> {
   id: string;
   data: T;
+  /** Identity ID of the caller that created the document, when known. */
+  createdBy?: string;
+}
+
+/** "all" covers everything, "own" only the caller's own documents. */
+export type Grant = "all" | "own" | "none";
+
+export interface DataPermission {
+  read: Grant;
+  write: Grant;
+}
+
+/**
+ * What the current viewer may do on the site. It is advisory, for showing or
+ * hiding links and controls; the platform checks every request itself.
+ * Rule maps include "*", the rule for names without their own entry.
+ */
+export interface Permissions {
+  role: "owner" | "editor" | "viewer" | "none";
+  admin: boolean;
+  publish: boolean;
+  paths: { prefix: string; allowed: boolean }[];
+  collections: Record<string, DataPermission>;
+  files: Record<string, DataPermission>;
+  channels: Record<string, DataPermission>;
 }
 
 export interface ClientOptions {
@@ -204,6 +230,11 @@ export function createHexClient(options: ClientOptions) {
   return {
     capabilities() {
       return requestJSON<Capabilities>("/api/hex/capabilities");
+    },
+    permissions() {
+      return requestJSON<Permissions>(
+        `/api/hex/sites/${validateName(options.site)}/permissions`,
+      );
     },
     async identity(): Promise<Identity | null> {
       try {

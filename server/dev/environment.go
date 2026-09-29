@@ -60,14 +60,8 @@ func (e *Environment) configureConnection(settings settings) error {
 		Name:     value("HEX_PLATFORM_NAME", "Local Hex"),
 		Server:   serverURL,
 		Resource: os.Getenv("HEX_API_RESOURCE"),
-	}
-	if settings.sites == "filesystem" {
-		directory := value("HEX_SITES_DIR", filepath.Join(settings.dataDir, "sites"))
-		root, err := filepath.Abs(filepath.Join(directory, "public", "sites"))
-		if err != nil {
-			return fmt.Errorf("resolve local publishing directory: %w", err)
-		}
-		e.Config.Connection.Publishing = &hex.PublishingConfig{Provider: "filesystem", Root: root}
+		ClientID: os.Getenv("HEX_CLI_CLIENT_ID"),
+		TenantID: os.Getenv("HEX_CLI_TENANT_ID"),
 	}
 	return nil
 }
@@ -138,6 +132,7 @@ func (e *Environment) openProviders(ctx context.Context, settings settings) erro
 			return fmt.Errorf("open local site directory: %w", err)
 		}
 		e.Config.Sites = store
+		e.Config.Publisher = store
 	}
 
 	switch settings.files {

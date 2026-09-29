@@ -16,7 +16,7 @@ Or build an executable without installing it:
 just build
 ```
 
-A compiled CLI does not need Go, Node.js, npm, or .NET installed to run. Go is needed to build source code, NGINX to serve local websites, and Docker Compose only for explicitly selected local integration services. Azure browser sign-in requires Azure CLI; Hex invokes its Entra web flow with MFA support and downloads AzCopy automatically if needed. Frontend projects may have their own build-tool requirements; plain static sites need no build.
+A compiled CLI does not need Go, Node.js, npm, or .NET installed to run. Go is needed to build source code, NGINX to serve local websites, and Docker Compose only for explicitly selected local integration services. Entra sign-in is built in: Hex opens the browser, supports MFA, and saves the session in its configuration directory. Azure CLI is only used for older platforms that advertise an API resource without a sign-in app. Frontend projects may have their own build-tool requirements; plain static sites need no build.
 
 Build versioned release binaries for macOS ARM64 and x86-64, Windows x86-64, and Linux x86-64:
 
@@ -32,7 +32,7 @@ The CLI uses the OS certificate trust store for HTTPS. On Unix, local processes 
 
 Remove the old global npm CLI installation/link if it shadows the Go executable, then put the new executable on PATH. `hex --version` reports the binary version (development builds report `dev`).
 
-Commands include `setup`, `login`, `init`, `publish`, `delete`, `sites`, `capabilities`, `skills`, `dev`, `update`, `whoami`, and `access`. `hex whoami` shows the identity the platform resolves for the caller, and `hex access show|set|clear <site>` manages a site's [access entry](access-control.md); both use the same API authentication as `sites` (`HEX_TOKEN`, or `resource` with a signed-in Azure CLI). Existing `hex.json`, `hex.dev.json`, and version-1 profile/connection files can be reused, including explicit directory settings and pinned profiles. Without a directory setting, publishing detects dist/, public/, or a plain site in the project root. Explicit settings take precedence. Remove an old `directory: "dist"` setting when converting a project to a plain site. Commands resolve the default platform profile unless one is explicitly selected.
+Commands include `setup`, `login`, `logout`, `init`, `publish`, `delete`, `sites`, `capabilities`, `skills`, `dev`, `update`, `whoami`, and `access`. `hex publish` and `hex delete` go through the platform API; see [Publishing](publishing.md). `hex whoami` shows the identity the platform resolves for the caller, and `hex access show|set|clear|check <site>` manages or inspects a site's [access policy](access-control.md). All API commands authenticate with `HEX_TOKEN` or the saved sign-in for the profile's `resource`; `hex login` forces a browser sign-in and `hex logout` forgets it. See [Publishing](publishing.md#authentication) for the Azure CLI fallback and app registration requirements. Existing `hex.json`, `hex.dev.json`, and version-1 profile/connection files can be reused, including explicit directory settings and pinned profiles. The storage `publishing` settings that older platforms advertised and older CLIs saved are accepted and ignored, and capabilities added by newer platforms do not break parsing. Without a directory setting, publishing detects dist/, public/, or a plain site in the project root. Explicit settings take precedence. Remove an old `directory: "dist"` setting when converting a project to a plain site. Commands resolve the default platform profile unless one is explicitly selected.
 
 ## Updating an installed CLI
 
@@ -63,7 +63,7 @@ go test -race ./...
 go vet ./...
 ```
 
-Go tests cover setup/profile compatibility, plain-site publishing, path boundaries, managed AzCopy extraction/authentication, and self-updating a running binary. A binary test runs `hex init` and `hex setup --file` with an empty PATH. `HEX_TEST_DOWNLOAD_AZCOPY=1 go test ./internal/cli -run TestOfficialManagedAzCopy -v` additionally verifies the pinned official download and executable.
+Go tests cover setup/profile compatibility, publishing against a real in-process server, access policies in hex.json, pre-signed Azure Files uploads against a fake share, path boundaries, and self-updating a running binary. A binary test runs `hex init` and `hex setup --file` with an empty PATH.
 
 JavaScript integration tests remain developer tooling for the browser client and full platform. They build and invoke the Go executable:
 

@@ -5,33 +5,32 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"path/filepath"
 	"regexp"
 	"strings"
 )
 
+// ConnectionConfig is the non-secret platform description the CLI imports.
+// Resource is the API the CLI requests tokens for. ClientID and TenantID
+// identify a public-client app registration the CLI signs in with through
+// the browser; without them the CLI falls back to Azure CLI tokens.
 type ConnectionConfig struct {
-	Name       string
-	Server     string
-	Resource   string
-	Publishing *PublishingConfig
-}
-
-type PublishingConfig struct {
-	Provider string `json:"provider"`
-	Root     string `json:"root,omitempty"`
-	URL      string `json:"url,omitempty"`
+	Name     string
+	Server   string
+	Resource string
+	ClientID string
+	TenantID string
 }
 
 type connectionDocument struct {
-	Version       int               `json:"version"`
-	Name          string            `json:"name"`
-	Server        string            `json:"server"`
-	SiteBaseURL   string            `json:"siteBaseURL"`
-	CLIReleaseURL string            `json:"cliReleaseURL,omitempty"`
-	Resource      string            `json:"resource,omitempty"`
-	Publishing    *PublishingConfig `json:"publishing,omitempty"`
-	Capabilities  map[string]any    `json:"capabilities"`
+	Version       int            `json:"version"`
+	Name          string         `json:"name"`
+	Server        string         `json:"server"`
+	SiteBaseURL   string         `json:"siteBaseURL"`
+	CLIReleaseURL string         `json:"cliReleaseURL,omitempty"`
+	Resource      string         `json:"resource,omitempty"`
+	ClientID      string         `json:"clientId,omitempty"`
+	TenantID      string         `json:"tenantId,omitempty"`
+	Capabilities  map[string]any `json:"capabilities"`
 }
 
 func (s *Server) connectionConfig(w http.ResponseWriter, r *http.Request) {
@@ -63,12 +62,17 @@ func (s *Server) connectionSettings() (connectionDocument, error) {
 		SiteBaseURL:   s.config.SiteBaseURL,
 		CLIReleaseURL: s.config.CLIReleaseURL,
 		Resource:      connection.Resource,
-		Publishing:    connection.Publishing,
+		ClientID:      connection.ClientID,
+		TenantID:      connection.TenantID,
 		Capabilities:  s.capabilityDescription(),
 	}, nil
 }
 
-var apiResourcePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9:/._-]{0,255}$`)
+var (
+	apiResourcePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9:/._-]{0,255}$`)
+	clientIDPattern    = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+	tenantPattern      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$`)
+)
 
 func validateConnection(connection *ConnectionConfig, siteBaseURL string) error {
 	if strings.TrimSpace(connection.Name) == "" {
@@ -77,36 +81,16 @@ func validateConnection(connection *ConnectionConfig, siteBaseURL string) error 
 	if connection.Resource != "" && !apiResourcePattern.MatchString(connection.Resource) {
 		return fmt.Errorf("invalid API resource identifier")
 	}
-	server, err := connectionOrigin(connection.Server)
-	if err != nil {
+	if connection.ClientID != "" || connection.TenantID != "" {
+		if connection.Resource == "" || !clientIDPattern.MatchString(connection.ClientID) || !tenantPattern.MatchString(connection.TenantID) {
+			return fmt.Errorf("CLI sign-in needs an API resource, a client ID (GUID) and a tenant ID or domain")
+		}
+	}
+	if _, err := connectionOrigin(connection.Server); err != nil {
 		return err
 	}
 	if _, err := parseSiteBaseURL(siteBaseURL); err != nil {
 		return err
-	}
-	if connection.Publishing == nil {
-		return nil
-	}
-
-	publishing := connection.Publishing
-	switch publishing.Provider {
-	case "filesystem":
-		if !loopbackHost(server.Hostname()) {
-			return fmt.Errorf("filesystem publishing is only advertised by local platforms")
-		}
-		if !filepath.IsAbs(publishing.Root) || publishing.URL != "" {
-			return fmt.Errorf("filesystem publishing requires an absolute root and no URL")
-		}
-	case "azure-files":
-		destination, err := url.Parse(publishing.URL)
-		if err != nil || destination.Scheme != "https" || destination.Host == "" || destination.User != nil || destination.RawQuery != "" || destination.Fragment != "" {
-			return fmt.Errorf("Azure Files publishing requires an HTTPS URL without credentials or query parameters")
-		}
-		if destination.Path == "" || destination.Path == "/" || publishing.Root != "" {
-			return fmt.Errorf("Azure Files publishing requires a share/prefix URL and no filesystem root")
-		}
-	default:
-		return fmt.Errorf("unsupported publishing provider")
 	}
 	return nil
 }

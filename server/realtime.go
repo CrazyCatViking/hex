@@ -11,9 +11,12 @@ import (
 )
 
 func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
-	if !validateIdentifiers(w, r) {
+	access := requestAuthorization(r).channel(r.PathValue("channel"))
+	if access.read != grantAll {
+		writeError(w, http.StatusForbidden, "this channel is restricted")
 		return
 	}
+	canSend := access.write == grantAll
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
@@ -40,13 +43,15 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		defer cancel()
-		s.receiveMessages(ctx, connection, room)
+		s.receiveMessages(ctx, connection, room, canSend)
 	}()
 
 	streamMessages(ctx, connection, subscription)
 }
 
-func (s *Server) receiveMessages(ctx context.Context, connection *websocket.Conn, room string) {
+// receiveMessages publishes the client's messages. Subscribers who may only
+// read the channel are disconnected when they try to send.
+func (s *Server) receiveMessages(ctx context.Context, connection *websocket.Conn, room string, canSend bool) {
 	for {
 		messageType, data, err := connection.Read(ctx)
 		if err != nil {
@@ -54,6 +59,10 @@ func (s *Server) receiveMessages(ctx context.Context, connection *websocket.Conn
 			return
 		}
 
+		if !canSend {
+			closeWebSocket(connection, websocket.StatusPolicyViolation, "sending to this channel is restricted")
+			return
+		}
 		if messageType != websocket.MessageText || !json.Valid(data) {
 			closeWebSocket(connection, websocket.StatusInvalidFramePayloadData, "expected JSON text")
 			return

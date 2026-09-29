@@ -103,9 +103,27 @@ variable "site_base_url" {
 }
 
 variable "admin_group_ids" {
-  description = "Entra group object IDs whose members administer every site access entry. Site access control also requires the database capability for durable entries."
+  description = "Entra group object IDs whose members administer every site access policy. Site access control also requires the database capability for durable policies."
   type        = list(string)
   default     = []
+}
+
+variable "publisher_group_ids" {
+  description = "Entra group object IDs whose members may claim new site names by publishing them. Empty lets every signed-in user; owners can always republish their sites."
+  type        = list(string)
+  default     = []
+}
+
+variable "api_resource" {
+  description = "Entra resource the CLI requests tokens for. Defaults to api://<entra_client_id>, advertised with the gateway registration as the CLI's sign-in app; another resource is advertised alone and the CLI obtains its tokens through Azure CLI."
+  type        = string
+  default     = null
+}
+
+variable "site_storage_public_network_access" {
+  description = "Allow publishers outside the VNet to reach the sites storage account. Uploads still require the server-signed SAS URLs; without it, publishers need private-endpoint connectivity."
+  type        = bool
+  default     = false
 }
 
 variable "custom_domains" {

@@ -7,13 +7,13 @@ description: Build and publish web apps on Hex using its file storage, JSON docu
 
 ## Platform setup with an agent
 
-Azure publishing uses Azure CLI's Entra browser sign-in, including MFA. Azure CLI must be installed once; Hex invokes it automatically during publishing and gives AzCopy `AZCOPY_AUTO_LOGIN_TYPE=AZCLI`. Do not use device-code login or ask the user to run AzCopy separately. A missing browser session requires the user to run the Hex command in a desktop terminal. `AZCOPY_TENANT_ID` selects the organization tenant when needed.
+Company platforms require a sign-in for CLI API calls, including publishing. Hex signs in itself through the browser (Entra, including MFA) and saves the session, refreshing it silently; no other tools are needed. In a non-interactive agent session without a saved session, commands fail with an actionable error: ask the user to run `hex login` in a desktop terminal once, then retry. `hex logout` forgets the session. Do not use device-code login and never ask for tokens; automation supplies `HEX_TOKEN`. Older platforms without a built-in sign-in app fall back to Azure CLI.
 
 Employees normally install Hex from their company's main-domain landing page. Its OS-specific installer saves the default platform profile automatically. After installation, start with `hex init` or `hex capabilities`; another setup step is not needed. Use the workflow below only when connecting an unconfigured CLI or adding another platform.
 
 If a user needs to connect to a platform, run `hex setup <platform-url> --json`. This command never blocks on a prompt or opens a browser in JSON mode. Exit code 0 with `status: "ready"` means the profile is configured. Exit code 2 with `status: "download_required"` includes a `downloadURL`: ask the user to open it, sign in through their company's hosting provider, and download the JSON file. When they provide or drop the file into the conversation, run `hex setup --file "/actual/local/path.json" --server <platform-url> --json`. If you only receive file contents, save the JSON to a local file first. Do not ask for passwords, browser cookies, client IDs, or access tokens.
 
-Use `hex init <app-name>` to create `hex.json` and this skill, or `hex init` in an existing app. It does not scaffold an app or install dependencies. By default hex.json contains only `name`; commands resolve the current default platform profile. Use `hex init --platform <profile>` to pin a destination, or `hex publish --platform <profile>` to override it for a command. Azure publishing automatically prepares AzCopy and initiates Microsoft storage sign-in when needed. Do not ask users to install or invoke AzCopy separately. For local filesystem publishing no login is needed. `hex update` installs the latest verified CLI; `hex skills` refreshes this skill afterward.
+Use `hex init <app-name>` to create `hex.json` and this skill, or `hex init` in an existing app. It does not scaffold an app or install dependencies. By default hex.json contains only `name`; commands resolve the current default platform profile. Use `hex init --platform <profile>` to pin a destination, or `hex publish --platform <profile>` to override it for a command. Local platforms need no sign-in. `hex update` installs the latest verified CLI; `hex skills` refreshes this skill afterward.
 
 ## Building an app
 
@@ -32,9 +32,39 @@ const hex = createHexClient({ site: 'my-site' });
 const capabilities = await hex.capabilities();
 ```
 
-When `capabilities.identity` is true, `await hex.identity()` returns the signed-in viewer as `{ id, name?, provider?, groups?, roles? }`, resolved by the hosting gateway; it returns `null` on platforms without identity support. Use it to personalize the app or branch on group membership for convenience only — actual enforcement is the platform's site access entry, never frontend checks. Locally, `hex dev` resolves a fixed `Local Developer` identity.
+When `capabilities.identity` is true, `await hex.identity()` returns the signed-in viewer as `{ id, name?, provider?, groups?, roles? }`, resolved by the hosting gateway; it returns `null` on platforms without identity support. Use it to personalize the app. Locally, `hex dev` resolves a fixed `Local Developer` identity, who is a platform admin.
 
-Use same-origin requests in deployed apps; no API keys or identity code is needed. Authentication happens at the hosting gateway. By default all authenticated users can access all sites and data; site names namespace data, not permissions. A site owner can restrict a site to identity-provider groups with `hex access set <site> --owner <id> --group <id>` (see `hex access --help` and `hex whoami`); the platform then enforces it on the site's pages, files, database and realtime channels, and hides the site from others' discovery. Restriction is per site, so build one site per audience rather than frontend-only access controls, which the platform does not honor. Never embed external service credentials.
+Use same-origin requests in deployed apps; no API keys or identity code is needed. Authentication happens at the hosting gateway. Never embed external service credentials.
+
+## Access control
+
+Without an access policy every signed-in user can view and edit a site. Put the policy in the `access` section of hex.json; `hex publish` applies it and the platform enforces it on pages, files, documents and realtime channels. Frontend checks are never enforcement.
+
+```json
+{
+  "name": "team-dashboard",
+  "access": {
+    "viewers": ["group:<object-id>"],
+    "editors": ["group:<object-id>"],
+    "paths": [{ "prefix": "/admin/", "viewers": "owners" }],
+    "collections": {
+      "settings": { "read": "viewers", "write": "owners" },
+      "drafts": { "read": "creator", "write": "creator" }
+    },
+    "files": { "exports/": { "read": "owners", "write": "owners" } },
+    "channels": { "announcements": { "write": "owners" } }
+  }
+}
+```
+
+- Principals are `user:<id or email>`, `group:<object id>` or `role:<value>`; get real values from the user or `hex whoami`, never invent them. Omitted `owners` keep the current owners; the first publisher of a new name becomes its owner.
+- Empty `viewers` means every signed-in user; empty `editors` means every viewer. Owners and platform admins pass every rule.
+- Audiences are `viewers`, `editors`, `owners`, `creator` or an array of principals. Unset `read` defaults to viewers and unset `write` to editors; `"*"` sets the default for unlisted names.
+- `creator` (collections only): documents carry a server-recorded `createdBy`; other people's documents return 404 and changing them returns 403.
+- Path rules protect separately served files. Build admin areas as a separate HTML entry such as `admin/index.html` (a multi-page build), not a hash route inside the public page, and protect their data with collection rules.
+- Expect `HexError` with status 403 for restricted reads and writes, and handle it in the UI.
+- Use `await hex.permissions()` to show or hide links and controls: it returns `{ role, admin, publish, paths: [{ prefix, allowed }], collections, files, channels }` with `read`/`write` grants of `all`, `own` or `none` per rule (including `"*"`).
+- `hex access show|set|clear|check <site>` manages or inspects policies directly.
 
 ## Files
 
@@ -60,7 +90,7 @@ const next = await tasks.list({ limit: 100, after: page.at(-1).id });
 await tasks.delete(created.id);
 ```
 
-Documents are `{ id, data }`. `set` replaces the entire object and creates it if missing. There is no patch, query language, transaction API or automatic database subscription. Lists sort lexicographically by ID, not creation time. Continue pagination using the last ID until an empty page. Maximum document size is 1 MiB. Collection names, IDs and channels contain 1–64 letters, digits, underscores or hyphens. Published site names must instead be lowercase DNS labels of 1–63 characters, with no underscores or leading/trailing hyphens.
+Documents are `{ id, data, createdBy? }`; `createdBy` is the creator's identity ID, recorded by the server. `set` replaces the entire object and creates it if missing. There is no patch, query language, transaction API or automatic database subscription. Lists sort lexicographically by ID, not creation time. Continue pagination using the last ID until an empty page. Maximum document size is 1 MiB. Collection names, IDs and channels contain 1–64 letters, digits, underscores or hyphens. Published site names must instead be lowercase DNS labels of 1–63 characters, with no underscores or leading/trailing hyphens.
 
 ## Realtime
 
@@ -80,12 +110,12 @@ Messages are JSON, limited to 64 KiB, and delivered to connected subscribers inc
 
 Catch `HexError` for HTTP failures (`status` and `message`). A 404 means a missing object or unavailable capability. Network and authentication redirect failures can be ordinary errors. Never insert untrusted text using innerHTML.
 
-Run `hex publish` from the project root after building if needed. It synchronizes directly to the `publishing` provider and never calls the Hex API. Set `publishing` to `{ "provider": "filesystem", "root": "/path/to/platform/public/sites" }` locally, or `{ "provider": "azure-files", "url": "https://ACCOUNT.file.core.windows.net/sites/public/sites" }` for Azure. The CLI appends the site name to the destination. `index.html` must be at the source root. Sites are served at `https://<name>.<parent-domain>/`, or `http://<name>.localhost:8080/` locally. `siteBaseURL` specifies the parent origin and defaults to `server`. There are no shared `/sites/<name>/` web routes. Use relative or root-relative assets and hash routing; there is no SPA fallback. Keep client API requests same-origin to preserve authentication. Subdomains isolate browser storage but do not grant separate backend permissions.
+Run `hex publish` from the project root after building if needed. The platform checks that the user owns the site (the first publisher of a new name claims it), then the CLI uploads only changed files, `index.html` last, and completes the publication; it prints the site URL. A 403 means someone else owns the name or the user may not create sites: ask the user rather than picking another name silently. `index.html` must be at the source root. Sites are served at `https://<name>.<parent-domain>/`, or `http://<name>.localhost:8080/` locally. `siteBaseURL` specifies the parent origin and defaults to `server`. There are no shared `/sites/<name>/` web routes. Use relative or root-relative assets and hash routing; there is no SPA fallback. Keep client API requests same-origin to preserve authentication. Subdomains isolate browser storage but do not grant separate backend permissions.
 
-Add optional `title`, `description`, and `author` strings to hex.json for site attribution. Ask the user for author information rather than inventing it. The CLI publishes these fields, the optional `discoverable` setting, and a generated UTC `publishedAt` timestamp in `.hex-site.json`; connection settings and local paths are excluded. Source configuration and build output are not modified. Attribution is descriptive, not verified identity or access control.
+Add optional `title`, `description`, and `author` strings to hex.json for site attribution. Ask the user for author information rather than inventing it. The platform records these fields, the optional `discoverable` setting, and a UTC `publishedAt` timestamp in `.hex-site.json`; connection settings and local paths are excluded. Source configuration and build output are not modified. Attribution is descriptive, not verified identity or access control.
 
 Set `"discoverable": false` in hex.json for an app that should not appear in the company's landing-page overview or discovery API. Republish to apply the setting. Set it to true or omit it and republish when the app should become visible. Sites are visible by default. Hidden apps still work at their URLs; this flag is not access control. Statistics count only discoverable sites.
 
-`hex sites` uses the read-only API to enumerate site directories containing a root index.html. Its JSON array contains names, URLs, and an optional `metadata` object with title, description, author, and publishedAt. Sites published without metadata remain discoverable. NGINX blocks direct requests for the hidden metadata file; discovery exposes its descriptive fields. `hex delete <name> --yes` removes the site and its metadata directly through the provider, leaving app uploads and database documents intact. Folder synchronization is not transactional; timestamps describe the publication attempt that produced the files, not an atomic release or verified audit event. Coordinate concurrent publishers and republish after a failure.
+`hex sites` uses the read-only API to enumerate site directories containing a root index.html. Its JSON array contains names, URLs, and an optional `metadata` object with title, description, author, and publishedAt. Sites published without metadata remain discoverable. NGINX blocks direct requests for the hidden metadata file; discovery exposes its descriptive fields. `hex delete <name> --yes` unpublishes a site the user owns, leaving app uploads, database documents and the access policy intact. Publishing replaces files in place and is not transactional; coordinate concurrent publishers and republish after a failure.
 
-For `sites`/`capabilities`/`whoami`/`access` API access, the CLI uses the profile's `resource` (advertised by platforms that configure one) with a signed-in Azure CLI, or an operator-supplied `HEX_TOKEN`. Azure publishing reuses its cached storage session and starts sign-in automatically when required. In a non-interactive agent session, a missing login produces an actionable error: ask the user to run the Hex command in their terminal once, then retry. Automation can use `AZCOPY_AUTO_LOGIN_TYPE=AZCLI` or an operator-supplied `HEX_PUBLISH_SAS`. Publishing still requires Azure Files data permissions and private-endpoint connectivity; a gateway token grants neither. Never store tokens in app files or hex.json. Hex does not implement custom integrations, AI calls or code generation yet.
+All API commands (`publish`, `delete`, `sites`, `capabilities --refresh`, `whoami`, `access`) use the saved sign-in for the profile's `resource`, or an operator-supplied `HEX_TOKEN`. Never store tokens in app files or hex.json. Hex does not implement custom integrations, AI calls or code generation yet.

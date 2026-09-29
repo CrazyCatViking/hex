@@ -134,7 +134,7 @@ func TestCLIUpdateReplacesExecutableAndPreservesConfiguration(t *testing.T) {
 	}
 	t.Setenv("HEX_CONFIG_DIR", filepath.Join(directory, "profiles"))
 	t.Setenv("HEX_CLI_RELEASE_URL", "")
-	connection := localConnection("http://localhost:8080", filepath.Join(directory, "sites"))
+	connection := localConnection("http://localhost:8080")
 	connection.CLIReleaseURL = server.URL
 	if _, err := saveProfile(connection, "company"); err != nil {
 		t.Fatal(err)
@@ -178,7 +178,7 @@ func TestWindowsUpdateRollback(t *testing.T) {
 func TestConnectionKeepsReleaseMirror(t *testing.T) {
 	directory := t.TempDir()
 	t.Setenv("HEX_CONFIG_DIR", directory)
-	connection := localConnection("http://localhost:8080", filepath.Join(directory, "sites"))
+	connection := localConnection("http://localhost:8080")
 	connection.CLIReleaseURL = "https://releases.example.com/hex/latest"
 	if _, err := saveProfile(connection, "company"); err != nil {
 		t.Fatal(err)

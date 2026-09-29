@@ -59,7 +59,3 @@ Download the appropriate artifact and rename it to `hex` (or `hex.exe` on Window
 For source installs on the development machine, use `just install`.
 
 Installed clients can run `hex update` to download and verify the latest CLI without reinstalling or changing profiles. Clients predating the update command need one more run of the platform installer. Release the new CLI before deploying server changes that advertise optional connection fields such as `cliReleaseURL`.
-
-## Managed Azure publishing tool
-
-Hex downloads AzCopy on demand when it is not available locally. `internal/cli/azcopy_install.go` pins the supported Microsoft release and SHA-256 digests for the four CLI targets. To upgrade that dependency, obtain the official release digests from `Azure/azure-storage-azcopy`, update the version and hashes together, and verify with `HEX_TEST_DOWNLOAD_AZCOPY=1 go test ./internal/cli -run TestOfficialManagedAzCopy -v`. Cached tool directories are versioned, so a new Hex release can provision the new dependency without modifying global installations.

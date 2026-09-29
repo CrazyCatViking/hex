@@ -44,7 +44,7 @@ func TestStandaloneBinaryNeedsNeitherNodeNorGoAtRuntime(t *testing.T) {
 		}
 		return string(output)
 	}
-	call("init", "demo", "--publish-root", filepath.Join(directory, "sites"))
+	call("init", "demo")
 	entries, err := os.ReadDir(filepath.Join(directory, "demo"))
 	if err != nil || len(entries) != 2 || entries[0].Name() != ".agents" || entries[1].Name() != "hex.json" {
 		t.Fatalf("init must create only configuration and skills: %v %v", entries, err)
@@ -52,7 +52,7 @@ func TestStandaloneBinaryNeedsNeitherNodeNorGoAtRuntime(t *testing.T) {
 	if data, err := os.ReadFile(filepath.Join(directory, "demo", ".agents", "skills", "hex", "SKILL.md")); err != nil || !strings.Contains(string(data), "hex publish") {
 		t.Fatalf("missing embedded skill: %v", err)
 	}
-	data, err := json.Marshal(localConnection("http://localhost:8080", filepath.Join(directory, "sites")))
+	data, err := json.Marshal(localConnection("http://localhost:8080"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,73 +63,6 @@ func TestStandaloneBinaryNeedsNeitherNodeNorGoAtRuntime(t *testing.T) {
 		t.Fatal(result)
 	}
 	call("--version")
-}
-
-func TestAzureToolsAreDelegatedWithoutHexRequests(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("test helper uses a POSIX shell")
-	}
-	directory := t.TempDir()
-	t.Setenv("HEX_CONFIG_DIR", filepath.Join(directory, "profiles"))
-	tools := filepath.Join(directory, "tools")
-	t.Setenv("HEX_AZCOPY_PATH", filepath.Join(tools, "azcopy"))
-	if err := os.Mkdir(tools, 0755); err != nil {
-		t.Fatal(err)
-	}
-	logFile := filepath.Join(directory, "tool-args")
-	metadataLog := filepath.Join(directory, "metadata.json")
-	t.Setenv("HEX_METADATA_LOG", metadataLog)
-	t.Setenv("HEX_TOOL_LOG", logFile)
-	t.Setenv("PATH", tools+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("DISPLAY", ":fixture")
-	t.Setenv("CODESPACES", "")
-	t.Setenv("AZCOPY_TENANT_ID", "")
-	if err := os.WriteFile(filepath.Join(tools, "az"), []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$HEX_TOOL_LOG\"\n"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	script := `#!/bin/sh
-set -eu
-printf '%s\n' "$@" > "$HEX_TOOL_LOG"
-if [ "$1" = sync ]; then
-    test -f "$2/index.html"
-    test -f "$2/styles/main.css"
-    test ! -e "$2/hex.json"
-    test ! -e "$2/.agents"
-    cp "$2/.hex-site.json" "$HEX_METADATA_LOG"
-fi
-`
-	if err := os.WriteFile(filepath.Join(tools, "azcopy"), []byte(script), 0755); err != nil {
-		t.Fatal(err)
-	}
-	project := filepath.Join(directory, "demo")
-	run(t, directory, "init", project, "--publish-url", "https://account.file.core.windows.net/sites/public/sites")
-	writePublishFixture(t, project, map[string]string{"index.html": "plain site", "styles/main.css": "body {}"})
-	run(t, project, "publish")
-	args, err := os.ReadFile(logFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	lines := strings.Split(strings.TrimSpace(string(args)), "\n")
-	if len(lines) != 5 || lines[0] != "sync" || lines[2] != "https://account.file.core.windows.net/sites/public/sites/demo" || lines[4] != "--delete-destination=true" {
-		t.Fatal(lines)
-	}
-	if _, err := os.Stat(lines[1]); !os.IsNotExist(err) {
-		t.Fatal("publishing snapshot was not removed")
-	}
-	metadata, err := os.ReadFile(metadataLog)
-	if err != nil || !strings.Contains(string(metadata), `"publishedAt"`) {
-		t.Fatalf("Azure snapshot is missing metadata: %s %v", metadata, err)
-	}
-	run(t, project, "login")
-	args, err = os.ReadFile(logFile)
-	if err != nil || !strings.HasPrefix(string(args), "login\n--allow-no-subscriptions\n") {
-		t.Fatalf("%s %v", args, err)
-	}
-	run(t, project, "delete", "--yes")
-	args, err = os.ReadFile(logFile)
-	if err != nil || !strings.HasPrefix(string(args), "remove\n") {
-		t.Fatalf("%s %v", args, err)
-	}
 }
 
 func TestSetupDistinguishesMissingAndProtectedEndpoints(t *testing.T) {

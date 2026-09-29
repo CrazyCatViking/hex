@@ -11,6 +11,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	hex "github.com/crazycatviking/hex/server"
 	"github.com/crazycatviking/hex/server/providers/azureblob"
+	"github.com/crazycatviking/hex/server/providers/azurefiles"
 	"github.com/crazycatviking/hex/server/providers/easyauth"
 	"github.com/crazycatviking/hex/server/providers/local"
 	"github.com/crazycatviking/hex/server/providers/memory"
@@ -18,11 +19,12 @@ import (
 )
 
 type providerSelection struct {
-	sites    string
-	files    string
-	database string
-	realtime string
-	identity string
+	sites     string
+	publisher string
+	files     string
+	database  string
+	realtime  string
+	identity  string
 }
 
 func readProviderSelection(getenv func(string) string) (providerSelection, error) {
@@ -36,12 +38,21 @@ func readProviderSelection(getenv func(string) string) (providerSelection, error
 		databaseDefault = "postgres"
 	}
 
+	sites := environmentValue(getenv, "HEX_SITES_PROVIDER", "filesystem")
+	publisherDefault := "none"
+	if getenv("AZURE_FILES_SHARE_URL") != "" {
+		publisherDefault = "azurefiles"
+	} else if sites == "filesystem" {
+		publisherDefault = "filesystem"
+	}
+
 	selection := providerSelection{
-		sites:    environmentValue(getenv, "HEX_SITES_PROVIDER", "filesystem"),
-		files:    environmentValue(getenv, "HEX_FILES_PROVIDER", filesDefault),
-		database: environmentValue(getenv, "HEX_DATABASE_PROVIDER", databaseDefault),
-		realtime: environmentValue(getenv, "HEX_REALTIME_PROVIDER", "memory"),
-		identity: environmentValue(getenv, "HEX_IDENTITY_PROVIDER", "none"),
+		sites:     sites,
+		publisher: environmentValue(getenv, "HEX_PUBLISHER_PROVIDER", publisherDefault),
+		files:     environmentValue(getenv, "HEX_FILES_PROVIDER", filesDefault),
+		database:  environmentValue(getenv, "HEX_DATABASE_PROVIDER", databaseDefault),
+		realtime:  environmentValue(getenv, "HEX_REALTIME_PROVIDER", "memory"),
+		identity:  environmentValue(getenv, "HEX_IDENTITY_PROVIDER", "none"),
 	}
 	settings := []struct {
 		name    string
@@ -49,6 +60,7 @@ func readProviderSelection(getenv func(string) string) (providerSelection, error
 		allowed []string
 	}{
 		{"HEX_SITES_PROVIDER", selection.sites, []string{"none", "filesystem"}},
+		{"HEX_PUBLISHER_PROVIDER", selection.publisher, []string{"none", "filesystem", "azurefiles"}},
 		{"HEX_FILES_PROVIDER", selection.files, []string{"none", "memory", "filesystem", "azureblob"}},
 		{"HEX_DATABASE_PROVIDER", selection.database, []string{"none", "memory", "postgres"}},
 		{"HEX_REALTIME_PROVIDER", selection.realtime, []string{"none", "memory"}},
@@ -61,6 +73,12 @@ func readProviderSelection(getenv func(string) string) (providerSelection, error
 		}
 	}
 
+	if selection.publisher == "filesystem" && selection.sites != "filesystem" {
+		return selection, fmt.Errorf("the filesystem publisher requires the filesystem sites provider")
+	}
+	if selection.publisher == "azurefiles" && getenv("AZURE_FILES_SHARE_URL") == "" {
+		return selection, fmt.Errorf("AZURE_FILES_SHARE_URL is required for the azurefiles publisher")
+	}
 	if selection.files == "azureblob" && getenv("AZURE_BLOB_ENDPOINT") == "" {
 		return selection, fmt.Errorf("AZURE_BLOB_ENDPOINT is required for the azureblob files provider")
 	}
@@ -115,7 +133,18 @@ func configure(ctx context.Context, getenv func(string) string) (hex.Config, fun
 			return config, nil, fmt.Errorf("configure site storage: %w", err)
 		}
 		config.Sites = store
+		if selection.publisher == "filesystem" {
+			config.Publisher = store
+		}
 	}
+	if selection.publisher == "azurefiles" {
+		publisher, err := openAzureFiles(getenv)
+		if err != nil {
+			return config, nil, fmt.Errorf("configure Azure Files publishing: %w", err)
+		}
+		config.Publisher = publisher
+	}
+	config.PublisherGroups = splitList(getenv("HEX_PUBLISHER_GROUPS"))
 
 	switch selection.files {
 	case "memory":
@@ -162,12 +191,8 @@ func configure(ctx context.Context, getenv func(string) string) (hex.Config, fun
 			Name:     environmentValue(getenv, "HEX_PLATFORM_NAME", "Hex"),
 			Server:   serverURL,
 			Resource: getenv("HEX_API_RESOURCE"),
-		}
-		if publishingURL := getenv("HEX_PUBLISH_URL"); publishingURL != "" {
-			config.Connection.Publishing = &hex.PublishingConfig{
-				Provider: "azure-files",
-				URL:      publishingURL,
-			}
+			ClientID: getenv("HEX_CLI_CLIENT_ID"),
+			TenantID: getenv("HEX_CLI_TENANT_ID"),
 		}
 	}
 
@@ -176,7 +201,7 @@ func configure(ctx context.Context, getenv func(string) string) (hex.Config, fun
 }
 
 // configureIdentity wires the identity resolver, admin groups and the access
-// store. Access entries need durable storage, so site access control only
+// store. Access policies need durable storage, so site access control only
 // activates alongside the PostgreSQL database provider; the ephemeral static
 // setup accepts the in-memory store for local experimentation.
 func configureIdentity(config *hex.Config, selection providerSelection, getenv func(string) string) {
@@ -222,6 +247,14 @@ func splitList(value string) []string {
 		}
 	}
 	return values
+}
+
+func openAzureFiles(getenv func(string) string) (*azurefiles.Publisher, error) {
+	credential, err := azidentity.NewDefaultAzureCredential(nil)
+	if err != nil {
+		return nil, fmt.Errorf("create Azure credential: %w", err)
+	}
+	return azurefiles.New(getenv("AZURE_FILES_SHARE_URL"), credential)
 }
 
 func openBlobStorage(getenv func(string) string) (*azureblob.Store, error) {

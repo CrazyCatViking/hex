@@ -14,7 +14,9 @@ For SmartDok, configure:
 HEX_PLATFORM_NAME=SmartDok Hex
 HEX_PUBLIC_URL=https://hex.smartdok.dev
 HEX_SITE_BASE_URL=https://hex.smartdok.dev
-HEX_PUBLISH_URL=https://ACCOUNT.file.core.windows.net/sites/public/sites
+HEX_API_RESOURCE=api://<client-id>
+HEX_CLI_CLIENT_ID=<client-id>
+HEX_CLI_TENANT_ID=<tenant-id>
 ```
 
 Set up DNS, TLS, ingress bindings, and hosting authentication for the main domain as well as the site domains. The Azure example accepts `platform_url`, `site_base_url`, and `custom_domains`; setting a URL does not create DNS or register Entra callbacks. See [subdomain hosting](subdomains.md).
@@ -37,7 +39,7 @@ To keep an app out of the overview, set this in its source `hex.json` and republ
 }
 ```
 
-Set `discoverable` to `true` or remove it and republish to list the app. Missing metadata and omitted visibility fields retain the default visible behavior. Hidden apps are excluded server-side from the HTML catalog, `/api/sites`, and overview statistics. Their URLs and app APIs continue to work; this is a listing preference, not authorization. The CLI includes the setting in `.hex-site.json` alongside the descriptive metadata. For actual authorization, restrict the site with a [site access entry](access-control.md); the catalog, discovery API and statistics then omit the site for viewers outside its groups.
+Set `discoverable` to `true` or remove it and republish to list the app. Missing metadata and omitted visibility fields retain the default visible behavior. Hidden apps are excluded server-side from the HTML catalog, `/api/sites`, and overview statistics. Their URLs and app APIs continue to work; this is a listing preference, not authorization. The server records the setting in `.hex-site.json` alongside the descriptive metadata. For actual authorization, restrict the site's viewers in its [access policy](access-control.md); the catalog, discovery API and statistics then omit the site for people who cannot view it.
 
 ## Employee onboarding
 
@@ -58,7 +60,7 @@ The browser download is intentional: terminal `curl`/PowerShell requests cannot 
 
 Unix scripts require Bash, curl, base64, and sha256sum or shasum. They add the bin directory to common shell startup files idempotently. The Windows script uses PowerShell and adds its bin directory to the user's PATH. Neither requires administrator privileges. The displayed PowerShell command sets execution policy only for that installation process.
 
-The installer verifies SHA-256 before installing the CLI, imports settings without network access to the platform, and removes temporary files. After installation, `hex update` installs newer binaries while preserving profiles. Rerunning a newly downloaded installer also refreshes platform settings. Azure publishers need Azure CLI installed once; `hex publish` then prepares AzCopy and invokes Azure CLI's Entra browser sign-in with MFA support. Employees do not need separate AzCopy installation or login commands.
+The installer verifies SHA-256 before installing the CLI, imports settings without network access to the platform, and removes temporary files. After installation, `hex update` installs newer binaries while preserving profiles. Rerunning a newly downloaded installer also refreshes platform settings. The first `hex publish` opens the browser for Entra sign-in with MFA support and saves the session; employees need no other tools.
 
 ## Release source
 

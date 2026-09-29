@@ -37,12 +37,26 @@ func TestPostgresDatabase(t *testing.T) {
 	}()
 
 	for _, id := range []string{"a", "b", "c"} {
-		if err := database.Put(ctx, site, "notes", id, json.RawMessage(`{"value":"initial"}`)); err != nil {
+		if _, err := database.Put(ctx, site, "notes", id, json.RawMessage(`{"value":"initial"}`), hex.WriteOptions{Creator: "alice"}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := database.Put(ctx, site, "notes", "b", json.RawMessage(`{"updated":true}`)); err != nil {
+	if _, err := database.Put(ctx, site, "notes", "b", json.RawMessage(`{"blocked":true}`), hex.WriteOptions{Creator: "bob", CreatorOnly: true}); !errors.Is(err, hex.ErrForbidden) {
+		t.Fatalf("creator-only write by another user: got %v", err)
+	}
+	stored, err := database.Put(ctx, site, "notes", "b", json.RawMessage(`{"updated":true}`), hex.WriteOptions{Creator: "bob"})
+	if err != nil {
 		t.Fatal(err)
+	}
+	if stored.CreatedBy != "alice" {
+		t.Fatalf("replacement changed the creator: %+v", stored)
+	}
+	if _, err := database.Put(ctx, site, "notes", "d", json.RawMessage(`{"owner":"bob"}`), hex.WriteOptions{Creator: "bob", CreatorOnly: true}); err != nil {
+		t.Fatal(err)
+	}
+	own, err := database.List(ctx, site, "notes", hex.ListOptions{Limit: 100, CreatedBy: "bob"})
+	if err != nil || len(own) != 1 || own[0].ID != "d" {
+		t.Fatalf("creator filter failed: %v %v", own, err)
 	}
 	reopened, err := New(ctx, connection)
 	if err != nil {
@@ -60,15 +74,18 @@ func TestPostgresDatabase(t *testing.T) {
 	if len(data) != 1 || data["updated"] != true {
 		t.Fatal("document replacement did not persist", data)
 	}
-	documents, err := database.List(ctx, site, "notes", "a", 1)
+	documents, err := database.List(ctx, site, "notes", hex.ListOptions{After: "a", Limit: 1})
 	if err != nil || len(documents) != 1 || documents[0].ID != "b" {
 		t.Fatalf("unexpected page: %v %v", documents, err)
 	}
-	documents, err = database.List(ctx, site, "other", "", 100)
+	documents, err = database.List(ctx, site, "other", hex.ListOptions{Limit: 100})
 	if err != nil || len(documents) != 0 {
 		t.Fatalf("collection isolation failed: %v %v", documents, err)
 	}
-	if err := database.Delete(ctx, site, "notes", "b"); err != nil {
+	if err := database.Delete(ctx, site, "notes", "b", hex.WriteOptions{Creator: "bob", CreatorOnly: true}); !errors.Is(err, hex.ErrForbidden) {
+		t.Fatalf("creator-only delete by another user: got %v", err)
+	}
+	if err := database.Delete(ctx, site, "notes", "b", hex.WriteOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.Get(ctx, site, "notes", "b"); !errors.Is(err, hex.ErrNotFound) {
@@ -95,7 +112,7 @@ func TestPostgresSiteAccess(t *testing.T) {
 	defer func() {
 		cleanup, stop := context.WithTimeout(context.Background(), 10*time.Second)
 		defer stop()
-		if _, err := database.pool.Exec(cleanup, "DELETE FROM hex_site_access WHERE site=$1", site); err != nil {
+		if _, err := database.pool.Exec(cleanup, "DELETE FROM hex_site_policies WHERE site=$1", site); err != nil {
 			t.Error(err)
 		}
 	}()
@@ -103,11 +120,19 @@ func TestPostgresSiteAccess(t *testing.T) {
 	if _, err := database.GetSiteAccess(ctx, site); !errors.Is(err, hex.ErrNotFound) {
 		t.Fatalf("expected not found, got %v", err)
 	}
-	entry := hex.SiteAccess{Owners: []string{"owner-id"}, Groups: []string{"sales", "ops"}}
+	entry := hex.SiteAccess{
+		Owners:      []string{"user:owner-id"},
+		Viewers:     []string{"group:sales", "group:ops"},
+		Paths:       []hex.PathRule{{Prefix: "/admin/", Viewers: hex.Audience{Level: hex.LevelOwners}}},
+		Collections: map[string]hex.DataRule{"drafts": {Read: hex.Audience{Level: hex.LevelCreator}}},
+	}
 	if err := database.PutSiteAccess(ctx, site, entry); err != nil {
 		t.Fatal(err)
 	}
-	replacement := hex.SiteAccess{Owners: []string{"owner-id", "backup-id"}, Groups: []string{}}
+	replacement := hex.SiteAccess{
+		Owners:      []string{"user:owner-id", "user:backup-id"},
+		Collections: map[string]hex.DataRule{"drafts": {Read: hex.Audience{Level: hex.LevelCreator}}},
+	}
 	if err := database.PutSiteAccess(ctx, site, replacement); err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +146,7 @@ func TestPostgresSiteAccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(access.Owners) != 2 || access.Owners[1] != "backup-id" || len(access.Groups) != 0 {
+	if len(access.Owners) != 2 || access.Owners[1] != "user:backup-id" || len(access.Viewers) != 0 || access.Collections["drafts"].Read.Level != hex.LevelCreator {
 		t.Fatalf("unexpected access entry: %+v", access)
 	}
 

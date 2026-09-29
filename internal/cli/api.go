@@ -9,66 +9,96 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"strings"
+	"sync"
 
 	"github.com/spf13/cobra"
 )
+
+// apiStatusError is an unexpected API response status.
+type apiStatusError struct {
+	Status  int
+	Message string
+}
+
+func (e *apiStatusError) Error() string {
+	if e.Message != "" {
+		return fmt.Sprintf("Hex API returned HTTP %d: %s", e.Status, e.Message)
+	}
+	return fmt.Sprintf("Hex API returned HTTP %d", e.Status)
+}
+
+// tokenCache keeps one API token per resource for the life of the command,
+// so multi-request commands such as publish ask Azure CLI only once.
+type tokenCache struct {
+	mu     sync.Mutex
+	tokens map[string]string
+}
 
 func (a *App) apiRequest(ctx context.Context, project Project, path string) (json.RawMessage, error) {
 	return a.apiCall(ctx, project, http.MethodGet, path, nil)
 }
 
 func (a *App) apiCall(ctx context.Context, project Project, method, path string, body any) (json.RawMessage, error) {
-	server, err := origin(project.Server, false)
-	if err != nil {
-		return nil, err
-	}
-	token := os.Getenv("HEX_TOKEN")
-	if token == "" && project.Resource != "" {
-		command := exec.CommandContext(ctx, "az", "account", "get-access-token", "--resource", project.Resource, "--query", "accessToken", "-o", "tsv")
-		command.Stderr = a.Err
-		output, err := command.Output()
-		if err != nil {
-			return nil, fmt.Errorf("obtain Azure API token; check az login and resource permissions: %w", err)
-		}
-		token = strings.TrimSpace(string(output))
-	}
 	var payload io.Reader
+	var size int64
+	contentType := ""
 	if body != nil {
 		data, err := json.Marshal(body)
 		if err != nil {
 			return nil, err
 		}
 		payload = bytes.NewReader(data)
+		size = int64(len(data))
+		contentType = "application/json"
 	}
+	return a.apiSend(ctx, project, method, path, payload, size, contentType)
+}
+
+func (a *App) apiSend(ctx context.Context, project Project, method, path string, payload io.Reader, size int64, contentType string) (json.RawMessage, error) {
+	server, err := origin(project.Server, false)
+	if err != nil {
+		return nil, err
+	}
+	token, err := a.apiToken(ctx, project)
+	if err != nil {
+		return nil, err
+	}
+
 	request, err := http.NewRequestWithContext(ctx, method, server.String()+path, payload)
 	if err != nil {
 		return nil, err
 	}
-	request.Header.Set("X-Hex-Request", "1")
-	if body != nil {
-		request.Header.Set("Content-Type", "application/json")
+	if payload != nil {
+		request.ContentLength = size
+		request.Header.Set("Content-Type", contentType)
 	}
+	request.Header.Set("X-Hex-Request", "1")
 	if token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
-	response, err := a.HTTP.Do(request)
+
+	client := a.HTTP
+	if payload != nil && contentType != "application/json" {
+		// Uploads can take longer than the default request timeout.
+		streaming := *a.HTTP
+		streaming.Timeout = 0
+		client = &streaming
+	}
+	response, err := client.Do(request)
 	if err != nil {
 		return nil, err
 	}
 	defer closeLogged(a.Err, response.Body)
+
 	if requiresBrowser(response.StatusCode) {
-		return nil, fmt.Errorf("gateway access requires authentication or permission (HTTP %d); use the browser or HEX_TOKEN. hex login authenticates storage only", response.StatusCode)
+		return nil, fmt.Errorf("gateway access requires authentication or permission (HTTP %d); run hex login, or set HEX_TOKEN", response.StatusCode)
 	}
 	if response.StatusCode == http.StatusNoContent {
 		return nil, nil
 	}
-	if response.StatusCode != http.StatusOK {
-		if message := apiErrorMessage(response); message != "" {
-			return nil, fmt.Errorf("Hex API returned HTTP %d: %s", response.StatusCode, message)
-		}
-		return nil, fmt.Errorf("Hex API returned HTTP %d", response.StatusCode)
+	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusCreated {
+		return nil, &apiStatusError{Status: response.StatusCode, Message: apiErrorMessage(response)}
 	}
 	if !strings.Contains(response.Header.Get("Content-Type"), "application/json") {
 		return nil, errors.New("expected a JSON response from Hex")
@@ -81,6 +111,77 @@ func (a *App) apiCall(ctx context.Context, project Project, method, path string,
 		return nil, errors.New("invalid JSON response from Hex")
 	}
 	return data, nil
+}
+
+// apiToken returns HEX_TOKEN, or a token for the platform's API resource:
+// from the CLI's own sign-in when the platform advertises a sign-in app, or
+// from Azure CLI for platforms that do not.
+func (a *App) apiToken(ctx context.Context, project Project) (string, error) {
+	if token := os.Getenv("HEX_TOKEN"); token != "" {
+		return token, nil
+	}
+	if project.Resource == "" {
+		return "", nil
+	}
+
+	a.tokens.mu.Lock()
+	defer a.tokens.mu.Unlock()
+	if token, ok := a.tokens.tokens[project.Resource]; ok {
+		return token, nil
+	}
+
+	var token string
+	var err error
+	if project.ClientID != "" {
+		token, err = a.signedInToken(ctx, project)
+	} else {
+		token, err = a.azureCLIToken(ctx, project.Resource)
+	}
+	if err != nil {
+		return "", err
+	}
+
+	if a.tokens.tokens == nil {
+		a.tokens.tokens = make(map[string]string)
+	}
+	a.tokens.tokens[project.Resource] = token
+	return token, nil
+}
+
+func (a *App) azureCLIToken(ctx context.Context, resource string) (string, error) {
+	token, err := a.azureAccessToken(ctx, resource)
+	if err != nil && a.Interactive {
+		fmt.Fprintln(a.Err, "Signing in to the platform with Azure CLI...")
+		if loginError := a.azureLogin(ctx, resource); loginError != nil {
+			return "", loginError
+		}
+		token, err = a.azureAccessToken(ctx, resource)
+	}
+	if err != nil {
+		return "", fmt.Errorf("obtain a platform token; run hex login first: %w", err)
+	}
+	return token, nil
+}
+
+func (a *App) azureAccessToken(ctx context.Context, resource string) (string, error) {
+	if err := validateResource(resource); err != nil {
+		return "", err
+	}
+	args, err := azureTenantArguments([]string{"account", "get-access-token", "--resource", resource, "--query", "accessToken", "--output", "tsv"})
+	if err != nil {
+		return "", err
+	}
+	command, err := azureCLICommand(ctx, args...)
+	if err != nil {
+		return "", err
+	}
+	command.Dir = a.Dir
+	command.Stderr = io.Discard
+	output, err := command.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
 }
 
 func apiErrorMessage(response *http.Response) string {
@@ -124,7 +225,7 @@ func (a *App) readCommand(name, description, path string, cached bool) *cobra.Co
 				project.Server = server
 			}
 			if resource != "" {
-				project.Resource = resource
+				project = project.withResource(resource)
 			}
 			data, err := a.apiRequest(cmd.Context(), project, path)
 			if err != nil {
@@ -146,24 +247,44 @@ func (a *App) loginCommand() *cobra.Command {
 	var profile string
 	command := &cobra.Command{
 		Use:   "login",
-		Short: "Delegate publishing login to the storage provider",
+		Short: "Sign in to the platform in your browser",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			project, err := a.commandConfig(profile, false)
 			if err != nil {
 				return err
 			}
-			if project.Publishing == nil {
-				return errors.New("no publishing provider configured")
+			switch {
+			case project.Resource == "":
+				fmt.Fprintln(a.Out, "This platform does not require a sign-in for the CLI.")
+				return nil
+			case project.ClientID != "":
+				return a.signIn(cmd.Context(), project)
+			default:
+				return a.azureLogin(cmd.Context(), project.Resource)
 			}
-			if err := validatePublishing(*project.Publishing); err != nil {
+		},
+	}
+	command.Flags().StringVar(&profile, "platform", "", "Saved platform profile")
+	return command
+}
+
+func (a *App) logoutCommand() *cobra.Command {
+	var profile string
+	command := &cobra.Command{
+		Use:   "logout",
+		Short: "Forget the saved platform sign-in",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			project, err := a.commandConfig(profile, false)
+			if err != nil {
 				return err
 			}
-			if project.Publishing.Provider == "filesystem" {
-				fmt.Fprintln(a.Out, "Filesystem publishing does not require a storage login.")
+			if project.ClientID == "" {
+				fmt.Fprintln(a.Out, "This platform has no saved Hex sign-in; Azure CLI sessions are managed with az logout.")
 				return nil
 			}
-			return a.azureLogin(cmd.Context())
+			return a.signOut(cmd.Context(), project)
 		},
 	}
 	command.Flags().StringVar(&profile, "platform", "", "Saved platform profile")

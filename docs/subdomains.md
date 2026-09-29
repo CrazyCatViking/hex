@@ -28,7 +28,7 @@ The NGINX Docker image generates its configuration from `internal/cli/assets/ngi
 
 Different hostnames isolate localStorage, sessionStorage, IndexedDB and service-worker scopes. NGINX also sends `Origin-Agent-Cluster: ?1` for static responses. Sibling subdomains can still be same-site for cookie policy, and a cookie deliberately scoped to the parent domain can be shared. Use host-scoped cookies for app-specific state.
 
-Origin separation is not backend authorization. The current shared APIs allow admitted users to access all site namespaces. Hosting authentication must cover every site's assets, API calls and WebSocket upgrades, and the backend must have no bypassing public listener.
+Origin separation is not backend authorization. Without an [access policy](access-control.md), admitted users can access all site namespaces; policies are enforced by the API on the site path segment, not by origin. Hosting authentication must cover every site's assets, API calls and WebSocket upgrades, and the backend must have no bypassing public listener.
 
 ## Local development
 
@@ -41,7 +41,7 @@ npx playwright install chromium
 npm run test:browser
 ```
 
-It starts NGINX and Go, opens two site origins in the same Chromium browser context, and verifies independent localStorage, sessionStorage and IndexedDB data. The ordinary end-to-end test checks host-based file routing, unknown-host rejection, same-origin API/WebSocket access, and direct publication while Go is stopped.
+It starts NGINX and Go, opens two site origins in the same Chromium browser context, and verifies independent localStorage, sessionStorage and IndexedDB data. The ordinary end-to-end test checks host-based file routing, unknown-host rejection, same-origin API/WebSocket access, and publishing through the API.
 
 ## Azure hosting setup
 
@@ -61,7 +61,7 @@ Certificate IDs must refer to certificates in that Container Apps environment. T
 
 For the standard Easy Auth flow, register each site's exact `https://<site-host>/.auth/login/aad/callback` Web redirect URI in the Entra application. The example outputs `custom_domain_redirect_uris` as a configuration aid. Entra documents wildcard redirect URIs for work/school-only registrations, but strongly recommends exact URIs; do not assume wildcard DNS supplies wildcard authentication. A wildcard-domain hosting design needs separate validation of ingress support and authentication behavior. No custom authentication broker or broad parent-domain session cookie is added to Hex.
 
-Domain/TLS/Entra onboarding is hosting configuration, not a site catalogue or part of `hex publish`. Publishing only writes files. The directory-discovery API can enumerate a site before its hostname is configured, so operators must arrange hosting coverage for the names they intend to publish.
+Domain/TLS/Entra onboarding is hosting configuration, not a site catalogue or part of `hex publish`. Publishing only writes files and the access policy. The directory-discovery API can enumerate a site before its hostname is configured, so operators must arrange hosting coverage for the names they intend to publish.
 
 Live Azure DNS, certificate bindings and Entra sign-in have not been tested in this repository. Verify anonymous rejection on every bound hostname before production use.
 

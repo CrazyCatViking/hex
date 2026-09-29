@@ -80,6 +80,29 @@ run "sites_only" {
   }
 
   assert {
+    condition = (
+      local.server_environment.HEX_PUBLISHER_PROVIDER == "azurefiles" &&
+      startswith(local.server_environment.AZURE_FILES_SHARE_URL, "https://") &&
+      !contains(keys(local.server_environment), "HEX_PUBLISH_URL")
+    )
+    error_message = "Site hosting must publish through the API with the azurefiles publisher."
+  }
+
+  assert {
+    condition     = length(azapi_resource.site_publishing_access) == 2
+    error_message = "The server identity needs file data and delegation roles to sign uploads."
+  }
+
+  assert {
+    condition = (
+      local.server_environment.HEX_API_RESOURCE == "api://00000000-0000-0000-0000-000000000003" &&
+      local.server_environment.HEX_CLI_CLIENT_ID == "00000000-0000-0000-0000-000000000003" &&
+      local.server_environment.HEX_CLI_TENANT_ID == "00000000-0000-0000-0000-000000000002"
+    )
+    error_message = "The CLI must sign in as the gateway registration for its own API by default."
+  }
+
+  assert {
     condition     = length(local.server_secrets) == 0
     error_message = "Site-only hosting must not carry database credentials."
   }
@@ -93,7 +116,7 @@ run "sites_only" {
   }
 }
 
-run "admin_groups" {
+run "admin_and_publisher_groups" {
   command = plan
 
   variables {
@@ -101,11 +124,23 @@ run "admin_groups" {
       "00000000-0000-0000-0000-00000000000a",
       "00000000-0000-0000-0000-00000000000b",
     ]
+    publisher_group_ids = ["00000000-0000-0000-0000-00000000000c"]
+    api_resource        = "api://00000000-0000-0000-0000-00000000000d"
   }
 
   assert {
     condition     = local.server_environment.HEX_ADMIN_GROUPS == "00000000-0000-0000-0000-00000000000a,00000000-0000-0000-0000-00000000000b"
     error_message = "Configured admin groups must reach the server as a comma-separated list."
+  }
+
+  assert {
+    condition = (
+      local.server_environment.HEX_PUBLISHER_GROUPS == "00000000-0000-0000-0000-00000000000c" &&
+      local.server_environment.HEX_API_RESOURCE == "api://00000000-0000-0000-0000-00000000000d" &&
+      !contains(keys(local.server_environment), "HEX_CLI_CLIENT_ID") &&
+      !contains(keys(local.server_environment), "HEX_CLI_TENANT_ID")
+    )
+    error_message = "Publisher groups must reach the server, and another API resource must be advertised without the gateway's sign-in app."
   }
 }
 
@@ -166,6 +201,8 @@ run "api_only_external_database" {
   assert {
     condition = (
       local.server_environment.HEX_SITES_PROVIDER == "none" &&
+      local.server_environment.HEX_PUBLISHER_PROVIDER == "none" &&
+      length(azapi_resource.site_publishing_access) == 0 &&
       local.server_environment.HEX_DATABASE_PROVIDER == "postgres" &&
       local.server_secrets.DATABASE_URL == var.database_url
     )

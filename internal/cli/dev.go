@@ -89,7 +89,7 @@ func (a *App) runDevelopment(ctx context.Context, settings devSettings) (result 
 
 	fmt.Fprintf(a.Out, "Hex development environment ready: http://localhost:%d\n", settings.Port)
 	fmt.Fprintf(a.Out, "Sites: http://<name>.localhost:%d/\n", settings.Port)
-	fmt.Fprintln(a.Out, "Publishing root:", filepath.Join(settings.DataDirectory, "sites", "public", "sites"))
+	fmt.Fprintln(a.Out, "Site directory:", filepath.Join(settings.DataDirectory, "sites", "public", "sites"))
 	fmt.Fprintln(a.Out, "Local gateway and API are loopback-only and unauthenticated.")
 	if len(settings.Services) > 0 {
 		fmt.Fprintln(a.Out, "Service containers persist after exit. Use hex dev --stop-services to stop them.")

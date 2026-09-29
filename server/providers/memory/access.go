@@ -2,13 +2,12 @@ package memory
 
 import (
 	"context"
-	"slices"
 	"sync"
 
 	hex "github.com/crazycatviking/hex/server"
 )
 
-// AccessStore keeps site access entries in process memory. Entries disappear
+// AccessStore keeps site access policies in process memory. Policies disappear
 // on restart, so it is only suitable for local development and tests.
 type AccessStore struct {
 	mu      sync.RWMutex
@@ -32,7 +31,7 @@ func (s *AccessStore) GetSiteAccess(ctx context.Context, site string) (hex.SiteA
 		return hex.SiteAccess{}, hex.ErrNotFound
 	}
 
-	return cloneAccess(access), nil
+	return hex.CloneSiteAccess(access), nil
 }
 
 func (s *AccessStore) PutSiteAccess(ctx context.Context, site string, access hex.SiteAccess) error {
@@ -43,7 +42,7 @@ func (s *AccessStore) PutSiteAccess(ctx context.Context, site string, access hex
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.entries[site] = cloneAccess(access)
+	s.entries[site] = hex.CloneSiteAccess(access)
 	return nil
 }
 
@@ -61,11 +60,4 @@ func (s *AccessStore) DeleteSiteAccess(ctx context.Context, site string) error {
 
 	delete(s.entries, site)
 	return nil
-}
-
-func cloneAccess(access hex.SiteAccess) hex.SiteAccess {
-	return hex.SiteAccess{
-		Owners: slices.Clone(access.Owners),
-		Groups: slices.Clone(access.Groups),
-	}
 }

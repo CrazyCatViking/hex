@@ -29,6 +29,11 @@ type App struct {
 	OpenBrowser func(string) error
 	input       *bufio.Reader
 	writes      *writeState
+	tokens      tokenCache
+	// signInHost and signInHTTP replace the Microsoft identity platform in
+	// tests.
+	signInHost string
+	signInHTTP *http.Client
 }
 
 type writeState struct {
@@ -105,7 +110,7 @@ func (a *App) Execute(ctx context.Context, args []string, version string) error 
 	root.CompletionOptions.DisableDefaultCmd = true
 	root.AddCommand(a.setupCommand(), a.initCommand(), a.devCommand())
 	root.AddCommand(a.updateCommand())
-	root.AddCommand(a.publishCommand(), a.deleteCommand(), a.loginCommand())
+	root.AddCommand(a.publishCommand(), a.deleteCommand(), a.loginCommand(), a.logoutCommand())
 	root.AddCommand(a.sitesCommand(), a.capabilitiesCommand(), a.skillsCommand())
 	root.AddCommand(a.accessCommand(), a.whoamiCommand())
 	err := root.ExecuteContext(ctx)

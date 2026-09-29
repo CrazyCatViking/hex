@@ -35,6 +35,34 @@ module "sites" {
   subnet_id         = module.network.endpoints_subnet_id
   quota_gib         = var.site_quota_gib
   access_tier       = var.site_access_tier
+
+  public_network_access = var.site_storage_public_network_access
+}
+
+# Publishing goes through the Hex API, which signs per-file upload URLs.
+# The server identity needs data-plane write access to the sites share
+# (Storage File Data Privileged Contributor) and the right to obtain a user
+# delegation key for signing (Storage File Delegator). Publishers need no
+# storage role of their own.
+locals {
+  site_publishing_roles = var.capabilities.sites ? {
+    file-data-privileged-contributor = "69566ab7-960f-475b-8e7c-b3118f30c6bd"
+    file-delegator                   = "765a04e0-5de8-4bb2-9bf6-b2a30bc03e91"
+  } : {}
+}
+
+resource "azapi_resource" "site_publishing_access" {
+  for_each  = local.site_publishing_roles
+  type      = "Microsoft.Authorization/roleAssignments@2022-04-01"
+  name      = uuidv5("url", "${module.sites[0].id}/${azapi_resource.identity.id}/${each.key}")
+  parent_id = module.sites[0].id
+  body = {
+    properties = {
+      principalId      = azapi_resource.identity.output.properties.principalId
+      principalType    = "ServicePrincipal"
+      roleDefinitionId = "/subscriptions/${var.subscription_id}/providers/Microsoft.Authorization/roleDefinitions/${each.value}"
+    }
+  }
 }
 
 module "files" {
@@ -75,17 +103,30 @@ resource "azapi_resource" "registry_access" {
 }
 
 locals {
+  # The CLI signs in as the gateway's own registration and requests tokens
+  # for its API, so no extra consent is needed. An explicit api_resource for
+  # another API is advertised without a sign-in app; the CLI then falls back
+  # to Azure CLI for it.
+  cli_sign_in = var.api_resource == null ? {
+    HEX_API_RESOURCE  = "api://${var.entra_client_id}"
+    HEX_CLI_CLIENT_ID = var.entra_client_id
+    HEX_CLI_TENANT_ID = var.entra_tenant_id
+  } : { HEX_API_RESOURCE = var.api_resource }
+
   server_environment = merge(
     {
-      HEX_SITES_PROVIDER    = "none"
-      HEX_FILES_PROVIDER    = "none"
-      HEX_DATABASE_PROVIDER = var.capabilities.database == "none" ? "none" : "postgres"
-      HEX_REALTIME_PROVIDER = var.capabilities.realtime ? "memory" : "none"
-      HEX_IDENTITY_PROVIDER = "easyauth"
-      AZURE_CLIENT_ID       = azapi_resource.identity.output.properties.clientId
-      HEX_PLATFORM_NAME     = var.name
+      HEX_SITES_PROVIDER     = "none"
+      HEX_PUBLISHER_PROVIDER = "none"
+      HEX_FILES_PROVIDER     = "none"
+      HEX_DATABASE_PROVIDER  = var.capabilities.database == "none" ? "none" : "postgres"
+      HEX_REALTIME_PROVIDER  = var.capabilities.realtime ? "memory" : "none"
+      HEX_IDENTITY_PROVIDER  = "easyauth"
+      AZURE_CLIENT_ID        = azapi_resource.identity.output.properties.clientId
+      HEX_PLATFORM_NAME      = var.name
     },
     length(var.admin_group_ids) == 0 ? {} : { HEX_ADMIN_GROUPS = join(",", var.admin_group_ids) },
+    length(var.publisher_group_ids) == 0 ? {} : { HEX_PUBLISHER_GROUPS = join(",", var.publisher_group_ids) },
+    local.cli_sign_in,
     var.site_base_url == null ? {} : { HEX_SITE_BASE_URL = var.site_base_url },
     var.platform_url == null ? {} : { HEX_PUBLIC_URL = var.platform_url },
     var.cli_release_url == null ? {} : { HEX_CLI_RELEASE_URL = var.cli_release_url },
@@ -119,7 +160,7 @@ module "hosting" {
     identity = azapi_resource.identity.id
   }]
 
-  depends_on     = [azapi_resource.registry_access]
+  depends_on     = [azapi_resource.registry_access, azapi_resource.site_publishing_access]
   site_domain    = var.site_base_url == null ? "localhost" : trimsuffix(trimprefix(var.site_base_url, "https://"), "/")
   custom_domains = var.custom_domains
 }
@@ -134,10 +175,6 @@ output "redirect_uri" {
 
 output "capabilities" {
   value = var.capabilities
-}
-
-output "publishing" {
-  value = var.capabilities.sites ? module.sites[0].publishing : null
 }
 
 output "site_base_url" {

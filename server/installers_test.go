@@ -24,8 +24,7 @@ func installerPlatform(releaseURL string) *hex.Server {
 		SiteBaseURL:   "https://hex.smartdok.dev",
 		CLIReleaseURL: releaseURL,
 		Connection: &hex.ConnectionConfig{
-			Name: "SmartDok Hex", Server: "https://hex.smartdok.dev",
-			Publishing: &hex.PublishingConfig{Provider: "azure-files", URL: "https://example.file.core.windows.net/sites/public/sites"},
+			Name: "SmartDok Hex", Server: "https://hex.smartdok.dev", Resource: "api://hex",
 		},
 	})
 }

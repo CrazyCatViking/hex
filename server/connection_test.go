@@ -16,12 +16,9 @@ func TestConnectionDownloadDescribesConfiguredPlatform(t *testing.T) {
 		SiteBaseURL: "https://hex.example.com",
 		Files:       memory.NewStore(),
 		Connection: &hex.ConnectionConfig{
-			Name:   "Company Hex",
-			Server: "https://api.example.com",
-			Publishing: &hex.PublishingConfig{
-				Provider: "azure-files",
-				URL:      "https://example.file.core.windows.net/sites/public/sites",
-			},
+			Name:     "Company Hex",
+			Server:   "https://api.example.com",
+			Resource: "api://hex",
 		},
 	})
 	response := request(t, server, http.MethodGet, "/api/hex/config", nil, http.StatusOK)
@@ -32,15 +29,15 @@ func TestConnectionDownloadDescribesConfiguredPlatform(t *testing.T) {
 		t.Fatal("connection settings must not be cached by the gateway")
 	}
 	var document struct {
-		Version      int                  `json:"version"`
-		Server       string               `json:"server"`
-		Publishing   hex.PublishingConfig `json:"publishing"`
-		Capabilities map[string]any       `json:"capabilities"`
+		Version      int            `json:"version"`
+		Server       string         `json:"server"`
+		Resource     string         `json:"resource"`
+		Capabilities map[string]any `json:"capabilities"`
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &document); err != nil {
 		t.Fatal(err)
 	}
-	if document.Version != 1 || document.Server != "https://api.example.com" || document.Publishing.Provider != "azure-files" {
+	if document.Version != 1 || document.Server != "https://api.example.com" || document.Resource != "api://hex" {
 		t.Fatalf("unexpected connection settings: %+v", document)
 	}
 	if document.Capabilities["files"] != true || document.Capabilities["database"] != false {
@@ -51,19 +48,34 @@ func TestConnectionDownloadDescribesConfiguredPlatform(t *testing.T) {
 	}
 }
 
-func TestConnectionDownloadRejectsCredentialsAndRemoteFilesystem(t *testing.T) {
-	for _, publishing := range []*hex.PublishingConfig{
-		{Provider: "azure-files", URL: "https://example.file.core.windows.net/sites?sig=private-key"},
-		{Provider: "filesystem", Root: "/sensitive/path"},
-	} {
-		server := hex.New(hex.Config{
-			SiteBaseURL: "https://hex.example.com",
-			Connection:  &hex.ConnectionConfig{Name: "Hex", Server: "https://hex.example.com", Publishing: publishing},
-		})
-		response := request(t, server, http.MethodGet, "/api/hex/config", nil, http.StatusInternalServerError)
-		if strings.Contains(response.Body.String(), "private-key") || strings.Contains(response.Body.String(), "/sensitive/path") {
-			t.Fatal("invalid configuration leaked into the response")
-		}
+func TestConnectionAdvertisesCLISignIn(t *testing.T) {
+	signIn := &hex.ConnectionConfig{
+		Name:     "Hex",
+		Server:   "https://hex.example.com",
+		Resource: "api://11111111-2222-3333-4444-555555555555",
+		ClientID: "66666666-7777-8888-9999-000000000000",
+		TenantID: "contoso.onmicrosoft.com",
+	}
+	server := hex.New(hex.Config{SiteBaseURL: "https://hex.example.com", Connection: signIn})
+	response := request(t, server, http.MethodGet, "/api/hex/config", nil, http.StatusOK).Body.String()
+	if !strings.Contains(response, `"clientId":"66666666-7777-8888-9999-000000000000"`) || !strings.Contains(response, `"tenantId":"contoso.onmicrosoft.com"`) {
+		t.Fatalf("sign-in settings missing: %s", response)
+	}
+
+	incomplete := *signIn
+	incomplete.TenantID = ""
+	server = hex.New(hex.Config{SiteBaseURL: "https://hex.example.com", Connection: &incomplete})
+	request(t, server, http.MethodGet, "/api/hex/config", nil, http.StatusInternalServerError)
+}
+
+func TestConnectionDownloadRejectsCredentials(t *testing.T) {
+	server := hex.New(hex.Config{
+		SiteBaseURL: "https://hex.example.com",
+		Connection:  &hex.ConnectionConfig{Name: "Hex", Server: "https://admin:private-key@hex.example.com"},
+	})
+	response := request(t, server, http.MethodGet, "/api/hex/config", nil, http.StatusInternalServerError)
+	if strings.Contains(response.Body.String(), "private-key") {
+		t.Fatal("invalid configuration leaked into the response")
 	}
 }
 

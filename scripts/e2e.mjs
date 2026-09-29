@@ -245,8 +245,6 @@ async function main() {
       origin,
       "--site-base-url",
       `http://localhost:${port}`,
-      "--publish-root",
-      join(sitesDirectory, "public/sites"),
     ]);
 
     await mkdir(join(projectDirectory, "dist"));
@@ -316,22 +314,16 @@ async function main() {
       }
     }
 
-    await stopProcess(server);
-    assert.equal((await fetch(`${origin}/api/hex/capabilities`)).status, 502);
-    await writeFile(
-      join(projectDirectory, "dist/index.html"),
-      "published without an API",
-    );
-    await invoke(["publish"]);
-    assert.equal((await fetch(`${origin}/healthz`)).status, 200);
-    assert.equal(await readSiteText(origin), "published without an API");
-    assert.match(await readSiteText(origin, "/app.js"), /console.log/);
-
     await invoke(["delete", "--yes"]);
     assert.equal((await siteRequest(origin)).status, 404);
 
+    // Publishing is authorized by the platform, so it needs the Go server.
+    await stopProcess(server);
+    assert.equal((await fetch(`${origin}/api/hex/capabilities`)).status, 502);
+    await assert.rejects(invoke(["publish"]));
+
     console.log(
-      "End-to-end passed: direct publishing, directory discovery, API/WebSockets, and publishing/unpublishing with Go stopped.",
+      "End-to-end passed: publishing through the API, directory discovery, API/WebSockets, and unpublishing.",
     );
   } finally {
     await stopProcess(nginx);

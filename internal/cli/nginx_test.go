@@ -110,6 +110,10 @@ func TestNginxStaticAssetAuthorization(t *testing.T) {
 			http.Error(w, "restricted", http.StatusForbidden)
 			return
 		}
+		if strings.HasPrefix(r.Header.Get("X-Hex-Path"), "/admin/") {
+			http.Error(w, "restricted page", http.StatusForbidden)
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer backend.Close()
@@ -124,7 +128,10 @@ func TestNginxStaticAssetAuthorization(t *testing.T) {
 	directory := t.TempDir()
 	for _, site := range []string{"open", "secret"} {
 		siteDirectory := filepath.Join(directory, "sites", "public", "sites", site)
-		if err := os.MkdirAll(siteDirectory, 0755); err != nil {
+		if err := os.MkdirAll(filepath.Join(siteDirectory, "admin"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(siteDirectory, "admin", "index.html"), []byte("admin"), 0644); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(filepath.Join(siteDirectory, "index.html"), []byte(site), 0644); err != nil {
@@ -164,6 +171,10 @@ func TestNginxStaticAssetAuthorization(t *testing.T) {
 		{"secret.localhost", "/", http.StatusForbidden},
 		{"secret.localhost", "/index.html", http.StatusForbidden},
 		{"open.localhost", "/.hex/authz", http.StatusNotFound},
+		{"open.localhost", "/admin/", http.StatusForbidden},
+		{"open.localhost", "/admin/index.html", http.StatusForbidden},
+		{"open.localhost", "/%61dmin/index.html", http.StatusForbidden},
+		{"open.localhost", "/x/../admin/index.html", http.StatusForbidden},
 	}
 	for _, testCase := range cases {
 		request, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+testCase.path, nil)

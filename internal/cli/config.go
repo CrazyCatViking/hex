@@ -22,13 +22,8 @@ const maxConfigBytes = 64 * 1024
 var siteNamePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 
 var apiResourcePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9:/._-]{0,255}$`)
+var clientIDPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 var profileNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{0,127}$`)
-
-type Publishing struct {
-	Provider string `json:"provider"`
-	Root     string `json:"root,omitempty"`
-	URL      string `json:"url,omitempty"`
-}
 
 type Capabilities struct {
 	Version        int   `json:"version"`
@@ -38,13 +33,16 @@ type Capabilities struct {
 	Realtime       bool  `json:"realtime"`
 	Identity       bool  `json:"identity,omitempty"`
 	AccessControl  bool  `json:"accessControl,omitempty"`
+	Publishing     bool  `json:"publishing,omitempty"`
 	MaxUploadBytes int64 `json:"maxUploadBytes"`
 }
 
+// UnmarshalJSON requires the original capabilities and tolerates new ones,
+// so platform upgrades do not break installed CLIs.
 func (c *Capabilities) UnmarshalJSON(data []byte) error {
 	type plain Capabilities
 	var decoded plain
-	if err := decodeStrict(data, &decoded); err != nil {
+	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
 	var fields map[string]json.RawMessage
@@ -70,23 +68,45 @@ type Connection struct {
 	SiteBaseURL   string        `json:"siteBaseURL"`
 	CLIReleaseURL string        `json:"cliReleaseURL,omitempty"`
 	Resource      string        `json:"resource,omitempty"`
-	Publishing    *Publishing   `json:"publishing,omitempty"`
+	ClientID      string        `json:"clientId,omitempty"`
+	TenantID      string        `json:"tenantId,omitempty"`
 	Capabilities  *Capabilities `json:"capabilities"`
+	// LegacyPublishing is the storage destination older platforms advertised
+	// and older CLIs saved in profiles. Publishing now goes through the API,
+	// so it is accepted and ignored.
+	LegacyPublishing json.RawMessage `json:"publishing,omitempty"`
 }
 
 type Project struct {
-	Name         string        `json:"name"`
-	Title        string        `json:"title,omitempty"`
-	Description  string        `json:"description,omitempty"`
-	Author       string        `json:"author,omitempty"`
-	Discoverable *bool         `json:"discoverable,omitempty"`
-	Directory    string        `json:"directory,omitempty"`
-	Platform     string        `json:"platform,omitempty"`
-	Server       string        `json:"server,omitempty"`
-	SiteBaseURL  string        `json:"siteBaseURL,omitempty"`
-	Publishing   *Publishing   `json:"publishing,omitempty"`
-	Resource     string        `json:"resource,omitempty"`
+	Name         string `json:"name"`
+	Title        string `json:"title,omitempty"`
+	Description  string `json:"description,omitempty"`
+	Author       string `json:"author,omitempty"`
+	Discoverable *bool  `json:"discoverable,omitempty"`
+	Directory    string `json:"directory,omitempty"`
+	Platform     string `json:"platform,omitempty"`
+	Server       string `json:"server,omitempty"`
+	SiteBaseURL  string `json:"siteBaseURL,omitempty"`
+	Resource     string `json:"resource,omitempty"`
+	// Access is the site's access policy, applied by the platform when the
+	// site is published. The platform validates it.
+	Access json.RawMessage `json:"access,omitempty"`
+	// ClientID and TenantID come from the platform profile and select the
+	// CLI's own browser sign-in.
+	ClientID     string        `json:"-"`
+	TenantID     string        `json:"-"`
 	Capabilities *Capabilities `json:"-"`
+}
+
+// withResource overrides the API resource. The profile's sign-in app only
+// applies to the platform's own resource, so other resources use Azure CLI.
+func (p Project) withResource(resource string) Project {
+	if resource != p.Resource {
+		p.ClientID = ""
+		p.TenantID = ""
+	}
+	p.Resource = resource
+	return p
 }
 
 func decodeStrict(data []byte, value any) error {
@@ -171,6 +191,11 @@ func parseConnection(data []byte, expectedServer string) (Connection, error) {
 	if connection.Resource != "" && !apiResourcePattern.MatchString(connection.Resource) {
 		return connection, errors.New("invalid API resource identifier in connection file")
 	}
+	if connection.ClientID != "" || connection.TenantID != "" {
+		if connection.Resource == "" || !clientIDPattern.MatchString(connection.ClientID) || !tenantPattern.MatchString(connection.TenantID) {
+			return connection, errors.New("connection file sign-in settings need an API resource, a client ID and a tenant")
+		}
+	}
 	server, err := origin(connection.Server, true)
 	if err != nil {
 		return connection, err
@@ -192,14 +217,6 @@ func parseConnection(data []byte, expectedServer string) (Connection, error) {
 	if _, err := siteURL(base.String(), "check"); err != nil {
 		return connection, err
 	}
-	if connection.Publishing != nil {
-		if err := validatePublishing(*connection.Publishing); err != nil {
-			return connection, err
-		}
-		if connection.Publishing.Provider == "filesystem" && (!isLocalHost(server.Hostname()) || !absoluteAnyOS(connection.Publishing.Root)) {
-			return connection, errors.New("filesystem profiles require a local platform and an absolute publishing root")
-		}
-	}
 	if connection.CLIReleaseURL != "" {
 		if err := validateReleaseDirectory(connection.CLIReleaseURL); err != nil {
 			return connection, fmt.Errorf("invalid CLI release directory: %w", err)
@@ -208,11 +225,8 @@ func parseConnection(data []byte, expectedServer string) (Connection, error) {
 	connection.Server = server.String()
 	connection.SiteBaseURL = base.String()
 	connection.Name = strings.TrimSpace(connection.Name)
+	connection.LegacyPublishing = nil
 	return connection, nil
-}
-
-func absoluteAnyOS(path string) bool {
-	return filepath.IsAbs(path) || (len(path) > 2 && path[1] == ':' && (path[2] == '\\' || path[2] == '/')) || strings.HasPrefix(path, `\\`)
 }
 
 func profileDirectory() (string, error) {

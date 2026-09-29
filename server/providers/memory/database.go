@@ -15,26 +15,40 @@ type documentKey struct {
 	id         string
 }
 
+type storedDocument struct {
+	data      json.RawMessage
+	createdBy string
+}
+
 type Database struct {
 	mu        sync.RWMutex
-	documents map[documentKey]json.RawMessage
+	documents map[documentKey]storedDocument
 }
 
 func NewDatabase() *Database {
-	return &Database{documents: make(map[documentKey]json.RawMessage)}
+	return &Database{documents: make(map[documentKey]storedDocument)}
 }
 
-func (d *Database) Put(ctx context.Context, site, collection, id string, data json.RawMessage) error {
+func (d *Database) Put(ctx context.Context, site, collection, id string, data json.RawMessage, options hex.WriteOptions) (hex.Document, error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return hex.Document{}, err
 	}
 
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
 	key := documentKey{site: site, collection: collection, id: id}
-	d.documents[key] = slices.Clone(data)
-	return nil
+	stored, exists := d.documents[key]
+	if exists && options.CreatorOnly && stored.createdBy != options.Creator {
+		return hex.Document{}, hex.ErrForbidden
+	}
+	if !exists {
+		stored.createdBy = options.Creator
+	}
+	stored.data = slices.Clone(data)
+	d.documents[key] = stored
+
+	return hex.Document{ID: id, Data: slices.Clone(data), CreatedBy: stored.createdBy}, nil
 }
 
 func (d *Database) Get(ctx context.Context, site, collection, id string) (hex.Document, error) {
@@ -46,15 +60,15 @@ func (d *Database) Get(ctx context.Context, site, collection, id string) (hex.Do
 	defer d.mu.RUnlock()
 
 	key := documentKey{site: site, collection: collection, id: id}
-	data, ok := d.documents[key]
+	stored, ok := d.documents[key]
 	if !ok {
 		return hex.Document{}, hex.ErrNotFound
 	}
 
-	return hex.Document{ID: id, Data: slices.Clone(data)}, nil
+	return hex.Document{ID: id, Data: slices.Clone(stored.data), CreatedBy: stored.createdBy}, nil
 }
 
-func (d *Database) List(ctx context.Context, site, collection, after string, limit int) ([]hex.Document, error) {
+func (d *Database) List(ctx context.Context, site, collection string, options hex.ListOptions) ([]hex.Document, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -63,30 +77,35 @@ func (d *Database) List(ctx context.Context, site, collection, after string, lim
 	defer d.mu.RUnlock()
 
 	var ids []string
-	for key := range d.documents {
-		if key.site == site && key.collection == collection && key.id > after {
-			ids = append(ids, key.id)
+	for key, stored := range d.documents {
+		if key.site != site || key.collection != collection || key.id <= options.After {
+			continue
 		}
+		if options.CreatedBy != "" && stored.createdBy != options.CreatedBy {
+			continue
+		}
+		ids = append(ids, key.id)
 	}
 
 	slices.Sort(ids)
-	if len(ids) > limit {
-		ids = ids[:limit]
+	if len(ids) > options.Limit {
+		ids = ids[:options.Limit]
 	}
 
 	documents := make([]hex.Document, 0, len(ids))
 	for _, id := range ids {
-		key := documentKey{site: site, collection: collection, id: id}
+		stored := d.documents[documentKey{site: site, collection: collection, id: id}]
 		documents = append(documents, hex.Document{
-			ID:   id,
-			Data: slices.Clone(d.documents[key]),
+			ID:        id,
+			Data:      slices.Clone(stored.data),
+			CreatedBy: stored.createdBy,
 		})
 	}
 
 	return documents, nil
 }
 
-func (d *Database) Delete(ctx context.Context, site, collection, id string) error {
+func (d *Database) Delete(ctx context.Context, site, collection, id string, options hex.WriteOptions) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -95,8 +114,12 @@ func (d *Database) Delete(ctx context.Context, site, collection, id string) erro
 	defer d.mu.Unlock()
 
 	key := documentKey{site: site, collection: collection, id: id}
-	if _, ok := d.documents[key]; !ok {
+	stored, ok := d.documents[key]
+	if !ok {
 		return hex.ErrNotFound
+	}
+	if options.CreatorOnly && stored.createdBy != options.Creator {
+		return hex.ErrForbidden
 	}
 
 	delete(d.documents, key)

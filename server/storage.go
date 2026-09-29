@@ -9,6 +9,10 @@ import (
 
 var ErrNotFound = errors.New("not found")
 
+// ErrForbidden reports that a conditional write was refused, such as replacing
+// a document created by someone else under a creator-only rule.
+var ErrForbidden = errors.New("forbidden")
+
 type SiteDirectory interface {
 	ListSites(ctx context.Context) ([]string, error)
 }
@@ -25,16 +29,38 @@ type ObjectStore interface {
 	Delete(ctx context.Context, key string) error
 }
 
+// Document is a site-scoped JSON object. CreatedBy is the identity ID of the
+// caller that first stored it, recorded by the server; it is empty for
+// documents written without an identity.
 type Document struct {
-	ID   string          `json:"id"`
-	Data json.RawMessage `json:"data"`
+	ID        string          `json:"id"`
+	Data      json.RawMessage `json:"data"`
+	CreatedBy string          `json:"createdBy,omitempty"`
+}
+
+// WriteOptions controls document writes and deletions. Put returns the stored
+// document, including its original creator. Creator is recorded
+// when a document is inserted and never changed by later writes. With
+// CreatorOnly, an existing document is replaced or deleted only when it was
+// created by Creator; otherwise the operation returns ErrForbidden.
+type WriteOptions struct {
+	Creator     string
+	CreatorOnly bool
+}
+
+// ListOptions selects a page of documents. After is exclusive, Limit is
+// 1–100, and a non-empty CreatedBy restricts results to that creator.
+type ListOptions struct {
+	After     string
+	Limit     int
+	CreatedBy string
 }
 
 type Database interface {
-	Put(ctx context.Context, site, collection, id string, data json.RawMessage) error
+	Put(ctx context.Context, site, collection, id string, data json.RawMessage, options WriteOptions) (Document, error)
 	Get(ctx context.Context, site, collection, id string) (Document, error)
-	List(ctx context.Context, site, collection, after string, limit int) ([]Document, error)
-	Delete(ctx context.Context, site, collection, id string) error
+	List(ctx context.Context, site, collection string, options ListOptions) ([]Document, error)
+	Delete(ctx context.Context, site, collection, id string, options WriteOptions) error
 }
 
 type Subscription interface {

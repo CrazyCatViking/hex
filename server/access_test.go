@@ -10,7 +10,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/coder/websocket"
 	hex "github.com/crazycatviking/hex/server"
 	"github.com/crazycatviking/hex/server/providers/easyauth"
 	"github.com/crazycatviking/hex/server/providers/local"
@@ -32,6 +34,7 @@ func setupWithAccess(t *testing.T) (*hex.Server, *local.Store) {
 	server := hex.New(hex.Config{
 		Files:          store,
 		Sites:          store,
+		Publisher:      store,
 		Database:       memory.NewDatabase(),
 		Realtime:       memory.NewRealtime(),
 		Identity:       easyauth.Resolver{},
@@ -79,6 +82,11 @@ func requestAs(t *testing.T, handler http.Handler, headers http.Header, method, 
 	return w
 }
 
+func putPolicy(t *testing.T, server http.Handler, headers http.Header, site, policy string) {
+	t.Helper()
+	requestAs(t, server, headers, "PUT", "/api/hex/sites/"+site+"/access", []byte(policy), 200)
+}
+
 func TestSiteAccessLifecycle(t *testing.T) {
 	server, store := setupWithAccess(t)
 	owner := principalHeaders("owner-id")
@@ -90,13 +98,12 @@ func TestSiteAccessLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Unregistered sites stay open to every authenticated user.
+	// Sites without a policy stay open to every authenticated user.
 	requestAs(t, server, outsider, "PUT", "/api/sites/demo/db/tasks/a", []byte(`{"open":true}`), 200)
 
-	entry := []byte(`{"owners":["owner-id"],"groups":["sales"]}`)
-	requestAs(t, server, owner, "PUT", "/api/hex/sites/demo/access", entry, 200)
+	putPolicy(t, server, owner, "demo", `{"owners":["user:owner-id"],"viewers":["group:sales"]}`)
 
-	// Members and owners use the namespace; outsiders and anonymous callers do not.
+	// Viewers and owners use the namespace; outsiders and anonymous callers do not.
 	requestAs(t, server, member, "GET", "/api/sites/demo/db/tasks/a", nil, 200)
 	requestAs(t, server, owner, "GET", "/api/sites/demo/db/tasks/a", nil, 200)
 	requestAs(t, server, admin, "GET", "/api/sites/demo/db/tasks/a", nil, 200)
@@ -104,44 +111,191 @@ func TestSiteAccessLifecycle(t *testing.T) {
 	requestAs(t, server, outsider, "PUT", "/api/sites/demo/files/report.txt", []byte("data"), 403)
 	requestAs(t, server, nil, "GET", "/api/sites/demo/db/tasks/a", nil, 403)
 
-	// Only owners and admins manage the entry; a takeover attempt fails.
+	// Only owners and admins manage the policy; a takeover attempt fails.
 	requestAs(t, server, member, "GET", "/api/hex/sites/demo/access", nil, 403)
-	takeover := []byte(`{"owners":["outsider-id"],"groups":["unrelated"]}`)
+	takeover := []byte(`{"owners":["user:outsider-id"],"viewers":["group:unrelated"]}`)
 	requestAs(t, server, outsider, "PUT", "/api/hex/sites/demo/access", takeover, 403)
 	requestAs(t, server, owner, "GET", "/api/hex/sites/demo/access", nil, 200)
 
-	// An owner cannot lock themselves out; admins may hand the entry over.
-	lockout := []byte(`{"owners":["someone-else"],"groups":["sales"]}`)
+	// An owner cannot lock themselves out; admins may hand the policy over.
+	lockout := []byte(`{"owners":["user:someone-else"],"viewers":["group:sales"]}`)
 	requestAs(t, server, owner, "PUT", "/api/hex/sites/demo/access", lockout, 400)
-	handover := []byte(`{"owners":["owner-id","ops"],"groups":["sales","ops"]}`)
-	requestAs(t, server, admin, "PUT", "/api/hex/sites/demo/access", handover, 200)
+	putPolicy(t, server, admin, "demo", `{"owners":["user:owner-id","group:ops"],"viewers":["group:sales","group:ops"]}`)
 
-	// Restricted sites disappear from discovery for non-members.
+	// Omitting owners keeps the current ones.
+	putPolicy(t, server, owner, "demo", `{"viewers":["group:sales"]}`)
+	policy := requestAs(t, server, owner, "GET", "/api/hex/sites/demo/access", nil, 200).Body.String()
+	if !strings.Contains(policy, `"owners":["user:owner-id","group:ops"]`) {
+		t.Fatalf("owners were not kept: %s", policy)
+	}
+
+	// Restricted sites disappear from discovery for non-viewers.
 	listing := requestAs(t, server, outsider, "GET", "/api/sites", nil, 200).Body.String()
 	if strings.Contains(listing, "demo") {
 		t.Fatalf("restricted site leaked into discovery: %s", listing)
 	}
 	listing = requestAs(t, server, member, "GET", "/api/sites", nil, 200).Body.String()
 	if !strings.Contains(listing, "demo") {
-		t.Fatalf("member cannot discover the site: %s", listing)
+		t.Fatalf("viewer cannot discover the site: %s", listing)
 	}
 
-	// Clearing the entry opens the site again.
+	// Clearing the policy opens the site again.
 	requestAs(t, server, owner, "DELETE", "/api/hex/sites/demo/access", nil, 204)
 	requestAs(t, server, outsider, "GET", "/api/sites/demo/db/tasks/a", nil, 200)
 	requestAs(t, server, owner, "DELETE", "/api/hex/sites/demo/access", nil, 404)
+}
+
+func TestViewersAndEditors(t *testing.T) {
+	server, _ := setupWithAccess(t)
+	owner := principalHeaders("owner-id")
+	viewer := principalHeaders("viewer-id", "sales")
+	editor := principalHeaders("editor-id", "editors")
+
+	// Without editors, every viewer may edit.
+	putPolicy(t, server, owner, "demo", `{"owners":["user:owner-id"]}`)
+	requestAs(t, server, viewer, "PUT", "/api/sites/demo/db/tasks/a", []byte(`{"v":1}`), 200)
+
+	putPolicy(t, server, owner, "demo", `{"editors":["group:editors"]}`)
+	requestAs(t, server, viewer, "GET", "/api/sites/demo/db/tasks/a", nil, 200)
+	requestAs(t, server, viewer, "PUT", "/api/sites/demo/db/tasks/a", []byte(`{"v":2}`), 403)
+	requestAs(t, server, viewer, "POST", "/api/sites/demo/db/tasks", []byte(`{"v":2}`), 403)
+	requestAs(t, server, viewer, "DELETE", "/api/sites/demo/db/tasks/a", nil, 403)
+	requestAs(t, server, viewer, "PUT", "/api/sites/demo/files/a.txt", []byte("x"), 403)
+	requestAs(t, server, editor, "PUT", "/api/sites/demo/db/tasks/a", []byte(`{"v":3}`), 200)
+	requestAs(t, server, editor, "PUT", "/api/sites/demo/files/a.txt", []byte("x"), 200)
+	requestAs(t, server, viewer, "GET", "/api/sites/demo/files/a.txt", nil, 200)
+
+	// Explicit editors can edit even when viewers are restricted to others.
+	putPolicy(t, server, owner, "demo", `{"viewers":["group:sales"],"editors":["group:editors"]}`)
+	requestAs(t, server, editor, "GET", "/api/sites/demo/db/tasks/a", nil, 200)
+	requestAs(t, server, principalHeaders("stranger"), "GET", "/api/sites/demo/db/tasks/a", nil, 403)
+}
+
+func TestCollectionRules(t *testing.T) {
+	server, _ := setupWithAccess(t)
+	owner := principalHeaders("owner-id")
+	viewer := principalHeaders("viewer-id")
+	auditor := principalHeaders("auditor-id", "auditors")
+
+	putPolicy(t, server, owner, "demo", `{
+		"owners": ["user:owner-id"],
+		"collections": {
+			"settings": {"read": "viewers", "write": "owners"},
+			"audit": {"read": ["group:auditors"], "write": "owners"},
+			"*": {"read": "viewers", "write": "editors"}
+		}
+	}`)
+
+	requestAs(t, server, owner, "PUT", "/api/sites/demo/db/settings/theme", []byte(`{"dark":true}`), 200)
+	requestAs(t, server, viewer, "GET", "/api/sites/demo/db/settings/theme", nil, 200)
+	requestAs(t, server, viewer, "PUT", "/api/sites/demo/db/settings/theme", []byte(`{"dark":false}`), 403)
+
+	requestAs(t, server, owner, "POST", "/api/sites/demo/db/audit", []byte(`{"event":"login"}`), 201)
+	requestAs(t, server, viewer, "GET", "/api/sites/demo/db/audit", nil, 403)
+	requestAs(t, server, auditor, "GET", "/api/sites/demo/db/audit", nil, 200)
+	requestAs(t, server, auditor, "POST", "/api/sites/demo/db/audit", []byte(`{"event":"forged"}`), 403)
+
+	// Unlisted collections use the "*" rule.
+	requestAs(t, server, viewer, "PUT", "/api/sites/demo/db/tasks/a", []byte(`{"v":1}`), 200)
+}
+
+func TestCreatorOnlyDocuments(t *testing.T) {
+	server, _ := setupWithAccess(t)
+	owner := principalHeaders("owner-id")
+	alice := principalHeaders("alice")
+	bob := principalHeaders("bob")
+
+	putPolicy(t, server, owner, "demo", `{"collections":{"drafts":{"read":"creator","write":"creator"}}}`)
+
+	created := requestAs(t, server, alice, "POST", "/api/sites/demo/db/drafts", []byte(`{"text":"secret"}`), 201)
+	var document hex.Document
+	if err := json.Unmarshal(created.Body.Bytes(), &document); err != nil {
+		t.Fatal(err)
+	}
+	if document.CreatedBy != "alice" {
+		t.Fatalf("creator was not recorded: %+v", document)
+	}
+	path := "/api/sites/demo/db/drafts/" + document.ID
+	requestAs(t, server, bob, "PUT", "/api/sites/demo/db/drafts/bobs", []byte(`{"text":"mine"}`), 200)
+
+	// Bob neither sees nor changes Alice's draft; it looks missing to him.
+	requestAs(t, server, bob, "GET", path, nil, 404)
+	requestAs(t, server, bob, "PUT", path, []byte(`{"text":"hijacked"}`), 403)
+	requestAs(t, server, bob, "DELETE", path, nil, 403)
+	listing := requestAs(t, server, bob, "GET", "/api/sites/demo/db/drafts", nil, 200).Body.String()
+	if strings.Contains(listing, "secret") || !strings.Contains(listing, "mine") {
+		t.Fatalf("creator filter failed: %s", listing)
+	}
+
+	requestAs(t, server, alice, "PUT", path, []byte(`{"text":"edited"}`), 200)
+	requestAs(t, server, alice, "GET", path, nil, 200)
+
+	// Owners see and manage everything.
+	everything := requestAs(t, server, owner, "GET", "/api/sites/demo/db/drafts", nil, 200).Body.String()
+	if !strings.Contains(everything, "edited") || !strings.Contains(everything, "mine") {
+		t.Fatalf("owner listing incomplete: %s", everything)
+	}
+	requestAs(t, server, alice, "DELETE", path, nil, 204)
+}
+
+func TestFileAndChannelRules(t *testing.T) {
+	server, _ := setupWithAccess(t)
+	owner := principalHeaders("owner-id")
+	viewer := principalHeaders("viewer-id")
+
+	putPolicy(t, server, owner, "demo", `{
+		"files": {"exports/": {"read": "owners", "write": "owners"}},
+		"channels": {"announcements": {"read": "viewers", "write": "owners"}, "staff": {"read": "owners"}}
+	}`)
+
+	requestAs(t, server, owner, "PUT", "/api/sites/demo/files/exports/report.csv", []byte("a,b"), 200)
+	requestAs(t, server, owner, "PUT", "/api/sites/demo/files/public.txt", []byte("hi"), 200)
+	requestAs(t, server, viewer, "GET", "/api/sites/demo/files/exports/report.csv", nil, 403)
+	requestAs(t, server, viewer, "PUT", "/api/sites/demo/files/exports/new.csv", []byte("x"), 403)
+	requestAs(t, server, viewer, "GET", "/api/sites/demo/files/public.txt", nil, 200)
+	listing := requestAs(t, server, viewer, "GET", "/api/sites/demo/files", nil, 200).Body.String()
+	if strings.Contains(listing, "exports") || !strings.Contains(listing, "public.txt") {
+		t.Fatalf("file listing ignores rules: %s", listing)
+	}
+
+	requestAs(t, server, viewer, "GET", "/api/sites/demo/realtime/staff", nil, 403)
+
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	url := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/api/sites/demo/realtime/announcements"
+	listener, _, err := websocket.Dial(ctx, url, &websocket.DialOptions{HTTPHeader: viewer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.CloseNow()
+	if err := listener.Write(ctx, websocket.MessageText, []byte(`{"spoofed":true}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := listener.Read(ctx); websocket.CloseStatus(err) != websocket.StatusPolicyViolation {
+		t.Fatalf("read-only subscriber could send: %v", err)
+	}
 }
 
 func TestStaticAssetAuthorizationEndpoint(t *testing.T) {
 	server, _ := setupWithAccess(t)
 	owner := principalHeaders("owner-id")
 	member := principalHeaders("member-id", "sales")
+	admin := principalHeaders("admin-id", "admins")
 	outsider := principalHeaders("outsider-id")
 
-	entry := []byte(`{"owners":["owner-id"],"groups":["sales"]}`)
-	requestAs(t, server, owner, "PUT", "/api/hex/sites/demo/access", entry, 200)
+	putPolicy(t, server, owner, "demo", `{
+		"owners": ["user:owner-id"],
+		"viewers": ["group:sales", "group:admins"],
+		"paths": [
+			{"prefix": "/admin/", "viewers": ["group:admins"]},
+			{"prefix": "/admin/help/", "viewers": "viewers"}
+		]
+	}`)
 
-	authz := func(t *testing.T, headers http.Header, site string, want int) {
+	authz := func(t *testing.T, headers http.Header, site, path string, want int) {
 		t.Helper()
 		r := httptest.NewRequest("GET", "/api/hex/authz", nil)
 		for name, values := range headers {
@@ -150,22 +304,87 @@ func TestStaticAssetAuthorizationEndpoint(t *testing.T) {
 		if site != "" {
 			r.Header.Set("X-Hex-Site", site)
 		}
+		if path != "" {
+			r.Header.Set("X-Hex-Path", path)
+		}
 		// auth_request subrequests inherit the visitor's headers, including
 		// cross-site Fetch Metadata from external navigations.
 		r.Header.Set("Sec-Fetch-Site", "cross-site")
 		w := httptest.NewRecorder()
 		server.ServeHTTP(w, r)
 		if w.Code != want {
-			t.Fatalf("authz for %q: got %d, want %d: %s", site, w.Code, want, w.Body.String())
+			t.Fatalf("authz for %q %q: got %d, want %d: %s", site, path, w.Code, want, w.Body.String())
 		}
 	}
 
-	authz(t, member, "demo", 204)
-	authz(t, owner, "demo", 204)
-	authz(t, outsider, "demo", 403)
-	authz(t, nil, "demo", 403)
-	authz(t, outsider, "unregistered", 204)
-	authz(t, nil, "", 204)
+	authz(t, member, "demo", "/", 204)
+	authz(t, owner, "demo", "/index.html", 204)
+	authz(t, outsider, "demo", "/", 403)
+	authz(t, nil, "demo", "/", 403)
+	authz(t, outsider, "unregistered", "/", 204)
+	authz(t, nil, "", "/", 204)
+
+	// Path rules: the longest prefix wins, the bare directory is covered, and
+	// matching ignores case like the Azure Files share does.
+	authz(t, member, "demo", "/admin/index.html", 403)
+	authz(t, member, "demo", "/admin", 403)
+	authz(t, member, "demo", "/ADMIN/index.html", 403)
+	authz(t, member, "demo", "/administration.html", 204)
+	authz(t, member, "demo", "/admin/help/faq.html", 204)
+	authz(t, admin, "demo", "/admin/index.html", 204)
+	authz(t, owner, "demo", "/admin/index.html", 204)
+}
+
+func TestPermissionsDescribeTheCaller(t *testing.T) {
+	server, _ := setupWithAccess(t)
+	owner := principalHeaders("owner-id")
+	viewer := principalHeaders("viewer-id")
+
+	putPolicy(t, server, owner, "demo", `{
+		"editors": ["group:editors"],
+		"paths": [{"prefix": "/admin/", "viewers": "owners"}],
+		"collections": {"drafts": {"read": "creator", "write": "creator"}}
+	}`)
+
+	var permissions struct {
+		Role    string `json:"role"`
+		Publish bool   `json:"publish"`
+		Paths   []struct {
+			Prefix  string `json:"prefix"`
+			Allowed bool   `json:"allowed"`
+		} `json:"paths"`
+		Collections map[string]struct {
+			Read  string `json:"read"`
+			Write string `json:"write"`
+		} `json:"collections"`
+	}
+	response := requestAs(t, server, viewer, "GET", "/api/hex/sites/demo/permissions", nil, 200)
+	if err := json.Unmarshal(response.Body.Bytes(), &permissions); err != nil {
+		t.Fatal(err)
+	}
+	if permissions.Role != "viewer" || permissions.Publish || len(permissions.Paths) != 1 || permissions.Paths[0].Allowed {
+		t.Fatalf("unexpected viewer permissions: %+v", permissions)
+	}
+	if permissions.Collections["drafts"].Read != "own" || permissions.Collections["*"].Write != "none" {
+		t.Fatalf("unexpected collection permissions: %+v", permissions.Collections)
+	}
+
+	putPolicy(t, server, owner, "demo", `{
+		"viewers": ["group:staff"],
+		"paths": [{"prefix": "/admin/", "viewers": "owners"}]
+	}`)
+	hidden := requestAs(t, server, viewer, "GET", "/api/hex/sites/demo/permissions", nil, 200).Body.String()
+	if strings.Contains(hidden, "/admin/") || !strings.Contains(hidden, `"role":"none"`) {
+		t.Fatalf("rules leaked to a caller who cannot view the site: %s", hidden)
+	}
+
+	response = requestAs(t, server, owner, "GET", "/api/hex/sites/demo/permissions", nil, 200)
+	if err := json.Unmarshal(response.Body.Bytes(), &permissions); err != nil {
+		t.Fatal(err)
+	}
+	if permissions.Role != "owner" || !permissions.Publish || !permissions.Paths[0].Allowed {
+		t.Fatalf("unexpected owner permissions: %+v", permissions)
+	}
 }
 
 func TestIdentityEndpointAndCapabilities(t *testing.T) {
@@ -181,10 +400,10 @@ func TestIdentityEndpointAndCapabilities(t *testing.T) {
 	}
 
 	requestAs(t, server, nil, "GET", "/api/hex/me", nil, 401)
-	requestAs(t, server, nil, "PUT", "/api/hex/sites/demo/access", []byte(`{"owners":["x"]}`), 401)
+	requestAs(t, server, nil, "PUT", "/api/hex/sites/demo/access", []byte(`{"owners":["user:x"]}`), 401)
 
 	capabilities := requestAs(t, server, nil, "GET", "/api/hex/capabilities", nil, 200).Body.String()
-	for _, expected := range []string{`"identity":true`, `"accessControl":true`} {
+	for _, expected := range []string{`"identity":true`, `"accessControl":true`, `"publishing":true`} {
 		if !strings.Contains(capabilities, expected) {
 			t.Fatalf("capabilities missing %s: %s", expected, capabilities)
 		}
@@ -204,21 +423,41 @@ func TestIdentityEndpointAndCapabilities(t *testing.T) {
 	}
 }
 
-func TestAccessEntryValidation(t *testing.T) {
+func TestAccessPolicyValidation(t *testing.T) {
 	server, _ := setupWithAccess(t)
 	owner := principalHeaders("owner-id")
 
-	invalid := [][]byte{
-		[]byte(`[]`),
-		[]byte(`{"owners":["owner-id"],"groups":[" spaced value"]}`),
-		[]byte(fmt.Appendf(nil, `{"owners":["owner-id"],"groups":[%s"last"]}`, strings.Repeat(`"g",`, 64))),
+	invalid := []string{
+		`[]`,
+		`{"viewers":["sales"]}`,
+		`{"viewers":["group: spaced"]}`,
+		fmt.Sprintf(`{"viewers":[%s"group:last"]}`, strings.Repeat(`"group:g",`, 64)),
+		`{"paths":[{"prefix":"admin/","viewers":"owners"}]}`,
+		`{"paths":[{"prefix":"/../x","viewers":"owners"}]}`,
+		`{"paths":[{"prefix":"/admin/"}]}`,
+		`{"paths":[{"prefix":"/admin/","viewers":"creator"}]}`,
+		`{"collections":{"bad name":{"read":"viewers"}}}`,
+		`{"collections":{"tasks":{"read":"everyone"}}}`,
+		`{"files":{"exports/":{"read":"creator"}}}`,
+		`{"files":{"../":{"read":"owners"}}}`,
+		`{"channels":{"chat":{"write":"creator"}}}`,
 	}
 	for _, body := range invalid {
-		requestAs(t, server, owner, "PUT", "/api/hex/sites/demo/access", body, 400)
+		requestAs(t, server, owner, "PUT", "/api/hex/sites/demo/access", []byte(body), 400)
 	}
 
-	// Owners without groups reserve a name without restricting viewers.
-	reserved := []byte(`{"owners":["owner-id"]}`)
-	requestAs(t, server, owner, "PUT", "/api/hex/sites/demo/access", reserved, 200)
+	// Owners without viewers reserve a name without restricting viewers.
+	putPolicy(t, server, owner, "demo", `{"owners":["user:owner-id"]}`)
 	requestAs(t, server, principalHeaders("anyone"), "GET", "/api/sites/demo/files", nil, 200)
+}
+
+func TestPublisherGroupsLimitNewSites(t *testing.T) {
+	server := hex.New(hex.Config{
+		Database:        memory.NewDatabase(),
+		Identity:        easyauth.Resolver{},
+		Access:          memory.NewAccessStore(),
+		PublisherGroups: []string{"publishers"},
+	})
+	requestAs(t, server, principalHeaders("someone"), "PUT", "/api/hex/sites/demo/access", []byte(`{}`), 403)
+	requestAs(t, server, principalHeaders("publisher", "publishers"), "PUT", "/api/hex/sites/demo/access", []byte(`{}`), 200)
 }

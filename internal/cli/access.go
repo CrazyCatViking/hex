@@ -3,15 +3,19 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
 
 type siteAccess struct {
-	Owners []string `json:"owners"`
-	Groups []string `json:"groups"`
+	Owners  []string `json:"owners,omitempty"`
+	Editors []string `json:"editors,omitempty"`
+	Viewers []string `json:"viewers,omitempty"`
 }
 
 func (a *App) whoamiCommand() *cobra.Command {
@@ -21,13 +25,15 @@ func (a *App) whoamiCommand() *cobra.Command {
 func (a *App) accessCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "access",
-		Short: "Manage who can view a site",
-		Long: "Manage a site's access entry on the platform. A site without an entry is open " +
-			"to every authenticated user. Owners manage the entry; the listed groups may view " +
-			"the site and use its data APIs. Values are identity-provider group or role " +
-			"identifiers, or individual user IDs; use hex whoami to see your own.",
+		Short: "Manage who can view, edit and publish a site",
+		Long: "Manage a site's access policy on the platform. A site without a policy is open " +
+			"to every signed-in user. Owners manage the policy and publish the site, editors " +
+			"write its data and viewers see it; empty viewers means everyone, and empty editors " +
+			"means every viewer. Principals are user:<id or email>, group:<object id> or " +
+			"role:<value>; use hex whoami to see your own. Path and data rules are easiest to " +
+			"keep in the access section of hex.json, which hex publish applies.",
 	}
-	command.AddCommand(a.accessShowCommand(), a.accessSetCommand(), a.accessClearCommand())
+	command.AddCommand(a.accessShowCommand(), a.accessSetCommand(), a.accessClearCommand(), a.permissionsCommand())
 	return command
 }
 
@@ -35,10 +41,10 @@ func (a *App) accessShowCommand() *cobra.Command {
 	options := &accessOptions{}
 	command := &cobra.Command{
 		Use:   "show <site>",
-		Short: "Show a site's access entry",
+		Short: "Show a site's access policy",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.accessRequest(cmd.Context(), options, args[0], http.MethodGet, nil)
+			return a.accessRequest(cmd.Context(), options, args[0], http.MethodGet, "/access", nil)
 		},
 	}
 	options.register(command)
@@ -47,23 +53,45 @@ func (a *App) accessShowCommand() *cobra.Command {
 
 func (a *App) accessSetCommand() *cobra.Command {
 	options := &accessOptions{}
-	access := siteAccess{Owners: []string{}, Groups: []string{}}
+	access := siteAccess{}
+	var policyFile string
 	command := &cobra.Command{
 		Use:   "set <site>",
-		Short: "Replace a site's access entry",
-		Long: "Replace a site's access entry. The entry must keep you able to manage it, so " +
-			"include your own ID or one of your groups as an owner. An entry with owners but " +
-			"no groups reserves ownership without restricting viewers.",
+		Short: "Replace a site's access policy",
+		Long: "Replace a site's access policy, either from flags or from a JSON file with the " +
+			"same shape as the access section of hex.json. Omitted owners keep the current " +
+			"owners, and the result must keep you able to manage the policy.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(access.Owners) == 0 && len(access.Groups) == 0 {
-				return fmt.Errorf("provide at least one --owner or --group")
+			usesFlags := len(access.Owners)+len(access.Editors)+len(access.Viewers) > 0
+			if policyFile != "" && usesFlags {
+				return errors.New("use either --file or --owner/--editor/--viewer")
 			}
-			return a.accessRequest(cmd.Context(), options, args[0], http.MethodPut, access)
+			if policyFile != "" {
+				data, err := os.ReadFile(resolvePath(a.Dir, policyFile))
+				if err != nil {
+					return err
+				}
+				if !json.Valid(data) {
+					return errors.New("the policy file must contain JSON")
+				}
+				return a.accessRequest(cmd.Context(), options, args[0], http.MethodPut, "/access", json.RawMessage(data))
+			}
+			if !usesFlags {
+				return errors.New("provide --file, or at least one --owner, --editor or --viewer")
+			}
+			for _, principal := range append(append(append([]string{}, access.Owners...), access.Editors...), access.Viewers...) {
+				if kind, _, typed := strings.Cut(principal, ":"); !typed || (kind != "user" && kind != "group" && kind != "role") {
+					return fmt.Errorf("principal %q needs a user:, group: or role: prefix", principal)
+				}
+			}
+			return a.accessRequest(cmd.Context(), options, args[0], http.MethodPut, "/access", access)
 		},
 	}
-	command.Flags().StringArrayVar(&access.Owners, "owner", nil, "ID that manages the entry (repeatable)")
-	command.Flags().StringArrayVar(&access.Groups, "group", nil, "Group allowed to view the site (repeatable)")
+	command.Flags().StringArrayVar(&access.Owners, "owner", nil, "Principal that manages and publishes the site (repeatable)")
+	command.Flags().StringArrayVar(&access.Editors, "editor", nil, "Principal allowed to write the site's data (repeatable)")
+	command.Flags().StringArrayVar(&access.Viewers, "viewer", nil, "Principal allowed to view the site (repeatable)")
+	command.Flags().StringVar(&policyFile, "file", "", "JSON file with the complete policy")
 	options.register(command)
 	return command
 }
@@ -72,10 +100,24 @@ func (a *App) accessClearCommand() *cobra.Command {
 	options := &accessOptions{}
 	command := &cobra.Command{
 		Use:   "clear <site>",
-		Short: "Remove a site's access entry, opening it to all authenticated users",
+		Short: "Remove a site's access policy, opening it to all signed-in users",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.accessRequest(cmd.Context(), options, args[0], http.MethodDelete, nil)
+			return a.accessRequest(cmd.Context(), options, args[0], http.MethodDelete, "/access", nil)
+		},
+	}
+	options.register(command)
+	return command
+}
+
+func (a *App) permissionsCommand() *cobra.Command {
+	options := &accessOptions{}
+	command := &cobra.Command{
+		Use:   "check <site>",
+		Short: "Show what you may do on a site",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return a.accessRequest(cmd.Context(), options, args[0], http.MethodGet, "/permissions", nil)
 		},
 	}
 	options.register(command)
@@ -94,7 +136,7 @@ func (o *accessOptions) register(command *cobra.Command) {
 	command.Flags().StringVar(&o.resource, "resource", "", "Optional Azure CLI API resource")
 }
 
-func (a *App) accessRequest(ctx context.Context, options *accessOptions, site, method string, body any) error {
+func (a *App) accessRequest(ctx context.Context, options *accessOptions, site, method, suffix string, body any) error {
 	if err := validateSiteName(site); err != nil {
 		return err
 	}
@@ -106,15 +148,15 @@ func (a *App) accessRequest(ctx context.Context, options *accessOptions, site, m
 		project.Server = options.server
 	}
 	if options.resource != "" {
-		project.Resource = options.resource
+		project = project.withResource(options.resource)
 	}
 
-	data, err := a.apiCall(ctx, project, method, "/api/hex/sites/"+site+"/access", body)
+	data, err := a.apiCall(ctx, project, method, "/api/hex/sites/"+site+suffix, body)
 	if err != nil {
 		return err
 	}
 	if data == nil {
-		fmt.Fprintf(a.Out, "Access entry for %s removed; the site is open to all authenticated users.\n", site)
+		fmt.Fprintf(a.Out, "Access policy for %s removed; the site is open to all signed-in users.\n", site)
 		return nil
 	}
 	return a.printJSON(json.RawMessage(data))

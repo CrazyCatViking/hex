@@ -1,0 +1,581 @@
+package hex
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/url"
+	"slices"
+	"strings"
+	"time"
+)
+
+// SiteFile describes one file of a published site. MD5 is the base64 Content-MD5
+// of the file, supplied by the publisher.
+type SiteFile struct {
+	Path string `json:"path"`
+	Size int64  `json:"size"`
+	MD5  string `json:"md5,omitempty"`
+}
+
+// UploadTarget tells the publisher where to send one file. Protocol "hex"
+// is a plain PUT of the file body to URL, authenticated like other API calls;
+// "azure-files" is a pre-signed Azure Files URL that accepts Create File and
+// Put Range requests.
+type UploadTarget struct {
+	Path     string `json:"path"`
+	Protocol string `json:"protocol"`
+	URL      string `json:"url"`
+}
+
+// SitePublisher writes published site files on behalf of authorized
+// publishers. Paths are relative to the site's directory and use forward
+// slashes. ListSiteFiles returns every regular file, including the
+// server-owned dotfiles; sizes must be exact, MD5 is optional.
+type SitePublisher interface {
+	ListSiteFiles(ctx context.Context, site string) ([]SiteFile, error)
+	ReadSiteFile(ctx context.Context, site, path string) (io.ReadCloser, error)
+	WriteSiteFile(ctx context.Context, site, path string, size int64, source io.Reader) error
+	DeleteSiteFile(ctx context.Context, site, path string) error
+	DeleteSite(ctx context.Context, site string) error
+}
+
+// DirectUploader is implemented by publishers whose storage accepts uploads
+// straight from the publisher, such as pre-signed URLs. Publishers without it
+// receive uploads through the server.
+type DirectUploader interface {
+	UploadTargets(ctx context.Context, site string, files []SiteFile) ([]UploadTarget, error)
+}
+
+const (
+	siteMetadataFile = ".hex-site.json"
+	siteManifestFile = ".hex-manifest.json"
+	maxPublishFiles  = 20000
+)
+
+type publishRequest struct {
+	Files    []SiteFile    `json:"files"`
+	Metadata *SiteMetadata `json:"metadata,omitempty"`
+	Access   *SiteAccess   `json:"access,omitempty"`
+}
+
+type publishPlan struct {
+	Uploads   []UploadTarget `json:"uploads"`
+	Unchanged int            `json:"unchanged"`
+}
+
+type publishResult struct {
+	Name    string      `json:"name"`
+	URL     string      `json:"url"`
+	Deleted int         `json:"deleted"`
+	Access  *SiteAccess `json:"access,omitempty"`
+}
+
+// startPublish authorizes a publication, claims unclaimed sites for the
+// caller, and returns upload targets for the files that differ from the
+// current publication.
+func (s *Server) startPublish(w http.ResponseWriter, r *http.Request) {
+	site, identity, ok := s.publishCaller(w, r, true)
+	if !ok {
+		return
+	}
+
+	request, ok := s.readPublishRequest(w, r)
+	if !ok {
+		return
+	}
+	if !s.checkRequestedAccess(w, r, site, identity, request.Access) {
+		return
+	}
+
+	if err := s.removeConflictingFiles(r.Context(), site, request.Files); err != nil {
+		writeServerError(w, err)
+		return
+	}
+
+	changed, unchanged, err := s.changedFiles(r.Context(), site, request.Files)
+	if err != nil {
+		writeServerError(w, err)
+		return
+	}
+
+	uploads, err := s.uploadTargets(r.Context(), site, changed)
+	if err != nil {
+		writeServerError(w, err)
+		return
+	}
+
+	slog.Info("publication started", "site", site, "publisher", identityName(identity), "uploads", len(uploads), "unchanged", unchanged)
+	writeJSON(w, http.StatusOK, publishPlan{Uploads: uploads, Unchanged: unchanged})
+}
+
+// uploadSiteFile receives one file for publishers without direct uploads.
+func (s *Server) uploadSiteFile(w http.ResponseWriter, r *http.Request) {
+	site, _, ok := s.publishCaller(w, r, false)
+	if !ok {
+		return
+	}
+
+	path := r.PathValue("path")
+	if !validKey(path) {
+		writeError(w, http.StatusBadRequest, "invalid file path")
+		return
+	}
+	if r.ContentLength < 0 || r.ContentLength > s.config.MaxPublishFileBytes {
+		writeError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("files need a Content-Length of at most %d bytes", s.config.MaxPublishFileBytes))
+		return
+	}
+
+	body := http.MaxBytesReader(w, r.Body, r.ContentLength)
+	if err := s.config.Publisher.WriteSiteFile(r.Context(), site, path, r.ContentLength, body); err != nil {
+		writeServerError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// completePublish verifies that every file of the manifest arrived, removes
+// files that are no longer part of the site, and records the manifest,
+// metadata and optional access policy.
+func (s *Server) completePublish(w http.ResponseWriter, r *http.Request) {
+	site, identity, ok := s.publishCaller(w, r, false)
+	if !ok {
+		return
+	}
+
+	request, ok := s.readPublishRequest(w, r)
+	if !ok {
+		return
+	}
+	if !s.checkRequestedAccess(w, r, site, identity, request.Access) {
+		return
+	}
+
+	current, err := s.config.Publisher.ListSiteFiles(r.Context(), site)
+	if err != nil {
+		writeServerError(w, err)
+		return
+	}
+	if missing := missingFiles(request.Files, current); len(missing) > 0 {
+		writeError(w, http.StatusConflict, "files were not uploaded completely: "+strings.Join(missing, ", "))
+		return
+	}
+
+	deleted, err := s.removeObsoleteFiles(r.Context(), site, request.Files, current)
+	if err != nil {
+		writeServerError(w, err)
+		return
+	}
+
+	if err := s.writeSiteRecords(r.Context(), site, request); err != nil {
+		writeServerError(w, err)
+		return
+	}
+
+	result := publishResult{Name: site, Deleted: deleted}
+	if siteURL, err := s.siteURL(site); err == nil {
+		result.URL = siteURL
+	}
+	if request.Access != nil && s.config.Access != nil {
+		saved, status, err := s.replaceSiteAccess(r.Context(), identity, site, *request.Access)
+		if err != nil {
+			if status == 0 {
+				writeServerError(w, err)
+				return
+			}
+			writeError(w, status, "site published, but the access policy was rejected: "+err.Error())
+			return
+		}
+		result.Access = &saved
+	}
+
+	slog.Info("publication completed", "site", site, "publisher", identityName(identity), "files", len(request.Files), "deleted", deleted)
+	writeJSON(w, http.StatusOK, result)
+}
+
+// checkRequestedAccess rejects a publication whose access policy is invalid
+// or would lock the publisher out, before any file changes.
+func (s *Server) checkRequestedAccess(w http.ResponseWriter, r *http.Request, site string, identity *Identity, requested *SiteAccess) bool {
+	if requested == nil {
+		return true
+	}
+	if err := validateSiteAccess(*requested); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return false
+	}
+	if s.config.Access == nil || identity == nil {
+		return true
+	}
+
+	existing, exists, err := s.sitePolicy(r.Context(), site)
+	if err != nil {
+		writeServerError(w, err)
+		return false
+	}
+	if err := s.keepsCallerOwner(identity, s.withOwners(identity, *requested, existing, exists)); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return false
+	}
+	return true
+}
+
+// unpublishSite deletes the site's files. Its access policy is kept, so the
+// name stays reserved for its owners.
+func (s *Server) unpublishSite(w http.ResponseWriter, r *http.Request) {
+	site, identity, ok := s.publishCaller(w, r, false)
+	if !ok {
+		return
+	}
+
+	if err := s.config.Publisher.DeleteSite(r.Context(), site); err != nil {
+		writeServerError(w, err)
+		return
+	}
+
+	slog.Info("site unpublished", "site", site, "publisher", identityName(identity))
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// publishCaller validates the site name and authorizes the caller to
+// publish it. Owners may always publish; with claim set, a caller allowed to
+// create sites also claims an unowned name and becomes its owner.
+func (s *Server) publishCaller(w http.ResponseWriter, r *http.Request, claim bool) (string, *Identity, bool) {
+	site := r.PathValue("site")
+	if !siteNamePattern.MatchString(site) {
+		writeError(w, http.StatusBadRequest, "site names are 1–63 lowercase letters, digits or hyphens")
+		return "", nil, false
+	}
+
+	identity := s.requestIdentity(r)
+	if s.config.Identity == nil {
+		return site, nil, true
+	}
+	if identity == nil {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return "", nil, false
+	}
+	if s.config.Access == nil {
+		if !s.canCreateSites(identity) {
+			writeError(w, http.StatusForbidden, "you are not allowed to publish on this platform")
+			return "", nil, false
+		}
+		return site, identity, true
+	}
+
+	access, exists, err := s.sitePolicy(r.Context(), site)
+	if err != nil {
+		writeServerError(w, err)
+		return "", nil, false
+	}
+	if exists {
+		if s.siteRole(identity, access, true) != roleOwner {
+			writeError(w, http.StatusForbidden, "only the site's owners can publish it")
+			return "", nil, false
+		}
+		return site, identity, true
+	}
+
+	if !claim {
+		writeError(w, http.StatusForbidden, "this site has no owner yet; start a publication to claim it")
+		return "", nil, false
+	}
+	if !s.canCreateSites(identity) {
+		writeError(w, http.StatusForbidden, "you are not allowed to create sites on this platform")
+		return "", nil, false
+	}
+	if _, status, err := s.replaceSiteAccess(r.Context(), identity, site, SiteAccess{}); err != nil {
+		if status == 0 {
+			writeServerError(w, err)
+		} else {
+			writeError(w, status, err.Error())
+		}
+		return "", nil, false
+	}
+	return site, identity, true
+}
+
+func (s *Server) readPublishRequest(w http.ResponseWriter, r *http.Request) (publishRequest, bool) {
+	var request publishRequest
+	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 16<<20))
+	if err != nil {
+		writeError(w, http.StatusRequestEntityTooLarge, "publication manifests are limited to 16 MiB")
+		return request, false
+	}
+	if err := json.Unmarshal(data, &request); err != nil {
+		writeError(w, http.StatusBadRequest, "expected a JSON publication manifest: "+err.Error())
+		return request, false
+	}
+	if err := s.validateManifest(request.Files); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return request, false
+	}
+	return request, true
+}
+
+func (s *Server) validateManifest(files []SiteFile) error {
+	if len(files) > maxPublishFiles {
+		return fmt.Errorf("a site can contain at most %d files", maxPublishFiles)
+	}
+
+	paths := make(map[string]bool, len(files))
+	var total int64
+	for _, file := range files {
+		if !validKey(file.Path) {
+			return fmt.Errorf("invalid file path %q; paths are relative and cannot contain dot-prefixed segments", file.Path)
+		}
+		if paths[file.Path] {
+			return fmt.Errorf("duplicate file path %q", file.Path)
+		}
+		paths[file.Path] = true
+
+		if file.Size < 0 || file.Size > s.config.MaxPublishFileBytes {
+			return fmt.Errorf("%s: files are limited to %d bytes", file.Path, s.config.MaxPublishFileBytes)
+		}
+		total += file.Size
+		if digest, err := base64.StdEncoding.DecodeString(file.MD5); err != nil || len(digest) != 16 {
+			return fmt.Errorf("%s: md5 must be the base64 MD5 digest of the file", file.Path)
+		}
+	}
+	if total > s.config.MaxPublishBytes {
+		return fmt.Errorf("sites are limited to %d bytes in total", s.config.MaxPublishBytes)
+	}
+	if !paths["index.html"] {
+		return errors.New("a site must contain index.html")
+	}
+	for path := range paths {
+		for parent := parentPath(path); parent != ""; parent = parentPath(parent) {
+			if paths[parent] {
+				return fmt.Errorf("%s is both a file and a directory", parent)
+			}
+		}
+	}
+	return nil
+}
+
+func parentPath(path string) string {
+	index := strings.LastIndex(path, "/")
+	if index < 0 {
+		return ""
+	}
+	return path[:index]
+}
+
+// changedFiles compares the manifest with the recorded manifest of the
+// current publication and the files actually present, returning the files
+// that need uploading, with index.html last.
+func (s *Server) changedFiles(ctx context.Context, site string, files []SiteFile) ([]SiteFile, int, error) {
+	previous, err := s.readManifest(ctx, site)
+	if err != nil {
+		return nil, 0, err
+	}
+	current, err := s.config.Publisher.ListSiteFiles(ctx, site)
+	if err != nil {
+		return nil, 0, err
+	}
+	sizes := make(map[string]int64, len(current))
+	for _, file := range current {
+		sizes[file.Path] = file.Size
+	}
+
+	var changed []SiteFile
+	unchanged := 0
+	for _, file := range files {
+		recorded, known := previous[file.Path]
+		size, present := sizes[file.Path]
+		if known && present && recorded.MD5 == file.MD5 && recorded.Size == file.Size && size == file.Size {
+			unchanged++
+			continue
+		}
+		changed = append(changed, file)
+	}
+
+	slices.SortStableFunc(changed, func(left, right SiteFile) int {
+		switch {
+		case left.Path == "index.html":
+			return 1
+		case right.Path == "index.html":
+			return -1
+		default:
+			return strings.Compare(left.Path, right.Path)
+		}
+	})
+	return changed, unchanged, nil
+}
+
+func (s *Server) uploadTargets(ctx context.Context, site string, files []SiteFile) ([]UploadTarget, error) {
+	if uploader, ok := s.config.Publisher.(DirectUploader); ok {
+		return uploader.UploadTargets(ctx, site, files)
+	}
+
+	targets := make([]UploadTarget, 0, len(files))
+	for _, file := range files {
+		targets = append(targets, UploadTarget{
+			Path:     file.Path,
+			Protocol: "hex",
+			URL:      "/api/hex/sites/" + site + "/publish/files/" + escapePath(file.Path),
+		})
+	}
+	return targets, nil
+}
+
+func escapePath(path string) string {
+	segments := strings.Split(path, "/")
+	for i, segment := range segments {
+		segments[i] = url.PathEscape(segment)
+	}
+	return strings.Join(segments, "/")
+}
+
+func missingFiles(files, current []SiteFile) []string {
+	sizes := make(map[string]int64, len(current))
+	for _, file := range current {
+		sizes[file.Path] = file.Size
+	}
+
+	var missing []string
+	for _, file := range files {
+		if size, ok := sizes[file.Path]; !ok || size != file.Size {
+			missing = append(missing, file.Path)
+			if len(missing) == 20 {
+				break
+			}
+		}
+	}
+	return missing
+}
+
+// removeConflictingFiles deletes current files that would block the new
+// layout: a file where the manifest needs a directory, or files inside a
+// directory the manifest replaces with a file. They cannot be kept until the
+// publication completes, because uploads would fail on them.
+func (s *Server) removeConflictingFiles(ctx context.Context, site string, files []SiteFile) error {
+	current, err := s.config.Publisher.ListSiteFiles(ctx, site)
+	if err != nil {
+		return err
+	}
+
+	wanted := make(map[string]bool, len(files))
+	directories := make(map[string]bool)
+	for _, file := range files {
+		wanted[file.Path] = true
+		for parent := parentPath(file.Path); parent != ""; parent = parentPath(parent) {
+			directories[parent] = true
+		}
+	}
+
+	for _, file := range current {
+		conflict := directories[file.Path]
+		for parent := parentPath(file.Path); parent != "" && !conflict; parent = parentPath(parent) {
+			conflict = wanted[parent]
+		}
+		if !conflict {
+			continue
+		}
+		if err := s.config.Publisher.DeleteSiteFile(ctx, site, file.Path); err != nil && !errors.Is(err, ErrNotFound) {
+			return fmt.Errorf("remove conflicting file %s: %w", file.Path, err)
+		}
+	}
+	return nil
+}
+
+func (s *Server) removeObsoleteFiles(ctx context.Context, site string, files, current []SiteFile) (int, error) {
+	keep := make(map[string]bool, len(files)+2)
+	for _, file := range files {
+		keep[file.Path] = true
+	}
+	keep[siteMetadataFile] = true
+	keep[siteManifestFile] = true
+
+	deleted := 0
+	for _, file := range current {
+		if keep[file.Path] {
+			continue
+		}
+		if err := s.config.Publisher.DeleteSiteFile(ctx, site, file.Path); err != nil && !errors.Is(err, ErrNotFound) {
+			return deleted, fmt.Errorf("remove obsolete file %s: %w", file.Path, err)
+		}
+		deleted++
+	}
+	return deleted, nil
+}
+
+func (s *Server) writeSiteRecords(ctx context.Context, site string, request publishRequest) error {
+	manifest, err := json.Marshal(request.Files)
+	if err != nil {
+		return err
+	}
+	if err := s.writeRecord(ctx, site, siteManifestFile, manifest); err != nil {
+		return err
+	}
+
+	metadata := SiteMetadata{}
+	if request.Metadata != nil {
+		metadata = *request.Metadata
+	}
+	metadata.PublishedAt = time.Now().UTC()
+	encoded, err := json.MarshalIndent(metadata, "", "  ")
+	if err != nil {
+		return err
+	}
+	if len(encoded) > 64<<10 {
+		return errors.New("site metadata exceeds 64 KiB")
+	}
+	return s.writeRecord(ctx, site, siteMetadataFile, encoded)
+}
+
+func (s *Server) writeRecord(ctx context.Context, site, path string, data []byte) error {
+	if err := s.config.Publisher.WriteSiteFile(ctx, site, path, int64(len(data)), strings.NewReader(string(data))); err != nil {
+		return fmt.Errorf("write %s for %s: %w", path, site, err)
+	}
+	return nil
+}
+
+func (s *Server) readManifest(ctx context.Context, site string) (map[string]SiteFile, error) {
+	reader, err := s.config.Publisher.ReadSiteFile(ctx, site, siteManifestFile)
+	if errors.Is(err, ErrNotFound) {
+		return map[string]SiteFile{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer closeReader(reader, siteManifestFile)
+
+	var files []SiteFile
+	if err := json.NewDecoder(io.LimitReader(reader, 16<<20)).Decode(&files); err != nil {
+		// An unreadable manifest only costs a full upload.
+		slog.Warn("ignoring unreadable site manifest", "site", site, "error", err)
+		return map[string]SiteFile{}, nil
+	}
+	manifest := make(map[string]SiteFile, len(files))
+	for _, file := range files {
+		manifest[file.Path] = file
+	}
+	return manifest, nil
+}
+
+func (s *Server) siteURL(site string) (string, error) {
+	baseURL, err := parseSiteBaseURL(s.config.SiteBaseURL)
+	if err != nil {
+		return "", err
+	}
+	siteURL := *baseURL
+	siteURL.Host = site + "." + baseURL.Host
+	siteURL.Path = "/"
+	return siteURL.String(), nil
+}
+
+func identityName(identity *Identity) string {
+	if identity == nil {
+		return ""
+	}
+	if identity.Name != "" {
+		return identity.Name
+	}
+	return identity.ID
+}

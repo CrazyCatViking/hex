@@ -54,31 +54,54 @@ func (s *Server) requestIdentity(r *http.Request) *Identity {
 	return identity
 }
 
-func (identity *Identity) memberOf(values []string) bool {
+// matchesAny reports whether the identity is one of the principals. Typed
+// principals (user:, group:, role:) match that kind of claim; a user matches
+// by identity ID or principal name. Untyped values, such as configured admin
+// group IDs, match the ID, any group or any role.
+func (identity *Identity) matchesAny(principals []string) bool {
 	if identity == nil {
 		return false
 	}
 
-	for _, value := range values {
-		if value == "" {
-			continue
-		}
-		if strings.EqualFold(identity.ID, value) {
+	for _, principal := range principals {
+		if identity.matches(principal) {
 			return true
 		}
-		for _, group := range identity.Groups {
-			if strings.EqualFold(group, value) {
-				return true
-			}
-		}
-		for _, role := range identity.Roles {
-			if strings.EqualFold(role, value) {
-				return true
-			}
-		}
+	}
+	return false
+}
+
+func (identity *Identity) matches(principal string) bool {
+	kind, value, typed := strings.Cut(principal, ":")
+	if !typed {
+		value = principal
+	}
+	if value == "" {
+		return false
 	}
 
-	return false
+	matchesUser := strings.EqualFold(identity.ID, value) ||
+		(identity.Name != "" && strings.EqualFold(identity.Name, value))
+	matchesGroup := slices.ContainsFunc(identity.Groups, func(group string) bool {
+		return strings.EqualFold(group, value)
+	})
+	matchesRole := slices.ContainsFunc(identity.Roles, func(role string) bool {
+		return strings.EqualFold(role, value)
+	})
+
+	if !typed {
+		return strings.EqualFold(identity.ID, value) || matchesGroup || matchesRole
+	}
+	switch kind {
+	case "user":
+		return matchesUser
+	case "group":
+		return matchesGroup
+	case "role":
+		return matchesRole
+	default:
+		return false
+	}
 }
 
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {

@@ -15,6 +15,9 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	hex "github.com/crazycatviking/hex/server"
+	"github.com/crazycatviking/hex/server/providers/memory"
 )
 
 func testApp(t *testing.T, directory string) (*App, *bytes.Buffer) {
@@ -37,42 +40,19 @@ func run(t *testing.T, directory string, args ...string) string {
 	return output.String()
 }
 
-func localConnection(server, root string) Connection {
+func localConnection(server string) Connection {
 	return Connection{
 		Version: 1, Name: "Company Hex", Server: server, SiteBaseURL: "http://localhost:8080",
-		Publishing:   &Publishing{Provider: "filesystem", Root: root},
-		Capabilities: &Capabilities{Version: 1, Sites: true, Files: true, MaxUploadBytes: 4096},
+		Capabilities: &Capabilities{Version: 1, Sites: true, Files: true, Publishing: true, MaxUploadBytes: 4096},
 	}
 }
 
-func TestSetupProfilesAndOfflinePublishing(t *testing.T) {
+func TestSetupProfilesAndPublishing(t *testing.T) {
 	directory := t.TempDir()
 	t.Setenv("HEX_CONFIG_DIR", filepath.Join(directory, "profiles"))
-	t.Setenv("HEX_TOKEN", "must-not-send-during-setup")
-	var requests atomic.Int32
-	var blocked atomic.Bool
-	connection := localConnection("", filepath.Join(directory, "published"))
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests.Add(1)
-		if r.URL.Path != connectionPath {
-			t.Errorf("unexpected request %s", r.URL.Path)
-		}
-		if r.Header.Get("Authorization") != "" {
-			t.Error("setup sent a token")
-		}
-		if blocked.Load() {
-			w.WriteHeader(http.StatusUnauthorized)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(connection); err != nil {
-			t.Error(err)
-		}
-	}))
-	defer server.Close()
-	connection.Server = server.URL
+	platform := startPlatform(t, nil)
 
-	output := run(t, directory, "setup", server.URL, "--name", "company", "--json")
+	output := run(t, directory, "setup", platform.URL, "--name", "company", "--json")
 	if !strings.Contains(output, `"status": "ready"`) {
 		t.Fatal(output)
 	}
@@ -89,17 +69,47 @@ func TestSetupProfilesAndOfflinePublishing(t *testing.T) {
 	if config.Platform != "" || config.Directory != "" || config.Server != "" || config.Name != "demo" {
 		t.Fatalf("unexpected project: %+v", config)
 	}
-	blocked.Store(true)
 	createBuild(t, project)
-	if output := run(t, project, "publish"); strings.TrimSpace(output) != "http://demo.localhost:8080/" {
+	if output := run(t, project, "publish"); !strings.HasSuffix(strings.TrimSpace(output), "http://demo.localhost:8080/") {
 		t.Fatal(output)
 	}
-	if output := run(t, project, "capabilities"); !strings.Contains(output, `"files": true`) {
+	if content, err := os.ReadFile(filepath.Join(platform.Sites, "demo", "index.html")); err != nil || string(content) != "test website" {
+		t.Fatalf("site was not published: %s %v", content, err)
+	}
+	if output := run(t, project, "capabilities"); !strings.Contains(output, `"publishing": true`) {
 		t.Fatal(output)
 	}
 	run(t, project, "delete", "--yes")
+	if _, err := os.Stat(filepath.Join(platform.Sites, "demo")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("site was not unpublished: %v", err)
+	}
+}
+
+func TestSetupNeverSendsTokens(t *testing.T) {
+	directory := t.TempDir()
+	t.Setenv("HEX_CONFIG_DIR", filepath.Join(directory, "profiles"))
+	t.Setenv("HEX_TOKEN", "must-not-send-during-setup")
+	var requests atomic.Int32
+	connection := localConnection("")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if r.URL.Path != connectionPath {
+			t.Errorf("unexpected request %s", r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "" {
+			t.Error("setup sent a token")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(connection); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer server.Close()
+	connection.Server = server.URL
+
+	run(t, directory, "setup", server.URL, "--name", "company", "--json")
 	if requests.Load() != 1 {
-		t.Fatal("publishing contacted the API")
+		t.Fatal("setup made unexpected requests")
 	}
 }
 
@@ -124,7 +134,7 @@ func TestProtectedSetupAndDroppedFile(t *testing.T) {
 	}
 
 	file := filepath.Join(directory, "connection with spaces.json")
-	if err := writeJSONFile(file, localConnection(server.URL, filepath.Join(directory, "sites"))); err != nil {
+	if err := writeJSONFile(file, localConnection(server.URL)); err != nil {
 		t.Fatal(err)
 	}
 	app, output = testApp(t, directory)
@@ -145,7 +155,7 @@ func TestProtectedSetupAndDroppedFile(t *testing.T) {
 }
 
 func TestConnectionValidation(t *testing.T) {
-	connection := localConnection("http://localhost:8080", t.TempDir())
+	connection := localConnection("http://localhost:8080")
 	connection.Resource = "api://00000000-0000-0000-0000-000000000001"
 	data, err := json.Marshal(connection)
 	if err != nil {
@@ -182,13 +192,19 @@ func TestConnectionValidation(t *testing.T) {
 	if _, err := parseConnection(data, ""); err == nil || strings.Contains(err.Error(), "never-store-this") {
 		t.Fatal("credential document accepted or leaked")
 	}
-	connection.Server = "https://company.example"
-	data, err = json.Marshal(connection)
+	// Storage destinations advertised by older platforms are ignored, and
+	// capabilities added by newer platforms do not break the CLI.
+	object["publishing"] = map[string]string{"provider": "azure-files", "url": "https://account.file.core.windows.net/sites"}
+	object["capabilities"].(map[string]any)["futureCapability"] = true
+	delete(object, "clientSecret")
+	delete(object, "resource")
+	data, err = json.Marshal(object)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := parseConnection(data, ""); err == nil {
-		t.Fatal("remote filesystem configuration accepted")
+	legacy, err := parseConnection(data, "")
+	if err != nil || legacy.LegacyPublishing != nil {
+		t.Fatalf("legacy connection rejected or kept its storage destination: %+v %v", legacy, err)
 	}
 	if _, err := parseConnection(bytes.Repeat([]byte(" "), maxConfigBytes+1), ""); err == nil {
 		t.Fatal("oversized configuration accepted")
@@ -202,7 +218,7 @@ func TestSetupDoesNotOverwriteAnInvalidProfileStore(t *testing.T) {
 	if err := os.WriteFile(path, []byte("{}"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := saveProfile(localConnection("http://localhost:8080", t.TempDir()), "company"); err == nil {
+	if _, err := saveProfile(localConnection("http://localhost:8080"), "company"); err == nil {
 		t.Fatal("invalid profile store was accepted")
 	}
 	content, err := os.ReadFile(path)
@@ -243,9 +259,10 @@ func TestDroppedPathsAndSiteURLs(t *testing.T) {
 func TestPublishingMirrorsOnlyOneSite(t *testing.T) {
 	directory := t.TempDir()
 	t.Setenv("HEX_CONFIG_DIR", filepath.Join(directory, "profiles"))
+	platform := startPlatform(t, nil)
 	project := filepath.Join(directory, "project")
-	destination := filepath.Join(directory, "sites")
-	run(t, directory, "init", project, "--name", "demo", "--publish-root", destination)
+	destination := platform.Sites
+	run(t, directory, "init", project, "--name", "demo", "--server", platform.URL)
 	createBuild(t, project)
 	write := func(path, value string) {
 		t.Helper()
@@ -284,15 +301,15 @@ func TestPublishingMirrorsOnlyOneSite(t *testing.T) {
 	}
 }
 
-func TestPublishingRejectsSymlinksAndOverlap(t *testing.T) {
+func TestPublishingRejectsSymlinks(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink creation needs Windows privileges")
 	}
 	directory := t.TempDir()
 	t.Setenv("HEX_CONFIG_DIR", filepath.Join(directory, "profiles"))
+	platform := startPlatform(t, nil)
 	project := filepath.Join(directory, "project")
-	destination := filepath.Join(directory, "sites")
-	run(t, directory, "init", project, "--name", "demo", "--publish-root", destination)
+	run(t, directory, "init", project, "--name", "demo", "--server", platform.URL)
 	createBuild(t, project)
 	source := filepath.Join(project, "dist")
 	if err := os.Symlink(filepath.Join(source, "index.html"), filepath.Join(source, "leak")); err != nil {
@@ -302,24 +319,40 @@ func TestPublishingRejectsSymlinksAndOverlap(t *testing.T) {
 	if err := app.Execute(context.Background(), []string{"publish"}, "test"); err == nil {
 		t.Fatal("source symlink accepted")
 	}
-	if err := os.Remove(filepath.Join(source, "leak")); err != nil {
-		t.Fatal(err)
+}
+
+func TestPublishingAppliesTheAccessPolicy(t *testing.T) {
+	directory := t.TempDir()
+	t.Setenv("HEX_CONFIG_DIR", filepath.Join(directory, "profiles"))
+	platform := startPlatform(t, func(config *hex.Config) {
+		config.Identity = hex.StaticIdentity{Identity: hex.Identity{ID: "alex", Name: "alex@example.com"}}
+		config.Access = memory.NewAccessStore()
+	})
+	project := filepath.Join(directory, "project")
+	run(t, directory, "init", project, "--name", "demo", "--server", platform.URL)
+	createBuild(t, project)
+
+	config := Project{
+		Name:   "demo",
+		Server: platform.URL,
+		Access: json.RawMessage(`{"viewers":["group:sales"],"paths":[{"prefix":"/admin/","viewers":"owners"}]}`),
 	}
-	if err := os.MkdirAll(destination, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(source, filepath.Join(destination, "demo")); err != nil {
-		t.Fatal(err)
-	}
-	if err := app.Execute(context.Background(), []string{"publish"}, "test"); err == nil {
-		t.Fatal("destination symlink accepted")
-	}
-	config := Project{Name: "demo", Server: "http://localhost:8080", Directory: "dist", Publishing: &Publishing{Provider: "filesystem", Root: source}}
 	if err := writeJSONFile(filepath.Join(project, "hex.json"), config); err != nil {
 		t.Fatal(err)
 	}
-	if err := app.Execute(context.Background(), []string{"publish"}, "test"); err == nil || !strings.Contains(err.Error(), "overlap") {
+	run(t, project, "publish")
+	policy := run(t, project, "access", "show", "demo", "--server", platform.URL)
+	if !strings.Contains(policy, `"user:alex"`) || !strings.Contains(policy, `"/admin/"`) || !strings.Contains(policy, `"group:sales"`) {
+		t.Fatalf("policy was not applied: %s", policy)
+	}
+
+	config.Access = json.RawMessage(`{"viewers":["sales"]}`)
+	if err := writeJSONFile(filepath.Join(project, "hex.json"), config); err != nil {
 		t.Fatal(err)
+	}
+	app, output := testApp(t, project)
+	if err := app.Execute(context.Background(), []string{"publish"}, "test"); err == nil || !strings.Contains(err.Error(), "principal") {
+		t.Fatalf("invalid policy accepted: %v\n%s", err, output)
 	}
 }
 

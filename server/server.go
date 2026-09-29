@@ -4,25 +4,33 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 type Config struct {
-	Files          ObjectStore
-	Sites          SiteDirectory
-	SiteBaseURL    string
-	Database       Database
-	Realtime       Realtime
-	Identity       IdentityResolver
-	Access         AccessStore
-	AdminGroups    []string
-	MaxUploadBytes int64
-	Connection     *ConnectionConfig
-	CLIReleaseURL  string
+	Files       ObjectStore
+	Sites       SiteDirectory
+	SiteBaseURL string
+	Database    Database
+	Realtime    Realtime
+	Identity    IdentityResolver
+	Access      AccessStore
+	AdminGroups []string
+	// Publisher enables publishing through the API. PublisherGroups limits
+	// who may claim new site names; empty lets every signed-in user.
+	Publisher           SitePublisher
+	PublisherGroups     []string
+	MaxUploadBytes      int64
+	MaxPublishFileBytes int64
+	MaxPublishBytes     int64
+	Connection          *ConnectionConfig
+	CLIReleaseURL       string
 }
 
 type Server struct {
-	config Config
-	mux    *http.ServeMux
+	config   Config
+	mux      *http.ServeMux
+	policies *policyCache
 }
 
 func New(config Config) *Server {
@@ -32,10 +40,17 @@ func New(config Config) *Server {
 	if config.MaxUploadBytes <= 0 {
 		config.MaxUploadBytes = 32 << 20
 	}
+	if config.MaxPublishFileBytes <= 0 {
+		config.MaxPublishFileBytes = 256 << 20
+	}
+	if config.MaxPublishBytes <= 0 {
+		config.MaxPublishBytes = 2 << 30
+	}
 
 	server := &Server{
-		config: config,
-		mux:    http.NewServeMux(),
+		config:   config,
+		mux:      http.NewServeMux(),
+		policies: newPolicyCache(10 * time.Second),
 	}
 	server.registerRoutes()
 
@@ -64,6 +79,14 @@ func (s *Server) registerRoutes() {
 		s.mux.HandleFunc("GET /api/hex/sites/{site}/access", s.getSiteAccess)
 		s.mux.HandleFunc("PUT /api/hex/sites/{site}/access", s.putSiteAccess)
 		s.mux.HandleFunc("DELETE /api/hex/sites/{site}/access", s.deleteSiteAccess)
+	}
+	s.mux.HandleFunc("GET /api/hex/sites/{site}/permissions", s.permissions)
+
+	if s.config.Publisher != nil {
+		s.mux.HandleFunc("POST /api/hex/sites/{site}/publish", s.startPublish)
+		s.mux.HandleFunc("PUT /api/hex/sites/{site}/publish/files/{path...}", s.uploadSiteFile)
+		s.mux.HandleFunc("POST /api/hex/sites/{site}/publish/complete", s.completePublish)
+		s.mux.HandleFunc("DELETE /api/hex/sites/{site}", s.unpublishSite)
 	}
 
 	if s.config.Files != nil {
@@ -165,6 +188,7 @@ func (s *Server) capabilityDescription() map[string]any {
 		"sites":          s.config.Sites != nil,
 		"identity":       s.config.Identity != nil,
 		"accessControl":  s.config.Identity != nil && s.config.Access != nil,
+		"publishing":     s.config.Publisher != nil,
 		"maxUploadBytes": s.config.MaxUploadBytes,
 	}
 }

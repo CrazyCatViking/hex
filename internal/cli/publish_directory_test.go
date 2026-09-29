@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -64,8 +63,9 @@ func TestPublishPlainSiteExcludesProjectFiles(t *testing.T) {
 	directory := t.TempDir()
 	t.Setenv("HEX_CONFIG_DIR", filepath.Join(directory, "profiles"))
 	project := filepath.Join(directory, "demo")
-	destination := filepath.Join(directory, "published")
-	run(t, directory, "init", project, "--publish-root", destination)
+	platform := startPlatform(t, nil)
+	destination := platform.Sites
+	run(t, directory, "init", project, "--server", platform.URL)
 	assets := map[string]string{
 		"index.html":      "<script src='./app.js'></script>",
 		"app.js":          "console.log('plain site')",
@@ -115,12 +115,8 @@ func TestRootPublishingRetainsPathBoundaries(t *testing.T) {
 	if _, err := readSource(project, "../outside"); err == nil {
 		t.Fatal("publishing outside the project was allowed")
 	}
-	source, err := readSource(project, ".")
-	if err != nil {
+	if _, err := readSource(project, "."); err != nil {
 		t.Fatal(err)
-	}
-	if err := syncFilesystem(context.Background(), source, filepath.Join(project, "published")); err == nil {
-		t.Fatal("overlapping root publication was allowed")
 	}
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink creation requires Windows privileges")

@@ -14,7 +14,7 @@ The initial example is [Azure Container Apps](examples/azure-container-apps/READ
 | `modules/azure/` | Concrete Azure resources; no application business logic |
 | `examples/azure-container-apps/` | Chooses resources, connects outputs, selects enabled runtime capabilities |
 
-No resource identifiers, credentials, or cloud SDKs are required by the browser client. The CLI can use an operator-supplied `HEX_TOKEN`; its optional Entra/Azure CLI token acquisition is a convenience, not a server requirement. Authentication enforcement belongs to the host.
+No resource identifiers, credentials, or cloud SDKs are required by the browser client. The CLI can use an operator-supplied `HEX_TOKEN`; its built-in Entra sign-in (or Azure CLI fallback) is a convenience, not a server requirement. Authentication enforcement belongs to the host.
 
 ## Modules
 
@@ -24,7 +24,7 @@ All Azure modules accept a resource group ID and deployment location; modules do
 | --- | --- | --- |
 | `azure/network` | VNet and Container Apps/private endpoint subnets; optional PostgreSQL subnet | Network and subnet IDs |
 | `azure/private-storage` | LRS storage account, private endpoint, DNS zone and VNet link for one service | Storage account ID/name |
-| `azure/sites` | Private Azure Files account and an explicitly Hot SMB share | Read-only mount binding, reference-server environment, direct CLI publishing destination |
+| `azure/sites` | Private Azure Files account and an explicitly Hot SMB share | Storage account ID, read-only mount binding, share URL, reference-server environment (including the `azurefiles` publisher) |
 | `azure/files` | Private Blob account/container and scoped data-access role assignment | Reference-server environment |
 | `azure/postgres` | Private PostgreSQL server/database and private DNS | Sensitive connection string |
 | `azure/container-apps` | Environment, optional site mounts, two-container gateway, Entra authentication | Public URL and callback URI |
@@ -33,7 +33,7 @@ All Azure modules accept a resource group ID and deployment location; modules do
 
 The hosting module accepts `server_environment`, `server_secrets`, and an optional `site_mount`. It does not provision PostgreSQL or Blob Storage. You can therefore pass outputs from these modules, supply bindings for existing services, or replace a capability module entirely. The reference example demonstrates an existing PostgreSQL connection with `database = "external"`.
 
-Site publication is CLI-to-storage, without a Hex API call. Runtime site mounts are read-only. Hosting uses a subdomain per site; `site_base_url` and operator-supplied `custom_domains` bindings describe the domain setup. See [subdomain configuration](../../docs/subdomains.md) and [direct publishing](../../docs/publishing.md). Discovery enumerates directories and does not use infrastructure bindings as a site catalogue.
+Site publication goes through the Hex API: the server authorizes site owners and signs per-file upload URLs with its managed identity, which the example grants Storage File Data Privileged Contributor and Storage File Delegator on the sites account. Runtime site mounts are read-only. Hosting uses a subdomain per site; `site_base_url` and operator-supplied `custom_domains` bindings describe the domain setup. See [subdomain configuration](../../docs/subdomains.md) and [publishing](../../docs/publishing.md). Discovery enumerates directories and does not use infrastructure bindings as a site catalogue.
 
 ## State and lifecycle
 

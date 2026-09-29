@@ -151,7 +151,7 @@ func TestSiteDiscoveryUsesFilesWithoutMetadata(t *testing.T) {
 	}
 }
 
-func TestServerCannotPublishUnpublishOrServeSites(t *testing.T) {
+func TestServerWithoutPublisherCannotPublishOrServeSites(t *testing.T) {
 	server, store := setup(t)
 	key := "public/sites/demo/index.html"
 	if err := store.Put(context.Background(), key, strings.NewReader("published directly")); err != nil {
@@ -160,6 +160,8 @@ func TestServerCannotPublishUnpublishOrServeSites(t *testing.T) {
 
 	request(t, server, "POST", "/api/sites/demo/deploy", []byte("anything"), 404)
 	request(t, server, "DELETE", "/api/sites/demo", nil, 404)
+	request(t, server, "POST", "/api/hex/sites/demo/publish", []byte(`{"files":[]}`), 404)
+	request(t, server, "DELETE", "/api/hex/sites/demo", nil, 404)
 	request(t, server, "GET", "/sites/demo/", nil, 404)
 
 	reader, err := store.Open(context.Background(), key)
