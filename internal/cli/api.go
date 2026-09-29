@@ -11,6 +11,8 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -199,7 +201,84 @@ func apiErrorMessage(response *http.Response) string {
 }
 
 func (a *App) sitesCommand() *cobra.Command {
-	return a.readCommand("sites", "List directories discovered by the platform", "/api/sites", false)
+	var profile, server string
+	var mine, jsonOutput bool
+	command := &cobra.Command{
+		Use:   "sites",
+		Short: "List the platform's sites, or yours with --mine",
+		Long: "List the sites listed in the platform's catalogue. --mine lists every site you " +
+			"own instead, including files and folders you published at private links.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			project, err := a.commandConfig(profile, false)
+			if err != nil {
+				return err
+			}
+			if server != "" {
+				project.Server = server
+			}
+			if !mine {
+				data, err := a.apiRequest(cmd.Context(), project, "/api/sites")
+				if err != nil {
+					return err
+				}
+				return a.printJSON(data)
+			}
+
+			sites, err := a.mySites(cmd.Context(), project)
+			if err != nil {
+				return err
+			}
+			if jsonOutput {
+				return a.printJSON(sites)
+			}
+			return printSites(a.Out, sites)
+		},
+	}
+	command.Flags().BoolVar(&mine, "mine", false, "List the sites you own")
+	command.Flags().BoolVar(&jsonOutput, "json", false, "Print JSON with --mine")
+	command.Flags().StringVar(&profile, "platform", "", "Saved platform profile")
+	command.Flags().StringVar(&server, "server", "", "Override the API origin")
+	return command
+}
+
+type ownedSite struct {
+	Name        string    `json:"name"`
+	URL         string    `json:"url"`
+	Title       string    `json:"title"`
+	Kind        string    `json:"kind"`
+	Audience    string    `json:"audience"`
+	PublishedBy string    `json:"publishedBy,omitempty"`
+	PublishedAt time.Time `json:"publishedAt,omitzero"`
+}
+
+func (a *App) mySites(ctx context.Context, project Project) ([]ownedSite, error) {
+	data, err := a.apiRequest(ctx, project, "/api/hex/my-sites")
+	if err != nil {
+		var status *apiStatusError
+		if errors.As(err, &status) && status.Status == http.StatusNotFound {
+			return nil, errors.New("this platform cannot list your sites; it needs sign-in and access control")
+		}
+		return nil, err
+	}
+	var sites []ownedSite
+	if err := json.Unmarshal(data, &sites); err != nil {
+		return nil, errors.New("unexpected site list from the platform")
+	}
+	return sites, nil
+}
+
+func printSites(output io.Writer, sites []ownedSite) error {
+	if len(sites) == 0 {
+		_, err := fmt.Fprintln(output, "You don't own any sites yet. Publish a project, file or folder with hex publish.")
+		return err
+	}
+	table := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(table, "NAME\tTITLE\tKIND\tWHO CAN OPEN IT\tURL")
+	for _, site := range sites {
+		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\n", site.Name, site.Title, site.Kind, site.Audience, site.URL)
+	}
+	return table.Flush()
 }
 
 func (a *App) capabilitiesCommand() *cobra.Command {

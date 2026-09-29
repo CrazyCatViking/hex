@@ -55,6 +55,7 @@ type DirectUploader interface {
 const (
 	siteMetadataFile = ".hex-site.json"
 	siteManifestFile = ".hex-manifest.json"
+	siteHistoryFile  = ".hex-history.json"
 	maxPublishFiles  = 20000
 )
 
@@ -173,7 +174,7 @@ func (s *Server) completePublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.writeSiteRecords(r.Context(), site, request); err != nil {
+	if err := s.writeSiteRecords(r.Context(), site, request, identity); err != nil {
 		writeServerError(w, err)
 		return
 	}
@@ -491,6 +492,7 @@ func (s *Server) removeObsoleteFiles(ctx context.Context, site string, files, cu
 	}
 	keep[siteMetadataFile] = true
 	keep[siteManifestFile] = true
+	keep[siteHistoryFile] = true
 
 	deleted := 0
 	for _, file := range current {
@@ -505,7 +507,10 @@ func (s *Server) removeObsoleteFiles(ctx context.Context, site string, files, cu
 	return deleted, nil
 }
 
-func (s *Server) writeSiteRecords(ctx context.Context, site string, request publishRequest) error {
+// writeSiteRecords stores the manifest, the metadata and the publication
+// history. The creator, kind and creation time carry over from earlier
+// publications; the publisher is the caller.
+func (s *Server) writeSiteRecords(ctx context.Context, site string, request publishRequest, identity *Identity) error {
 	manifest, err := json.Marshal(request.Files)
 	if err != nil {
 		return err
@@ -514,11 +519,42 @@ func (s *Server) writeSiteRecords(ctx context.Context, site string, request publ
 		return err
 	}
 
+	now := time.Now().UTC()
+	previous := s.readSiteMetadata(ctx, site)
 	metadata := SiteMetadata{}
 	if request.Metadata != nil {
-		metadata = *request.Metadata
+		metadata = SiteMetadata{
+			Title:        request.Metadata.Title,
+			Description:  request.Metadata.Description,
+			Author:       request.Metadata.Author,
+			Discoverable: request.Metadata.Discoverable,
+		}
 	}
-	metadata.PublishedAt = time.Now().UTC()
+	metadata.PublishedAt = now
+	metadata.PublishedBy = personOf(identity)
+	metadata.Kind = previous.Kind
+	if metadata.Kind == KindArtifact && metadata.Title == "" {
+		// Artifacts are updated without a project file; keep their title.
+		metadata.Title = previous.Title
+	}
+	metadata.CreatedAt = previous.CreatedAt
+	metadata.CreatedBy = previous.CreatedBy
+	if metadata.CreatedAt.IsZero() {
+		metadata.CreatedAt = now
+		metadata.CreatedBy = metadata.PublishedBy
+	}
+	if err := s.writeMetadata(ctx, site, metadata); err != nil {
+		return err
+	}
+
+	var size int64
+	for _, file := range request.Files {
+		size += file.Size
+	}
+	return s.appendHistory(ctx, site, Publication{PublishedAt: now, PublishedBy: metadata.PublishedBy, Files: len(request.Files), Bytes: size})
+}
+
+func (s *Server) writeMetadata(ctx context.Context, site string, metadata SiteMetadata) error {
 	encoded, err := json.MarshalIndent(metadata, "", "  ")
 	if err != nil {
 		return err
@@ -527,6 +563,83 @@ func (s *Server) writeSiteRecords(ctx context.Context, site string, request publ
 		return errors.New("site metadata exceeds 64 KiB")
 	}
 	return s.writeRecord(ctx, site, siteMetadataFile, encoded)
+}
+
+// readSiteMetadata returns the site's recorded metadata, or empty metadata
+// for new sites and unreadable records.
+func (s *Server) readSiteMetadata(ctx context.Context, site string) SiteMetadata {
+	var metadata SiteMetadata
+	if err := s.readRecord(ctx, site, siteMetadataFile, &metadata); err != nil {
+		slog.Warn("ignoring unreadable site metadata", "site", site, "error", err)
+	}
+	return metadata
+}
+
+// Publication is one entry in a site's publication history.
+type Publication struct {
+	PublishedAt time.Time `json:"publishedAt"`
+	PublishedBy *Person   `json:"publishedBy,omitempty"`
+	Files       int       `json:"files"`
+	Bytes       int64     `json:"bytes"`
+}
+
+const maxHistory = 50
+
+func (s *Server) appendHistory(ctx context.Context, site string, publication Publication) error {
+	history := []Publication{}
+	if err := s.readRecord(ctx, site, siteHistoryFile, &history); err != nil {
+		slog.Warn("starting a new publication history", "site", site, "error", err)
+	}
+	history = append([]Publication{publication}, history...)
+	if len(history) > maxHistory {
+		history = history[:maxHistory]
+	}
+
+	encoded, err := json.Marshal(history)
+	if err != nil {
+		return err
+	}
+	return s.writeRecord(ctx, site, siteHistoryFile, encoded)
+}
+
+// readRecord decodes one of the server-owned records; a missing record
+// leaves value unchanged.
+func (s *Server) readRecord(ctx context.Context, site, path string, value any) error {
+	reader, err := s.config.Publisher.ReadSiteFile(ctx, site, path)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer closeReader(reader, path)
+	return json.NewDecoder(io.LimitReader(reader, 1<<20)).Decode(value)
+}
+
+// siteHistory lists who published the site and when, newest first. Only
+// owners and admins may read it.
+func (s *Server) siteHistory(w http.ResponseWriter, r *http.Request) {
+	identity, ok := s.accessCaller(w, r)
+	if !ok {
+		return
+	}
+	site := r.PathValue("site")
+	access, exists, err := s.sitePolicy(r.Context(), site)
+	if err != nil {
+		writeServerError(w, err)
+		return
+	}
+	if s.siteRole(identity, access, exists) != roleOwner {
+		writeError(w, http.StatusForbidden, "only site owners can read the publication history")
+		return
+	}
+
+	history := []Publication{}
+	if err := s.readRecord(r.Context(), site, siteHistoryFile, &history); err != nil {
+		writeServerError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, history)
 }
 
 func (s *Server) writeRecord(ctx context.Context, site, path string, data []byte) error {

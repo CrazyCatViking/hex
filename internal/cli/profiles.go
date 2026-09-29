@@ -95,8 +95,14 @@ func saveProfile(connection Connection, name string) (string, error) {
 }
 
 func (a *App) readProject(optional bool) (Project, error) {
+	return a.readProjectIn(a.Dir, optional)
+}
+
+// readProjectIn reads the hex.json in directory, resolving its platform
+// profile.
+func (a *App) readProjectIn(directory string, optional bool) (Project, error) {
 	var project Project
-	data, err := os.ReadFile(filepath.Join(a.Dir, "hex.json"))
+	data, err := os.ReadFile(filepath.Join(directory, "hex.json"))
 	if optional && errors.Is(err, fs.ErrNotExist) {
 		return project, nil
 	}
@@ -133,10 +139,16 @@ func (a *App) readProject(optional bool) (Project, error) {
 }
 
 func (a *App) commandConfig(profile string, needsProject bool) (Project, error) {
+	return a.commandConfigIn(a.Dir, profile, needsProject)
+}
+
+// commandConfigIn resolves the platform for a command run against
+// directory: its hex.json when present or needed, then the saved profile.
+func (a *App) commandConfigIn(directory, profile string, needsProject bool) (Project, error) {
 	var project Project
 	var err error
 	if profile == "" || needsProject {
-		project, err = a.readProject(!needsProject)
+		project, err = a.readProjectIn(directory, !needsProject)
 		if err != nil {
 			return project, err
 		}

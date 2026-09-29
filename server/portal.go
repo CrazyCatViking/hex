@@ -20,6 +20,7 @@ var portalTemplates = template.Must(template.ParseFS(platformAssets, "portal/*.h
 
 type portalView struct {
 	Name                string
+	Manage              bool
 	InstallersAvailable bool
 	Statistics          siteStatistics
 	Sites               []portalSite
@@ -85,6 +86,7 @@ func (s *Server) portalView(ctx context.Context, viewer *Identity, query url.Val
 	_, releaseError := s.cliReleaseURL()
 	view := portalView{
 		Name:                s.platformName(),
+		Manage:              s.manageEnabled() && viewer != nil,
 		InstallersAvailable: connectionError == nil && releaseError == nil,
 		Statistics:          summarizeSites(sites, time.Now()),
 		Search:              query.Get("search"),
@@ -107,8 +109,8 @@ func (s *Server) portalView(ctx context.Context, viewer *Identity, query url.Val
 			if metadata.Description != "" {
 				card.Description = metadata.Description
 			}
-			if metadata.Author != "" {
-				card.Author = metadata.Author
+			if author := metadata.DisplayAuthor(); author != "" {
+				card.Author = author
 			}
 			if !metadata.PublishedAt.IsZero() {
 				card.Timestamp = metadata.PublishedAt
@@ -180,7 +182,11 @@ func summarizeSites(sites []Site, now time.Time) siteStatistics {
 		if site.Metadata == nil {
 			continue
 		}
-		if author := strings.ToLower(strings.TrimSpace(site.Metadata.Author)); author != "" {
+		author := strings.ToLower(strings.TrimSpace(site.Metadata.DisplayAuthor()))
+		if site.Metadata.CreatedBy != nil {
+			author = site.Metadata.CreatedBy.ID
+		}
+		if author != "" {
 			authors[author] = true
 		}
 		published := site.Metadata.PublishedAt

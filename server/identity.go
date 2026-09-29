@@ -14,6 +14,7 @@ type Identity struct {
 	Provider string   `json:"provider,omitempty"`
 	ID       string   `json:"id"`
 	Name     string   `json:"name,omitempty"`
+	Email    string   `json:"email,omitempty"`
 	Groups   []string `json:"groups,omitempty"`
 	Roles    []string `json:"roles,omitempty"`
 }
@@ -51,12 +52,13 @@ func (s *Server) requestIdentity(r *http.Request) *Identity {
 		slog.Error("resolve request identity", "path", r.URL.Path, "error", err)
 		return nil
 	}
+	s.rememberPerson(r.Context(), identity)
 	return identity
 }
 
 // matchesAny reports whether the identity is one of the principals. Typed
 // principals (user:, group:, role:) match that kind of claim; a user matches
-// by identity ID or principal name. Untyped values, such as configured admin
+// by identity ID, email or principal name. Untyped values, such as configured admin
 // group IDs, match the ID, any group or any role.
 func (identity *Identity) matchesAny(principals []string) bool {
 	if identity == nil {
@@ -81,6 +83,7 @@ func (identity *Identity) matches(principal string) bool {
 	}
 
 	matchesUser := strings.EqualFold(identity.ID, value) ||
+		(identity.Email != "" && strings.EqualFold(identity.Email, value)) ||
 		(identity.Name != "" && strings.EqualFold(identity.Name, value))
 	matchesGroup := slices.ContainsFunc(identity.Groups, func(group string) bool {
 		return strings.EqualFold(group, value)
@@ -116,5 +119,6 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.rememberPerson(r.Context(), identity)
 	writeJSON(w, http.StatusOK, identity)
 }

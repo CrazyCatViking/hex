@@ -72,21 +72,34 @@ func readSource(project, directory string) (sourceDirectory, error) {
 	if !containsPath(project, source.Directory) {
 		return source, errors.New("publish directory must be the project root or a subdirectory of the project")
 	}
-	foundIndex := false
-	err = filepath.WalkDir(source.Directory, func(path string, entry fs.DirEntry, walkError error) error {
+	source.Files, err = collectFiles(source.Directory, func(path string, entry fs.DirEntry) bool {
+		return source.Directory == project && filepath.Dir(path) == project && rootProjectFile(entry.Name())
+	})
+	if err != nil {
+		return source, err
+	}
+	if !slices.ContainsFunc(source.Files, func(file sourceFile) bool { return file.Key == "index.html" }) {
+		return source, errors.New("publish directory must contain index.html")
+	}
+	slices.SortFunc(source.Files, func(left, right sourceFile) int {
+		return strings.Compare(left.Key, right.Key)
+	})
+	return source, nil
+}
+
+// collectFiles lists the regular files under directory with their
+// forward-slash keys. Hidden files and node_modules are left out, as is
+// anything skip selects; symlinks and special files are refused.
+func collectFiles(directory string, skip func(path string, entry fs.DirEntry) bool) ([]sourceFile, error) {
+	var files []sourceFile
+	err := filepath.WalkDir(directory, func(path string, entry fs.DirEntry, walkError error) error {
 		if walkError != nil {
 			return walkError
 		}
-		if path == source.Directory {
+		if path == directory {
 			return nil
 		}
-		if strings.HasPrefix(entry.Name(), ".") || strings.EqualFold(entry.Name(), "node_modules") {
-			if entry.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if source.Directory == project && filepath.Dir(path) == project && rootProjectFile(entry.Name()) {
+		if strings.HasPrefix(entry.Name(), ".") || strings.EqualFold(entry.Name(), "node_modules") || (skip != nil && skip(path, entry)) {
 			if entry.IsDir() {
 				return filepath.SkipDir
 			}
@@ -104,25 +117,14 @@ func readSource(project, directory string) (sourceDirectory, error) {
 		if !entry.Type().IsRegular() {
 			return fmt.Errorf("not a regular file: %s", path)
 		}
-		key, err := filepath.Rel(source.Directory, path)
+		key, err := filepath.Rel(directory, path)
 		if err != nil {
 			return err
 		}
-		key = filepath.ToSlash(key)
-		foundIndex = foundIndex || key == "index.html"
-		source.Files = append(source.Files, sourceFile{Key: key, Path: path})
+		files = append(files, sourceFile{Key: filepath.ToSlash(key), Path: path})
 		return nil
 	})
-	if err != nil {
-		return source, err
-	}
-	if !foundIndex {
-		return source, errors.New("publish directory must contain index.html")
-	}
-	slices.SortFunc(source.Files, func(left, right sourceFile) int {
-		return strings.Compare(left.Key, right.Key)
-	})
-	return source, nil
+	return files, err
 }
 
 // manifest describes every source file by size and MD5, which lets the
@@ -154,29 +156,35 @@ func fileDigest(path string) (int64, string, error) {
 	return size, base64.StdEncoding.EncodeToString(hash.Sum(nil)), nil
 }
 
-// publish asks the platform for upload targets, uploads the changed files
-// directly to them (index.html last), and completes the publication.
-func (a *App) publish(ctx context.Context, project Project, name string) (publishResult, error) {
-	var result publishResult
-	source, err := readSource(a.Dir, project.Directory)
+// publish publishes the project in directory with the metadata and access
+// policy from its hex.json.
+func (a *App) publish(ctx context.Context, project Project, directory, name string, assumeYes bool) (publishResult, error) {
+	source, err := readSource(directory, project.Directory)
 	if err != nil {
-		return result, err
+		return publishResult{}, err
 	}
-	files, err := manifest(source)
+	if err := a.checkPublication(ctx, source.Files, nil, assumeYes); err != nil {
+		return publishResult{}, err
+	}
+	metadata := &hex.SiteMetadata{
+		Title:        project.Title,
+		Description:  project.Description,
+		Author:       project.Author,
+		Discoverable: project.Discoverable,
+	}
+	return a.publishFiles(ctx, project, name, source.Files, metadata, project.Access)
+}
+
+// publishFiles asks the platform for upload targets, uploads the changed
+// files directly to them (index.html last), and completes the publication.
+func (a *App) publishFiles(ctx context.Context, project Project, name string, sources []sourceFile, metadata *hex.SiteMetadata, access json.RawMessage) (publishResult, error) {
+	var result publishResult
+	files, err := manifest(sourceDirectory{Files: sources})
 	if err != nil {
 		return result, err
 	}
 
-	request := publishRequest{
-		Files: files,
-		Metadata: &hex.SiteMetadata{
-			Title:        project.Title,
-			Description:  project.Description,
-			Author:       project.Author,
-			Discoverable: project.Discoverable,
-		},
-		Access: project.Access,
-	}
+	request := publishRequest{Files: files, Metadata: metadata, Access: access}
 	sitePath := "/api/hex/sites/" + name + "/publish"
 
 	data, err := a.apiCall(ctx, project, http.MethodPost, sitePath, request)
@@ -189,8 +197,8 @@ func (a *App) publish(ctx context.Context, project Project, name string) (publis
 	}
 
 	fmt.Fprintf(a.Err, "Uploading %d changed files (%d unchanged)\n", len(plan.Uploads), plan.Unchanged)
-	paths := make(map[string]string, len(source.Files))
-	for _, entry := range source.Files {
+	paths := make(map[string]string, len(sources))
+	for _, entry := range sources {
 		paths[entry.Key] = entry.Path
 	}
 	if err := a.uploadAll(ctx, project, plan.Uploads, paths); err != nil {
@@ -343,56 +351,111 @@ func uploadToAzureFiles(ctx context.Context, target, path string) error {
 }
 
 func (a *App) publishCommand() *cobra.Command {
-	var profile, server, baseURL string
+	var profile, server, baseURL, name, update string
+	var with []string
+	var assumeYes bool
 	command := &cobra.Command{
-		Use:   "publish [site]",
-		Short: "Publish the site through the platform",
-		Long: "Publish the site through the platform. The platform checks that you own the site " +
-			"(the first publisher of a new name becomes its owner), then files are uploaded " +
-			"directly to storage. An access policy in hex.json is applied with the publication.",
+		Use:   "publish [path]",
+		Short: "Publish a project, file or folder",
+		Long: "Publish through the platform. A folder with hex.json (by default the current " +
+			"folder) is published as that project's site: the first publisher of a name owns it, " +
+			"and the access policy in hex.json is applied. Any other file or folder is published " +
+			"at a new private link with a random name, titled with its file or folder name or " +
+			"--name; --with shares it and --update replaces an earlier one. Publications that " +
+			"include dependency folders, repositories or files that look like secrets are " +
+			"refused, and unusually large ones need confirmation.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			project, err := a.commandConfig(profile, true)
+			target := a.Dir
+			if len(args) > 0 {
+				target = resolvePath(a.Dir, args[0])
+			}
+			isProject, err := projectDirectory(target)
 			if err != nil {
 				return err
 			}
-			name := project.Name
-			if len(args) > 0 {
-				name = args[0]
+
+			if isProject {
+				if name != "" || update != "" || len(with) > 0 {
+					return errors.New("--name, --update and --with are for files and folders without hex.json; a project's name and access come from its hex.json")
+				}
+				return a.publishProject(cmd, target, profile, server, baseURL, assumeYes)
 			}
-			if err := validateSiteName(name); err != nil {
+			if len(args) == 0 {
+				return errors.New("no hex.json here: run hex init to create a project, or name a file or folder to publish, such as hex publish ./report.pdf")
+			}
+			if err := validateUpload(update, with); err != nil {
+				return err
+			}
+			project, err := a.commandConfig(profile, false)
+			if err != nil {
 				return err
 			}
 			if server != "" {
 				project.Server = server
 			}
-
-			result, err := a.publish(cmd.Context(), project, name)
-			if err != nil {
-				return err
-			}
-			website := result.URL
-			if baseURL != "" || website == "" {
-				base := project.SiteBaseURL
-				if base == "" {
-					base = project.Server
-				}
-				if baseURL != "" {
-					base = baseURL
-				}
-				website, err = siteURL(base, name)
-				if err != nil {
-					return fmt.Errorf("published %s, but its URL could not be derived: %w", name, err)
-				}
-			}
-			fmt.Fprintln(a.Out, website)
-			return nil
+			return a.publishPath(cmd.Context(), project, target, name, update, with, assumeYes)
 		},
 	}
-	command.Flags().StringVar(&profile, "platform", "", "Saved platform profile")
-	command.Flags().StringVar(&server, "server", "", "Override the platform origin")
-	command.Flags().StringVar(&baseURL, "site-base-url", "", "Override the parent site origin")
+	flags := command.Flags()
+	flags.StringVarP(&name, "name", "n", "", "Title for a file or folder (defaults to its name)")
+	flags.StringArrayVar(&with, "with", nil, "Share a file or folder with user:<email or id> or group:<object id> (repeatable)")
+	flags.StringVar(&update, "update", "", "Replace the content of a file or folder published earlier, by its site name")
+	flags.BoolVarP(&assumeYes, "yes", "y", false, "Publish unusually large content without asking")
+	flags.StringVar(&profile, "platform", "", "Saved platform profile")
+	flags.StringVar(&server, "server", "", "Override the platform origin")
+	flags.StringVar(&baseURL, "site-base-url", "", "Override the parent site origin")
 	return command
+}
+
+// projectDirectory reports whether target is a folder with a hex.json.
+func projectDirectory(target string) (bool, error) {
+	info, err := os.Stat(target)
+	if err != nil {
+		return false, err
+	}
+	if !info.IsDir() {
+		return false, nil
+	}
+	_, err = os.Stat(filepath.Join(target, "hex.json"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func (a *App) publishProject(cmd *cobra.Command, directory, profile, server, baseURL string, assumeYes bool) error {
+	project, err := a.commandConfigIn(directory, profile, true)
+	if err != nil {
+		return err
+	}
+	if err := validateSiteName(project.Name); err != nil {
+		return err
+	}
+	if server != "" {
+		project.Server = server
+	}
+
+	result, err := a.publish(cmd.Context(), project, directory, project.Name, assumeYes)
+	if err != nil {
+		return err
+	}
+	website := result.URL
+	if baseURL != "" || website == "" {
+		base := project.SiteBaseURL
+		if base == "" {
+			base = project.Server
+		}
+		if baseURL != "" {
+			base = baseURL
+		}
+		website, err = siteURL(base, project.Name)
+		if err != nil {
+			return fmt.Errorf("published %s, but its URL could not be derived: %w", project.Name, err)
+		}
+	}
+	fmt.Fprintln(a.Out, website)
+	return nil
 }
 
 func (a *App) deleteCommand() *cobra.Command {
@@ -407,7 +470,8 @@ func (a *App) deleteCommand() *cobra.Command {
 			if !confirmed {
 				return errors.New("use --yes to unpublish this site")
 			}
-			project, err := a.commandConfig(profile, true)
+			// A named site, such as an artifact, needs no hex.json.
+			project, err := a.commandConfig(profile, len(args) == 0)
 			if err != nil {
 				return err
 			}

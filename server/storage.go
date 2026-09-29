@@ -63,6 +63,18 @@ type Database interface {
 	Delete(ctx context.Context, site, collection, id string, options WriteOptions) error
 }
 
+// Collection summarizes one collection of a site's documents.
+type Collection struct {
+	Name      string `json:"name"`
+	Documents int    `json:"documents"`
+}
+
+// CollectionLister is implemented by databases that can list a site's
+// collections, which the management portal's data browser uses.
+type CollectionLister interface {
+	ListCollections(ctx context.Context, site string) ([]Collection, error)
+}
+
 type Subscription interface {
 	Messages() <-chan json.RawMessage
 	Close()

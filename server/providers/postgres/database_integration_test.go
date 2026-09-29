@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -155,5 +156,65 @@ func TestPostgresSiteAccess(t *testing.T) {
 	}
 	if err := database.DeleteSiteAccess(ctx, site); !errors.Is(err, hex.ErrNotFound) {
 		t.Fatalf("expected not found, got %v", err)
+	}
+}
+
+func TestPostgresPeopleAndCollections(t *testing.T) {
+	connection := os.Getenv("HEX_TEST_POSTGRES_URL")
+	if connection == "" {
+		t.Skip("set HEX_TEST_POSTGRES_URL to run against PostgreSQL")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	database, err := New(ctx, connection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := database.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	suffix := rand.Text()
+	alex := hex.Person{ID: "alex-" + suffix, Name: "Alex_100% " + suffix, Email: "alex." + suffix + "@example.test"}
+	defer func() {
+		cleanup, stop := context.WithTimeout(context.Background(), 10*time.Second)
+		defer stop()
+		if _, err := database.pool.Exec(cleanup, "DELETE FROM hex_people WHERE id = $1", alex.ID); err != nil {
+			t.Error(err)
+		}
+	}()
+	if err := database.RememberPerson(ctx, hex.Person{ID: alex.ID, Name: "old name", Email: alex.Email}); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.RememberPerson(ctx, alex); err != nil {
+		t.Fatal(err)
+	}
+
+	found, err := database.FindPeople(ctx, "_100% "+suffix, 10)
+	if err != nil || len(found) != 1 || found[0] != alex {
+		t.Fatalf("search with wildcard characters: %+v %v", found, err)
+	}
+	byEmail, err := database.GetPeople(ctx, []string{strings.ToUpper(alex.Email)})
+	if err != nil || len(byEmail) != 1 || byEmail[0].ID != alex.ID {
+		t.Fatalf("lookup by email: %+v %v", byEmail, err)
+	}
+
+	site := "test-" + suffix
+	defer func() {
+		cleanup, stop := context.WithTimeout(context.Background(), 10*time.Second)
+		defer stop()
+		if _, err := database.pool.Exec(cleanup, "DELETE FROM hex_documents WHERE site=$1", site); err != nil {
+			t.Error(err)
+		}
+	}()
+	for _, entry := range []struct{ collection, id string }{{"tasks", "a"}, {"tasks", "b"}, {"notes", "a"}} {
+		if _, err := database.Put(ctx, site, entry.collection, entry.id, json.RawMessage(`{}`), hex.WriteOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	collections, err := database.ListCollections(ctx, site)
+	if err != nil || len(collections) != 2 || collections[0] != (hex.Collection{Name: "notes", Documents: 1}) || collections[1] != (hex.Collection{Name: "tasks", Documents: 2}) {
+		t.Fatalf("collections: %+v %v", collections, err)
 	}
 }

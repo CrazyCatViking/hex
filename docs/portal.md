@@ -41,6 +41,19 @@ To keep an app out of the overview, set this in its source `hex.json` and republ
 
 Set `discoverable` to `true` or remove it and republish to list the app. Missing metadata and omitted visibility fields retain the default visible behavior. Hidden apps are excluded server-side from the HTML catalog, `/api/sites`, and overview statistics. Their URLs and app APIs continue to work; this is a listing preference, not authorization. The server records the setting in `.hex-site.json` alongside the descriptive metadata. For actual authorization, restrict the site's viewers in its [access policy](access-control.md); the catalog, discovery API and statistics then omit the site for people who cannot view it.
 
+## Managing sites
+
+With an identity provider and access control, signed-in users get **Your sites** at `/manage` on the platform domain. It lists the apps and artifacts they own; platform admins can list every site. Each site's page shows:
+
+- who created it and who published it last, and its publication history;
+- an access editor for owners, viewers and editors, with a picker for people and groups, plus a JSON editor for path, collection, file and channel rules;
+- a data browser: collections and their documents (with the verified creator of each), the JSON of a document, uploaded files, and deleting documents and files;
+- unpublishing, confirmed by typing the site's name.
+
+Only a site's owners and platform admins can open its page; every change goes through `/api/hex/manage/…` with the API's same-origin and `X-Hex-Request` checks. Pages are rendered by the server with HTMX under the same content security policy as the landing page.
+
+The portal reads no directory data from the identity provider. People are remembered from their own sign-ins (ID, name and email, refreshed at most hourly) and can be found by name once they have used the platform; anyone else can be added by typing their email address. Groups come from `HEX_GROUPS`, which should list the groups assigned to the app registration, the only ones sign-in tokens carry. The remembered people are stored in PostgreSQL (`hex_people`), or in memory for local development.
+
 ## Employee onboarding
 
 1. Visit the main domain and sign in through the company's existing hosting provider.

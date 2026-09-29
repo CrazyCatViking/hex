@@ -233,3 +233,50 @@ func TestLocalPublisherKeepsFilesInsideTheSite(t *testing.T) {
 		t.Fatalf("missing sites have no files: %+v %v", files, err)
 	}
 }
+
+func TestPublicationsRecordVerifiedPeople(t *testing.T) {
+	server, store := setupWithAccess(t)
+	creator := principalHeaders("creator-id", "team")
+	colleague := principalHeaders("colleague-id", "team")
+
+	publishSite(t, server, creator, "demo", map[string]string{"index.html": "v1"}, `{"owners":["user:creator-id","group:team"]}`)
+
+	// A publisher cannot claim to be someone else.
+	forged := publication{
+		Files:    manifest(map[string]string{"index.html": "v2"}),
+		Metadata: &hex.SiteMetadata{Title: "Demo", CreatedBy: &hex.Person{ID: "ceo"}, PublishedBy: &hex.Person{ID: "ceo"}, Kind: hex.KindArtifact},
+	}
+	requestAs(t, server, colleague, "POST", "/api/hex/sites/demo/publish", encode(t, forged), 200)
+	requestAs(t, server, colleague, "PUT", "/api/hex/sites/demo/publish/files/index.html", []byte("v2"), 204)
+	requestAs(t, server, colleague, "POST", "/api/hex/sites/demo/publish/complete", encode(t, forged), 200)
+
+	data, _ := readSiteFile(t, store, "demo", ".hex-site.json")
+	var metadata hex.SiteMetadata
+	if err := json.Unmarshal([]byte(data), &metadata); err != nil {
+		t.Fatal(err)
+	}
+	if metadata.CreatedBy == nil || metadata.CreatedBy.ID != "creator-id" || metadata.CreatedAt.IsZero() {
+		t.Fatalf("creator was not kept: %+v", metadata)
+	}
+	if metadata.PublishedBy == nil || metadata.PublishedBy.ID != "colleague-id" || metadata.PublishedBy.Name != "colleague-id@example.test" {
+		t.Fatalf("publisher was not recorded from the identity: %+v", metadata.PublishedBy)
+	}
+	if metadata.Kind != "" {
+		t.Fatalf("a publisher changed the site kind: %q", metadata.Kind)
+	}
+
+	// Discovery shows the verified creator; the history is for owners only.
+	listing := requestAs(t, server, colleague, "GET", "/api/sites", nil, 200).Body.String()
+	if !strings.Contains(listing, `"createdBy":{"id":"creator-id"`) {
+		t.Fatalf("discovery lacks the creator: %s", listing)
+	}
+	history := requestAs(t, server, creator, "GET", "/api/hex/sites/demo/history", nil, 200).Body.String()
+	var entries []hex.Publication
+	if err := json.Unmarshal([]byte(history), &entries); err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 || entries[0].PublishedBy.ID != "colleague-id" || entries[1].PublishedBy.ID != "creator-id" || entries[0].Files != 1 {
+		t.Fatalf("unexpected history: %s", history)
+	}
+	requestAs(t, server, principalHeaders("stranger"), "GET", "/api/hex/sites/demo/history", nil, 403)
+}

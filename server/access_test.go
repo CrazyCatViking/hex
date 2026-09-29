@@ -145,6 +145,27 @@ func TestSiteAccessLifecycle(t *testing.T) {
 	requestAs(t, server, owner, "DELETE", "/api/hex/sites/demo/access", nil, 404)
 }
 
+func TestUsersMatchByEmail(t *testing.T) {
+	server, _ := setupWithAccess(t)
+	owner := principalHeaders("owner-id")
+	putPolicy(t, server, owner, "demo", `{"viewers":["user:Alex@Example.test"]}`)
+
+	document, err := json.Marshal(map[string]any{
+		"auth_typ": "aad", "name_typ": "name",
+		"claims": []map[string]string{{"typ": "preferred_username", "val": "alex@example.test"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	alex := http.Header{}
+	alex.Set("X-Ms-Client-Principal", base64.StdEncoding.EncodeToString(document))
+	alex.Set("X-Ms-Client-Principal-Id", "alex-object-id")
+	alex.Set("X-Ms-Client-Principal-Name", "Alex Example")
+
+	requestAs(t, server, alex, "GET", "/api/sites/demo/db/tasks", nil, 200)
+	requestAs(t, server, principalHeaders("someone-else"), "GET", "/api/sites/demo/db/tasks", nil, 403)
+}
+
 func TestViewersAndEditors(t *testing.T) {
 	server, _ := setupWithAccess(t)
 	owner := principalHeaders("owner-id")

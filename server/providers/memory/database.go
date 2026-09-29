@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
+	"strings"
 	"sync"
 
 	hex "github.com/crazycatviking/hex/server"
@@ -124,4 +125,27 @@ func (d *Database) Delete(ctx context.Context, site, collection, id string, opti
 
 	delete(d.documents, key)
 	return nil
+}
+
+func (d *Database) ListCollections(ctx context.Context, site string) ([]hex.Collection, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	counts := map[string]int{}
+	for key := range d.documents {
+		if key.site == site {
+			counts[key.collection]++
+		}
+	}
+	collections := make([]hex.Collection, 0, len(counts))
+	for name, count := range counts {
+		collections = append(collections, hex.Collection{Name: name, Documents: count})
+	}
+	slices.SortFunc(collections, func(left, right hex.Collection) int {
+		return strings.Compare(left.Name, right.Name)
+	})
+	return collections, nil
 }

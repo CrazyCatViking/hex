@@ -6,13 +6,13 @@ Access control is optional. Without an identity resolver and access store, every
 
 ## Concepts
 
-An **identity** is what the gateway resolved for the caller: a stable ID, a display name (the principal name, typically an email address), and the group and role values the identity provider emitted. Apps read it from `GET /api/hex/me` or `hex.identity()`, and operators from `hex whoami`.
+An **identity** is what the gateway resolved for the caller: a stable ID, a display name, an email address (from the token's `email`, `preferred_username` or `upn` claim), and the group and role values the identity provider emitted. Apps read it from `GET /api/hex/me` or `hex.identity()`, and operators from `hex whoami`.
 
 A **principal** is a typed value in a policy:
 
 | Principal | Matches |
 | --- | --- |
-| `user:<value>` | The caller's identity ID or principal name, case-insensitively |
+| `user:<value>` | The caller's identity ID, email address or display name, case-insensitively. Prefer the ID or email; display names are not unique. |
 | `group:<value>` | One of the caller's group claims (Entra group object IDs) |
 | `role:<value>` | One of the caller's role claims (app role values) |
 
