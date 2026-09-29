@@ -91,3 +91,29 @@ func TestResolveIdentityRejectsBadInput(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveIdentityEmail(t *testing.T) {
+	resolve := func(claims []map[string]string) string {
+		t.Helper()
+		r := httptest.NewRequest("GET", "/api/hex/me", nil)
+		r.Header.Set("X-Ms-Client-Principal-Id", "object-id")
+		r.Header.Set("X-Ms-Client-Principal-Name", "Displayed Name")
+		r.Header.Set("X-Ms-Client-Principal", encodePrincipal(t, map[string]any{"auth_typ": "aad", "name_typ": "name", "claims": claims}))
+		identity, err := Resolver{}.ResolveIdentity(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return identity.Email
+	}
+
+	if email := resolve([]map[string]string{{"typ": "preferred_username", "val": "alex@example.test"}}); email != "alex@example.test" {
+		t.Fatalf("preferred_username not used: %q", email)
+	}
+	both := []map[string]string{{"typ": "preferred_username", "val": "alex@contoso.test"}, {"typ": "email", "val": "alex@example.test"}}
+	if email := resolve(both); email != "alex@example.test" {
+		t.Fatalf("email claim should win: %q", email)
+	}
+	if email := resolve([]map[string]string{{"typ": "preferred_username", "val": "not-an-email"}}); email != "" {
+		t.Fatalf("a non-email value was used: %q", email)
+	}
+}

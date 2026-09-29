@@ -212,9 +212,12 @@ func (e *Environment) configureIdentity(settings settings) {
 
 	if database, ok := e.Config.Database.(*postgres.Database); ok {
 		e.Config.Access = database
+		e.Config.People = database
 	} else {
 		e.Config.Access = memory.NewAccessStore()
+		e.Config.People = memory.NewPeopleStore()
 	}
+	e.Config.Groups = hex.ParseGroups(os.Getenv("HEX_GROUPS"))
 }
 
 func splitList(list string) []string {

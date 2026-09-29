@@ -20,12 +20,50 @@ type Site struct {
 	Metadata *SiteMetadata `json:"metadata,omitempty"`
 }
 
+// SiteMetadata describes a published site. Title, Description, Author and
+// Discoverable come from the publisher; the server records the rest from the
+// identity provider when one is configured, so they cannot be claimed by a
+// publisher.
 type SiteMetadata struct {
 	Title        string    `json:"title,omitempty"`
 	Description  string    `json:"description,omitempty"`
 	Author       string    `json:"author,omitempty"`
 	Discoverable *bool     `json:"discoverable,omitempty"`
 	PublishedAt  time.Time `json:"publishedAt"`
+	PublishedBy  *Person   `json:"publishedBy,omitempty"`
+	CreatedAt    time.Time `json:"createdAt,omitzero"`
+	CreatedBy    *Person   `json:"createdBy,omitempty"`
+	// Kind is "artifact" for files and folders published without hex.json,
+	// empty for apps.
+	Kind string `json:"kind,omitempty"`
+}
+
+// Person is a user as resolved by the identity provider.
+type Person struct {
+	ID    string `json:"id"`
+	Name  string `json:"name,omitempty"`
+	Email string `json:"email,omitempty"`
+}
+
+const KindArtifact = "artifact"
+
+func personOf(identity *Identity) *Person {
+	if identity == nil || identity.ID == "" {
+		return nil
+	}
+	return &Person{ID: identity.ID, Name: identity.Name, Email: identity.Email}
+}
+
+// DisplayAuthor is who the site is shown as coming from: the verified
+// creator when known, otherwise the publisher-supplied author.
+func (m *SiteMetadata) DisplayAuthor() string {
+	if m == nil {
+		return ""
+	}
+	if m.CreatedBy != nil && m.CreatedBy.Name != "" {
+		return m.CreatedBy.Name
+	}
+	return m.Author
 }
 
 type SiteMetadataReader interface {
@@ -82,7 +120,7 @@ func (s *Server) discoverSites(ctx context.Context, viewer *Identity) ([]Site, e
 				return nil, err
 			}
 		}
-		if site.Metadata != nil && site.Metadata.Discoverable != nil && !*site.Metadata.Discoverable {
+		if site.Metadata != nil && (site.Metadata.Kind == KindArtifact || (site.Metadata.Discoverable != nil && !*site.Metadata.Discoverable)) {
 			continue
 		}
 		sites = append(sites, site)

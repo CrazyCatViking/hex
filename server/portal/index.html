@@ -19,7 +19,8 @@
         <span id="platform-name">{{.Name}}</span></a
       >
       <nav aria-label="Main navigation">
-        <a href="#sites">Explore apps</a><a href="#start">Get started</a>
+        <a href="#sites">Explore apps</a><a href="#start">Get started</a>{{if
+        .Manage}}<a href="/manage">Your sites</a>{{end}}
       </nav>
     </header>
     <main>
@@ -178,11 +179,12 @@
               </p>
               <pre><code>hex publish</code></pre>
               <p>
-                Azure publishing requires Azure CLI installed once. Hex prepares
-                AzCopy automatically and opens Entra web sign-in with MFA
-                support when needed. Complete sign-in and Hex continues
-                publishing; no separate AzCopy installation or login command is
-                required.
+                The first time, Hex opens your company sign-in in the browser;
+                after that it stays signed in. The first person to publish a
+                name owns it, and decides who can use it in
+                <code>hex.json</code> or under <a href="/manage">Your sites</a>.
+                To share a single file or folder instead, run
+                <code>hex publish ./report.pdf</code>.
               </p>
               <p>
                 Add a title, description, and author in <code>hex.json</code>.

@@ -18,8 +18,13 @@ type Config struct {
 	AdminGroups []string
 	// Publisher enables publishing through the API. PublisherGroups limits
 	// who may claim new site names; empty lets every signed-in user.
-	Publisher           SitePublisher
-	PublisherGroups     []string
+	Publisher       SitePublisher
+	PublisherGroups []string
+	// People remembers who has signed in, and Groups names the groups
+	// offered in pickers; together they label principals without reading
+	// the identity provider's directory.
+	People              PeopleStore
+	Groups              []NamedGroup
 	MaxUploadBytes      int64
 	MaxPublishFileBytes int64
 	MaxPublishBytes     int64
@@ -31,6 +36,7 @@ type Server struct {
 	config   Config
 	mux      *http.ServeMux
 	policies *policyCache
+	seen     peopleSeen
 }
 
 func New(config Config) *Server {
@@ -51,6 +57,7 @@ func New(config Config) *Server {
 		config:   config,
 		mux:      http.NewServeMux(),
 		policies: newPolicyCache(10 * time.Second),
+		seen:     peopleSeen{entries: make(map[string]seenPerson)},
 	}
 	server.registerRoutes()
 
@@ -73,6 +80,7 @@ func (s *Server) registerRoutes() {
 
 	if s.config.Identity != nil {
 		s.mux.HandleFunc("GET /api/hex/me", s.me)
+		s.mux.HandleFunc("GET /api/hex/directory", s.directory)
 	}
 
 	if s.config.Identity != nil && s.config.Access != nil {
@@ -87,6 +95,11 @@ func (s *Server) registerRoutes() {
 		s.mux.HandleFunc("PUT /api/hex/sites/{site}/publish/files/{path...}", s.uploadSiteFile)
 		s.mux.HandleFunc("POST /api/hex/sites/{site}/publish/complete", s.completePublish)
 		s.mux.HandleFunc("DELETE /api/hex/sites/{site}", s.unpublishSite)
+		s.mux.HandleFunc("GET /api/hex/sites/{site}/history", s.siteHistory)
+	}
+
+	if s.artifactsEnabled() {
+		s.mux.HandleFunc("POST /api/hex/artifacts", s.createArtifact)
 	}
 
 	if s.config.Files != nil {
@@ -111,6 +124,8 @@ func (s *Server) registerRoutes() {
 	if s.config.Sites != nil {
 		s.mux.HandleFunc("GET /api/sites", s.listSites)
 	}
+
+	s.registerManageRoutes()
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -175,6 +190,13 @@ func validateRequestOrigin(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+// artifactsEnabled reports whether files and folders can be published
+// without hex.json: such artifacts are private to
+// their creator, which needs identities, access policies and publishing.
+func (s *Server) artifactsEnabled() bool {
+	return s.config.Identity != nil && s.config.Access != nil && s.config.Publisher != nil
+}
+
 func (s *Server) capabilities(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.capabilityDescription())
 }
@@ -189,6 +211,7 @@ func (s *Server) capabilityDescription() map[string]any {
 		"identity":       s.config.Identity != nil,
 		"accessControl":  s.config.Identity != nil && s.config.Access != nil,
 		"publishing":     s.config.Publisher != nil,
+		"artifacts":      s.artifactsEnabled(),
 		"maxUploadBytes": s.config.MaxUploadBytes,
 	}
 }

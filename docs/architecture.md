@@ -71,6 +71,11 @@ As browser request hygiene, state-changing API requests require `X-Hex-Request: 
 | PUT | `/api/hex/sites/{site}/publish/files/{path}` | Raw file body for publishers without direct uploads (204) |
 | POST | `/api/hex/sites/{site}/publish/complete` | Manifest → `{name, url, deleted, access?}`; verifies uploads and removes obsolete files |
 | DELETE | `/api/hex/sites/{site}` | Unpublish (204); keeps the access policy |
+| GET | `/api/hex/sites/{site}/history` | Owner- and admin-only publication history, newest first |
+| POST | `/api/hex/artifacts` | `{title?}` → `{name, url, title, viewers}` (201); creates a private artifact with a random name |
+| GET | `/api/hex/my-sites` | The sites and artifacts the caller owns, newest first (`hex sites --mine`) |
+| GET | `/api/hex/directory` | People who have used the platform and configured groups, filtered by `query`; for pickers |
+| GET | `/manage`, `/manage/{site}` | Management portal pages on the platform domain; `/api/hex/manage/…` serves their HTMX fragments and changes |
 | GET | `/api/sites` | Discoverable sites as `{name,url,metadata?}`; hidden and inaccessible listings are omitted |
 | GET/HEAD | `https://{site}.<site-domain>/{asset}` | NGINX static file; directory indexes use `index.html` |
 | GET | `/api/sites/{site}/files` | Array of `{key,size}` |

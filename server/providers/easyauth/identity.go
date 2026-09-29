@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	hex "github.com/crazycatviking/hex/server"
 )
@@ -21,6 +22,16 @@ const maxPrincipalBytes = 64 << 10
 var objectIDClaims = []string{
 	"oid",
 	"http://schemas.microsoft.com/identity/claims/objectidentifier",
+}
+
+// Claim types that carry the user's email or sign-in name, in order of
+// preference. The principal-name header holds the display name.
+var emailClaims = []string{
+	"email",
+	"http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+	"preferred_username",
+	"upn",
+	"http://schemas.xmlsoap.org/ws/2005/05/identity/claims/upn",
 }
 
 type Resolver struct{}
@@ -73,10 +84,22 @@ func (Resolver) ResolveIdentity(r *http.Request) (*hex.Identity, error) {
 		}
 	}
 
+	identity.Email = firstClaim(principal.Claims, emailClaims)
 	if identity.ID == "" {
 		return nil, fmt.Errorf("client principal is missing a stable identifier")
 	}
 	return identity, nil
+}
+
+func firstClaim(claims []principalClaim, types []string) string {
+	for _, claimType := range types {
+		for _, claim := range claims {
+			if claim.Type == claimType && strings.Contains(claim.Value, "@") {
+				return claim.Value
+			}
+		}
+	}
+	return ""
 }
 
 func claimMatches(claimType string, candidates []string) bool {

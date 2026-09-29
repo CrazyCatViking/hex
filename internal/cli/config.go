@@ -34,6 +34,7 @@ type Capabilities struct {
 	Identity       bool  `json:"identity,omitempty"`
 	AccessControl  bool  `json:"accessControl,omitempty"`
 	Publishing     bool  `json:"publishing,omitempty"`
+	Artifacts      bool  `json:"artifacts,omitempty"`
 	MaxUploadBytes int64 `json:"maxUploadBytes"`
 }
 

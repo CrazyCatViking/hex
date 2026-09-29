@@ -5,8 +5,8 @@
     "packages/client"
   ],
   "scripts": {
-    "format": "prettier --write \"packages/**/*.{ts,js,mjs,json}\" \"internal/cli/assets/*.yaml\" \"scripts/**/*.mjs\" \"server/portal/*.{html,css}\" server/portal/portal.js package.json",
-    "format:check": "prettier --check \"packages/**/*.{ts,js,mjs,json}\" \"internal/cli/assets/*.yaml\" \"scripts/**/*.mjs\" \"server/portal/*.{html,css}\" server/portal/portal.js package.json",
+    "format": "prettier --write \"packages/**/*.{ts,js,mjs,json}\" \"internal/cli/assets/*.yaml\" \"scripts/**/*.mjs\" \"server/portal/*.{html,css}\" server/portal/portal.js server/portal/manage.js package.json",
+    "format:check": "prettier --check \"packages/**/*.{ts,js,mjs,json}\" \"internal/cli/assets/*.yaml\" \"scripts/**/*.mjs\" \"server/portal/*.{html,css}\" server/portal/portal.js server/portal/manage.js package.json",
     "dev": "go run ./cmd/hex dev --package ./examples/custom-server --data-dir .hex-data",
     "build": "npm run build --workspaces --if-present && npm run build:portal",
     "build:portal": "node scripts/sync-portal-assets.mjs",

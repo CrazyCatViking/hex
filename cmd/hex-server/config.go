@@ -185,6 +185,7 @@ func configure(ctx context.Context, getenv func(string) string) (hex.Config, fun
 	}
 
 	configureIdentity(&config, selection, getenv)
+	config.Groups = hex.ParseGroups(getenv("HEX_GROUPS"))
 
 	if serverURL := getenv("HEX_PUBLIC_URL"); serverURL != "" {
 		config.Connection = &hex.ConnectionConfig{
@@ -225,10 +226,12 @@ func configureIdentity(config *hex.Config, selection providerSelection, getenv f
 	switch database := config.Database.(type) {
 	case *postgres.Database:
 		config.Access = database
+		config.People = database
 
 	case *memory.Database:
 		if selection.identity == "static" {
 			config.Access = memory.NewAccessStore()
+			config.People = memory.NewPeopleStore()
 			slog.Warn("using ephemeral in-memory site access entries")
 			return
 		}

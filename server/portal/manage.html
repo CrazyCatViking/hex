@@ -1,0 +1,408 @@
+{{define "manage-head"}}
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>{{.}}</title>
+<meta
+  name="htmx-config"
+  content='{"selfRequestsOnly":true,"allowEval":false,"includeIndicatorStyles":false}'
+/>
+<link rel="stylesheet" href="/api/hex/portal.css" />
+<script src="/api/hex/htmx.min.js" defer></script>
+<script src="/api/hex/manage.js" defer></script>
+{{end}} {{define "manage-header"}}
+<header class="header">
+  <a class="brand" href="/" aria-label="Hex home"
+    ><span class="mark" aria-hidden="true">⬡</span>
+    <span>{{.Platform}}</span></a
+  >
+  <nav aria-label="Main navigation">
+    <a href="/">Explore apps</a><a href="/manage">Your sites</a> {{with
+    .Viewer}}<span class="viewer"
+      >{{if .Name}}{{.Name}}{{else}}{{.Email}}{{end}}</span
+    >{{end}}
+  </nav>
+</header>
+<p id="manage-error" class="notice error" role="alert" hidden></p>
+{{end}} {{define "manage"}}
+<!doctype html>
+<html lang="en">
+  <head>
+    {{template "manage-head" (printf "%s · Your sites" .Platform)}}
+  </head>
+  <body hx-headers='{"X-Hex-Request":"1"}'>
+    {{template "manage-header" .}}
+    <main>
+      <section class="manage-intro">
+        <p class="eyebrow">Manage</p>
+        <h1 class="page-title">
+          {{if .All}}All sites{{else}}Your sites{{end}}
+        </h1>
+        <p class="intro">
+          Apps you publish and artifacts you share with
+          <code>hex publish ./file</code>. Open one to see its history, decide
+          who can use it, and look at its data.
+        </p>
+        {{if .Admin}}
+        <p>
+          {{if .All}}<a href="/manage">Show only yours</a>{{else}}<a
+            href="/manage?all=1"
+            >Show all sites (admin)</a
+          >{{end}}
+        </p>
+        {{end}}
+      </section>
+      {{if .Sites}}
+      <table class="manage-table">
+        <thead>
+          <tr>
+            <th scope="col">Site</th>
+            <th scope="col">Kind</th>
+            <th scope="col">Who can open it</th>
+            <th scope="col">Last published</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Sites}}
+          <tr>
+            <td>
+              <a class="site-title" href="/manage/{{.Name}}">{{.Title}}</a>
+              <span class="muted">{{.Name}}</span>
+            </td>
+            <td>{{.Kind}}</td>
+            <td>{{.Audience}}</td>
+            <td>
+              {{if .Published}}{{.Published}}{{if .PublishedBy}}
+              <span class="muted">by {{.PublishedBy}}</span
+              >{{end}}{{else}}—{{end}}
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+      {{else}}
+      <p class="empty">
+        {{if .All}}No sites are published yet.{{else}}You don't own any sites
+        yet. Publish an app with <code>hex publish</code>, or share a file with
+        <code>hex publish ./file</code>.{{end}}
+      </p>
+      {{end}}
+    </main>
+  </body>
+</html>
+{{end}} {{define "site"}}
+<!doctype html>
+<html lang="en">
+  <head>
+    {{template "manage-head" (printf "%s · %s" .Platform .Site.Title)}}
+  </head>
+  <body hx-headers='{"X-Hex-Request":"1"}'>
+    {{template "manage-header" .}}
+    <main>
+      {{with .Site}}
+      <section class="manage-intro">
+        <p class="eyebrow"><a href="/manage">Your sites</a> · {{.Kind}}</p>
+        <h1 class="page-title">{{.Title}}</h1>
+        <p><a href="{{.URL}}">{{.URL}}</a></p>
+        <dl class="facts">
+          <div>
+            <dt>Created by</dt>
+            <dd>{{if .CreatedBy}}{{.CreatedBy}}{{else}}Unknown{{end}}</dd>
+          </div>
+          <div>
+            <dt>Last published</dt>
+            <dd>
+              {{if .Published}}{{.Published}}{{if .PublishedBy}} by
+              {{.PublishedBy}}{{end}}{{else}}Not published{{end}}
+            </dd>
+          </div>
+          <div>
+            <dt>Who can open it</dt>
+            <dd>{{.Audience}}</dd>
+          </div>
+        </dl>
+      </section>
+      {{end}}
+
+      <section class="panel" aria-labelledby="access-heading">
+        <h2 id="access-heading">Access</h2>
+        {{template "access" .Access}}
+      </section>
+
+      {{if or .Data .Files}}
+      <section class="panel" aria-labelledby="data-heading">
+        <h2 id="data-heading">Data</h2>
+        {{if .Data}}
+        <div
+          hx-get="/api/hex/manage/sites/{{.Site.Name}}/collections"
+          hx-trigger="load"
+          hx-swap="outerHTML"
+        >
+          <p class="muted">Loading collections…</p>
+        </div>
+        <div id="documents"></div>
+        <div id="document-view"></div>
+        {{end}} {{if .Files}}
+        <h3>Uploaded files</h3>
+        <div
+          hx-get="/api/hex/manage/sites/{{.Site.Name}}/files"
+          hx-trigger="load"
+          hx-swap="outerHTML"
+        >
+          <p class="muted">Loading files…</p>
+        </div>
+        {{end}}
+      </section>
+      {{end}}
+
+      <section class="panel" aria-labelledby="history-heading">
+        <h2 id="history-heading">Publication history</h2>
+        {{if .History}}
+        <table class="manage-table">
+          <thead>
+            <tr>
+              <th scope="col">When</th>
+              <th scope="col">By</th>
+              <th scope="col">Files</th>
+              <th scope="col">Size</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .History}}
+            <tr>
+              <td><time datetime="{{.ISO}}">{{.When}}</time></td>
+              <td>{{if .By}}{{.By}}{{else}}Unknown{{end}}</td>
+              <td>{{.Files}}</td>
+              <td>{{.Size}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+        {{else}}
+        <p class="muted">No publications recorded yet.</p>
+        {{end}}
+      </section>
+
+      <section class="panel danger" aria-labelledby="unpublish-heading">
+        <h2 id="unpublish-heading">Unpublish</h2>
+        <p>
+          Removes the site's files, metadata and history. Its data, uploads and
+          access policy are kept, and the name stays reserved for its owners.
+        </p>
+        <form
+          hx-post="/api/hex/manage/sites/{{.Site.Name}}/unpublish"
+          hx-confirm="Unpublish {{.Site.Name}}? This cannot be undone."
+        >
+          <label
+            >Type <code>{{.Site.Name}}</code> to confirm
+            <input name="confirm" autocomplete="off" required
+          /></label>
+          <button class="button danger-button" type="submit">Unpublish</button>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>
+{{end}} {{define "access"}}
+<form
+  class="access-form"
+  hx-put="/api/hex/manage/sites/{{.Site}}/access"
+  hx-target="this"
+  hx-swap="outerHTML"
+>
+  {{if .Message}}
+  <p class="notice" role="status">{{.Message}}</p>
+  {{end}} {{if .Error}}
+  <p class="notice error" role="alert">{{.Error}}</p>
+  {{end}} {{if .Artifact}}<input
+    type="hidden"
+    name="artifact"
+    value="1"
+  />{{end}} {{range .Lists}}{{template "principal-list" .}}{{end}}
+  <details class="rules">
+    <summary>Path and data rules</summary>
+    <p class="hint">
+      Restrict pages by path and data by collection, file prefix or channel, for
+      example
+      <code
+        >{"paths":[{"prefix":"/admin/","viewers":"owners"}],"collections":{"drafts":{"read":"creator","write":"creator"}}}</code
+      >. See the access control docs for the format.
+    </p>
+    <label
+      >Rules (JSON)
+      <textarea name="rules" rows="8" spellcheck="false">{{.Rules}}</textarea>
+    </label>
+  </details>
+  <button class="button" type="submit">Save access</button>
+</form>
+{{end}} {{define "principal-list"}}
+<fieldset class="principals">
+  <legend>{{.Title}}</legend>
+  <p class="hint">{{.Help}}</p>
+  <ul class="chips" id="list-{{.Name}}">
+    {{range .Labels}}
+    <li class="chip">
+      <span
+        >{{.Name}}{{if .Detail}}
+        <span class="muted">{{.Detail}}</span>{{end}}</span
+      >
+      <input type="hidden" name="{{$.Name}}" value="{{.Principal}}" />
+      <button type="button" class="remove" aria-label="Remove {{.Name}}">
+        ×
+      </button>
+    </li>
+    {{end}}
+  </ul>
+  <label class="picker"
+    >Add a person, email or group
+    <input
+      type="search"
+      name="query"
+      autocomplete="off"
+      placeholder="Name, email or group…"
+      hx-get="/api/hex/manage/directory?list={{.Name}}"
+      hx-trigger="input changed delay:200ms, focus"
+      hx-sync="this:replace"
+      hx-target="next .suggestions"
+      hx-swap="innerHTML"
+      hx-params="query"
+  /></label>
+  <div class="suggestions" aria-live="polite"></div>
+</fieldset>
+{{end}} {{define "suggestions"}} {{range .Suggestions}}
+<button
+  type="button"
+  class="suggestion"
+  data-list="{{$.List}}"
+  data-principal="{{.Principal}}"
+  data-name="{{.Name}}"
+  data-detail="{{.Detail}}"
+>
+  {{.Name}} <span class="muted">{{.Detail}}</span>
+</button>
+{{else}}
+<p class="muted">
+  {{if .Query}}No one found. Type a full email address to add someone who hasn't
+  used Hex yet.{{else}}Type a name, email or group.{{end}}
+</p>
+{{end}} {{end}} {{define "collections"}}
+<div class="collections">
+  <h3>Collections</h3>
+  {{if .Unsupported}}
+  <p class="muted">This platform's database cannot list collections.</p>
+  {{else if .Collections}}
+  <ul class="collection-list">
+    {{range .Collections}}
+    <li>
+      <button
+        type="button"
+        class="secondary"
+        hx-get="/api/hex/manage/sites/{{$.Site}}/collections/{{.Name}}"
+        hx-target="#documents"
+      >
+        {{.Name}} <span class="muted">{{.Documents}}</span>
+      </button>
+    </li>
+    {{end}}
+  </ul>
+  {{else}}
+  <p class="muted">No documents stored yet.</p>
+  {{end}}
+</div>
+{{end}} {{define "documents"}}
+<div class="documents">
+  <h3>{{.Collection}}</h3>
+  {{if .Documents}}
+  <table class="manage-table">
+    <thead>
+      <tr>
+        <th scope="col">ID</th>
+        <th scope="col">Created by</th>
+        <th scope="col">Data</th>
+        <th scope="col"><span class="visually-hidden">Actions</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Documents}}
+      <tr>
+        <td><code>{{.ID}}</code></td>
+        <td>{{if .CreatedBy}}{{.CreatedBy}}{{else}}—{{end}}</td>
+        <td><code class="preview">{{.Preview}}</code></td>
+        <td class="actions">
+          <button
+            type="button"
+            class="secondary"
+            hx-get="/api/hex/manage/sites/{{$.Site}}/collections/{{$.Collection}}/{{.ID}}"
+            hx-target="#document-view"
+          >
+            View
+          </button>
+          <button
+            type="button"
+            class="secondary"
+            hx-delete="/api/hex/manage/sites/{{$.Site}}/collections/{{$.Collection}}/{{.ID}}"
+            hx-confirm="Delete document {{.ID}}? The app cannot recover it."
+            hx-target="closest tr"
+            hx-swap="outerHTML"
+          >
+            Delete
+          </button>
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{if .Next}}
+  <button
+    type="button"
+    class="secondary"
+    hx-get="/api/hex/manage/sites/{{.Site}}/collections/{{.Collection}}?after={{.Next}}"
+    hx-target="#documents"
+  >
+    Next page
+  </button>
+  {{end}} {{else}}
+  <p class="muted">No documents.</p>
+  {{end}}
+</div>
+{{end}} {{define "document"}}
+<div class="document">
+  <h3>Document <code>{{.ID}}</code></h3>
+  <pre>{{.JSON}}</pre>
+</div>
+{{end}} {{define "files"}}
+<div class="files">
+  {{if .Files}}
+  <table class="manage-table">
+    <thead>
+      <tr>
+        <th scope="col">File</th>
+        <th scope="col">Size</th>
+        <th scope="col"><span class="visually-hidden">Actions</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Files}}
+      <tr>
+        <td><a href="{{.Link}}">{{.Key}}</a></td>
+        <td>{{.Size}}</td>
+        <td class="actions">
+          <button
+            type="button"
+            class="secondary"
+            hx-delete="{{.DeleteLink}}"
+            hx-confirm="Delete {{.Key}}? The app cannot recover it."
+            hx-target="closest tr"
+            hx-swap="outerHTML"
+          >
+            Delete
+          </button>
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p class="muted">No uploaded files.</p>
+  {{end}}
+</div>
+{{end}}

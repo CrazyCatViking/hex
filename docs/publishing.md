@@ -114,7 +114,36 @@ Set `"discoverable": false` in hex.json and republish to exclude a site from the
 }
 ```
 
-The local site provider reads metadata on each discovery request; custom providers can implement `hex.SiteMetadataReader`. Invalid, oversized, or symlinked metadata produces an explicit discovery error. Attribution is project-provided; the server logs the authenticated publisher of each publication.
+The local site provider reads metadata on each discovery request; custom providers can implement `hex.SiteMetadataReader`. Invalid, oversized, or symlinked metadata produces an explicit discovery error.
+
+With an identity provider, the server also records who created the site and who published it last, from the signed-in identity rather than from hex.json: `createdBy` and `createdAt` (kept across publications), `publishedBy` and `publishedAt`, each person as `{id, name}`. Publishers cannot set these fields. The landing page shows the creator instead of `author` when known. Each publication is added to a history of the last 50 (`.hex-history.json`: when, by whom, file count and bytes), which owners and admins read with `GET /api/hex/sites/{site}/history`. Unpublishing removes the site's files, including its metadata and history.
+
+## Publishing files and folders
+
+`hex publish` decides what to publish from its target, the current folder by default:
+
+- **A folder with hex.json** is published as that project's site, as described above. `--name`, `--with` and `--update` are refused, because the name and access come from hex.json.
+- **A file, or a folder without hex.json**, is published without a project: reports, exports, prototypes. The platform creates a site with a random name, such as `k7m2x9qp4t.hex.example.com`, that only its creator can open, and the CLI prints its URL. These sites are called artifacts.
+
+For artifacts:
+
+- A folder with `index.html` is published as a site. A single HTML file becomes the page.
+- Any other file gets a generated page that previews it (images, PDF, video, audio, and text up to 1 MiB inline) with a download link. A folder without `index.html` gets a generated file listing.
+- `--name` (`-n`) sets the human-readable title, which defaults to the file or folder name.
+- `--with user:<email or id>` or `--with group:<object id>` (repeatable) shares it; the creator always stays a viewer. `hex access` changes the viewers later.
+- `--update <site>` replaces an artifact's content at the same URL, keeping its title and viewers unless `--name` or `--with` is given.
+- `hex sites --mine` lists everything you own, and `hex delete <site> --yes` removes one.
+
+Artifacts never appear in the catalogue or discovery API. Anyone who can sign in may create them, even when `HEX_PUBLISHER_GROUPS` limits app names, because their names are random. The feature needs identities, access control and publishing; `GET /api/hex/capabilities` reports it as `artifacts`.
+
+## Safety checks
+
+Before uploading, the CLI refuses content that should not be published:
+
+- in folders published without hex.json: `node_modules`, `.git`, `.ssh` and `.aws` folders anywhere inside;
+- in every publication: files whose names look like secrets or keys, such as `.env`, `*.env`, `*.pem`, `*.key`, `*.pfx`, `*.p12`, `*.kdbx`, `id_rsa*`, `id_ed25519*`, `.npmrc` and `credentials`.
+
+Projects keep leaving dot-files and `node_modules` out of their publish directory silently. Unusually large publications (more than 100 files, more than 20 MB in total, or any file over 10 MB) need confirmation: the CLI asks in a terminal and otherwise stops unless `--yes` (`-y`) is given.
 
 ## Other providers
 

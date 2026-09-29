@@ -64,6 +64,18 @@ func (d *Database) Migrate(ctx context.Context) error {
 		return fmt.Errorf("index document creators: %w", err)
 	}
 
+	const people = `
+		CREATE TABLE IF NOT EXISTS hex_people (
+			id text PRIMARY KEY,
+			name text NOT NULL,
+			email text NOT NULL,
+			last_seen timestamptz NOT NULL
+		)`
+
+	if _, err := d.pool.Exec(ctx, people); err != nil {
+		return fmt.Errorf("create people table: %w", err)
+	}
+
 	return d.migrateSitePolicies(ctx)
 }
 
@@ -204,4 +216,31 @@ func (d *Database) Delete(ctx context.Context, site, collection, id string, opti
 		return err
 	}
 	return hex.ErrForbidden
+}
+
+func (d *Database) ListCollections(ctx context.Context, site string) ([]hex.Collection, error) {
+	const query = `
+		SELECT collection, count(*) FROM hex_documents
+		WHERE site = $1
+		GROUP BY collection
+		ORDER BY collection`
+
+	rows, err := d.pool.Query(ctx, query, site)
+	if err != nil {
+		return nil, fmt.Errorf("list collections of %s: %w", site, err)
+	}
+	defer rows.Close()
+
+	collections := []hex.Collection{}
+	for rows.Next() {
+		var collection hex.Collection
+		if err := rows.Scan(&collection.Name, &collection.Documents); err != nil {
+			return nil, fmt.Errorf("decode collection row: %w", err)
+		}
+		collections = append(collections, collection)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read collection rows: %w", err)
+	}
+	return collections, nil
 }
