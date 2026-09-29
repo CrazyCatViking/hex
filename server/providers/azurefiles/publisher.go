@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"path"
 	"slices"
@@ -23,7 +24,6 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azfile/directory"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azfile/file"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azfile/fileerror"
-	"github.com/Azure/azure-sdk-for-go/sdk/storage/azfile/sas"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azfile/service"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azfile/share"
 	hex "github.com/crazycatviking/hex/server"
@@ -41,12 +41,15 @@ const (
 )
 
 type Publisher struct {
-	service   *service.Client
-	share     *share.Client
-	shareName string
+	share      *share.Client
+	shareName  string
+	account    string
+	serviceURL string
+	credential azcore.TokenCredential
+	http       *http.Client
 
 	mu              sync.Mutex
-	delegation      *service.UserDelegationCredential
+	delegation      delegationKey
 	delegationRenew time.Time
 }
 
@@ -69,9 +72,12 @@ func New(shareURL string, credential azcore.TokenCredential) (*Publisher, error)
 	}
 
 	return &Publisher{
-		service:   client,
-		share:     client.NewShareClient(shareName),
-		shareName: shareName,
+		share:      client.NewShareClient(shareName),
+		shareName:  shareName,
+		account:    strings.SplitN(parsed.Host, ".", 2)[0],
+		serviceURL: "https://" + parsed.Host + "/",
+		credential: credential,
+		http:       &http.Client{Timeout: 30 * time.Second},
 	}, nil
 }
 
@@ -210,12 +216,11 @@ func (p *Publisher) UploadTargets(ctx context.Context, site string, files []hex.
 		return nil, err
 	}
 
-	credential, err := p.userDelegation(ctx)
+	key, err := p.userDelegation(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	permissions := sas.FilePermissions{Create: true, Write: true}
 	expiry := time.Now().UTC().Add(uploadValidity)
 	targets := make([]hex.UploadTarget, 0, len(files))
 	for _, siteFile := range files {
@@ -224,14 +229,7 @@ func (p *Publisher) UploadTargets(ctx context.Context, site string, files []hex.
 			return nil, err
 		}
 
-		values := sas.SignatureValues{
-			Protocol:    sas.ProtocolHTTPS,
-			ExpiryTime:  expiry,
-			Permissions: permissions.String(),
-			ShareName:   p.shareName,
-			FilePath:    p.sitePath(site, siteFile.Path),
-		}
-		query, err := values.SignWithUserDelegation(credential)
+		query, err := fileSAS(key, p.account, p.shareName, p.sitePath(site, siteFile.Path), "cw", expiry)
 		if err != nil {
 			return nil, fmt.Errorf("sign upload for %s/%s: %w", site, siteFile.Path, err)
 		}
@@ -239,7 +237,7 @@ func (p *Publisher) UploadTargets(ctx context.Context, site string, files []hex.
 		targets = append(targets, hex.UploadTarget{
 			Path:     siteFile.Path,
 			Protocol: "azure-files",
-			URL:      client.URL() + "?" + query.Encode(),
+			URL:      client.URL() + "?" + query,
 		})
 	}
 	return targets, nil
@@ -247,25 +245,23 @@ func (p *Publisher) UploadTargets(ctx context.Context, site string, files []hex.
 
 // userDelegation returns a cached user delegation key, renewing it well
 // before any SAS signed with it could outlive it.
-func (p *Publisher) userDelegation(ctx context.Context) (*service.UserDelegationCredential, error) {
+func (p *Publisher) userDelegation(ctx context.Context) (delegationKey, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	now := time.Now().UTC()
-	if p.delegation != nil && now.Before(p.delegationRenew) {
+	if p.delegation.Value != "" && now.Before(p.delegationRenew) {
 		return p.delegation, nil
 	}
 
-	start := now.Add(-5 * time.Minute).Format(keyTimeFormat)
-	expiry := now.Add(delegationValidity).Format(keyTimeFormat)
-	credential, err := p.service.GetUserDelegationCredential(ctx, service.KeyInfo{Start: &start, Expiry: &expiry}, nil)
+	key, err := fetchDelegationKey(ctx, p.http, p.credential, p.serviceURL, now.Add(-5*time.Minute), now.Add(delegationValidity))
 	if err != nil {
-		return nil, fmt.Errorf("obtain Azure Files user delegation key: %w", err)
+		return delegationKey{}, fmt.Errorf("obtain Azure Files user delegation key: %w", err)
 	}
 
-	p.delegation = credential
+	p.delegation = key
 	p.delegationRenew = now.Add(delegationValidity - 2*uploadValidity)
-	return credential, nil
+	return key, nil
 }
 
 // ensureDirectories creates the sites root, the site directory and every
