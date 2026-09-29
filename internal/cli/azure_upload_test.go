@@ -34,6 +34,11 @@ func (s *fakeFileShare) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
+	// Azure Files rejects user delegation SAS requests without it.
+	if r.Header.Get("x-ms-file-request-intent") != "backup" {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
 
 	name := strings.TrimPrefix(r.URL.Path, "/sites/public/sites/demo/")
 	switch {
