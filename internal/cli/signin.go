@@ -74,8 +74,15 @@ func (a *App) signInClient(project Project) (public.Client, error) {
 	return public.New(project.ClientID, options...)
 }
 
-func signInScopes(resource string) []string {
-	return []string{strings.TrimRight(resource, "/") + "/.default"}
+// signInScopes requests the platform API's default scope. When the CLI signs
+// in as the API's own registration, Entra only accepts the API named by its
+// client ID (AADSTS90009), not by its api:// URI; the token is the same.
+func signInScopes(project Project) []string {
+	resource := strings.TrimRight(project.Resource, "/")
+	if strings.EqualFold(resource, "api://"+project.ClientID) {
+		resource = project.ClientID
+	}
+	return []string{resource + "/.default"}
 }
 
 // signedInToken returns a token from the saved session, signing in through
@@ -86,27 +93,27 @@ func (a *App) signedInToken(ctx context.Context, project Project) (string, error
 		return "", err
 	}
 
-	if token, ok := silentToken(ctx, client, project.Resource); ok {
+	if token, ok := silentToken(ctx, client, project); ok {
 		return token, nil
 	}
 	if !a.Interactive {
 		return "", errors.New("not signed in to the platform; run hex login in a terminal, or set HEX_TOKEN")
 	}
 
-	result, err := a.browserSignIn(ctx, client, project.Resource)
+	result, err := a.browserSignIn(ctx, client, project)
 	if err != nil {
 		return "", err
 	}
 	return result.AccessToken, nil
 }
 
-func silentToken(ctx context.Context, client public.Client, resource string) (string, bool) {
+func silentToken(ctx context.Context, client public.Client, project Project) (string, bool) {
 	accounts, err := client.Accounts(ctx)
 	if err != nil {
 		return "", false
 	}
 	for _, account := range accounts {
-		result, err := client.AcquireTokenSilent(ctx, signInScopes(resource), public.WithSilentAccount(account))
+		result, err := client.AcquireTokenSilent(ctx, signInScopes(project), public.WithSilentAccount(account))
 		if err == nil {
 			return result.AccessToken, true
 		}
@@ -114,13 +121,13 @@ func silentToken(ctx context.Context, client public.Client, resource string) (st
 	return "", false
 }
 
-func (a *App) browserSignIn(ctx context.Context, client public.Client, resource string) (public.AuthResult, error) {
+func (a *App) browserSignIn(ctx context.Context, client public.Client, project Project) (public.AuthResult, error) {
 	if os.Getenv("CODESPACES") == "true" || (runtime.GOOS == "linux" && os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "") {
 		return public.AuthResult{}, errors.New("signing in requires a desktop browser; run hex login in a desktop terminal, or set HEX_TOKEN. Device-code sign-in is not supported")
 	}
 
 	fmt.Fprintln(a.Err, "Sign in to the platform in your browser. Complete your organization's MFA prompts to continue.")
-	result, err := client.AcquireTokenInteractive(ctx, signInScopes(resource),
+	result, err := client.AcquireTokenInteractive(ctx, signInScopes(project),
 		public.WithRedirectURI("http://localhost"),
 		public.WithOpenURL(a.OpenBrowser),
 	)
@@ -136,7 +143,7 @@ func (a *App) signIn(ctx context.Context, project Project) error {
 	if err != nil {
 		return err
 	}
-	result, err := a.browserSignIn(ctx, client, project.Resource)
+	result, err := a.browserSignIn(ctx, client, project)
 	if err != nil {
 		return err
 	}

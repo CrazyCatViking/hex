@@ -178,6 +178,17 @@ func TestBrowserSignInIsSavedAndReused(t *testing.T) {
 	}
 }
 
+func TestSelfSignInNamesTheAPIByClientID(t *testing.T) {
+	own := Project{Resource: "api://" + testClientID, ClientID: testClientID, TenantID: testTenantID}
+	if scopes := signInScopes(own); len(scopes) != 1 || scopes[0] != testClientID+"/.default" {
+		t.Fatalf("a registration's own API must be requested by client ID: %v", scopes)
+	}
+	other := Project{Resource: "api://other-api/", ClientID: testClientID, TenantID: testTenantID}
+	if scopes := signInScopes(other); scopes[0] != "api://other-api/.default" {
+		t.Fatalf("another API keeps its URI: %v", scopes)
+	}
+}
+
 func TestProfilesCarryTheSignInApp(t *testing.T) {
 	directory := t.TempDir()
 	t.Setenv("HEX_CONFIG_DIR", directory)
