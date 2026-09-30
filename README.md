@@ -85,7 +85,7 @@ Visit the platform's main domain, such as **https://hex.smartdok.dev/**. Its Go-
 
 Set `"discoverable": false` in an app's hex.json and republish to hide its listing and exclude it from statistics. Its URL continues to work. See [landing page and installers](docs/portal.md) for hosting, configuration, and release prerequisites. Locally, the landing page is at **http://localhost:8080/**.
 
-Agents such as Claude Code can use `hex setup <url> --json` and, when user sign-in is required, `hex setup --file <downloaded-file> --json`. Setup saves a non-secret default profile. API commands, including publishing, sign in through the browser the first time and reuse the saved session; `hex login` and `hex logout` manage it, and `HEX_TOKEN` overrides it. See [Setup and authentication handoff](docs/setup.md).
+Agents such as Claude Code can use `hex setup <url> --json` and, when user sign-in is required, `hex setup --file <downloaded-file> --json`. Setup saves a non-secret default profile, including the platform's configured auth type, OIDC issuer, client ID and scopes. API commands, including publishing, sign in through the browser the first time and reuse the saved session; `hex login` and `hex logout` manage it, and `HEX_TOKEN` overrides it. See [Setup and authentication handoff](docs/setup.md).
 
 ## Browser API
 

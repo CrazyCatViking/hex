@@ -14,9 +14,7 @@ For SmartDok, configure:
 HEX_PLATFORM_NAME=SmartDok Hex
 HEX_PUBLIC_URL=https://hex.smartdok.dev
 HEX_SITE_BASE_URL=https://hex.smartdok.dev
-HEX_API_RESOURCE=api://<client-id>
-HEX_CLI_CLIENT_ID=<client-id>
-HEX_CLI_TENANT_ID=<tenant-id>
+HEX_AUTH_CONFIG={"type":"oidc","issuer":"https://identity.company.example","clientId":"hex-cli","scopes":["openid","profile","offline_access","hex-api"]}
 ```
 
 Set up DNS, TLS, ingress bindings, and hosting authentication for the main domain as well as the site domains. The Azure example accepts `platform_url`, `site_base_url`, and `custom_domains`; setting a URL does not create DNS or register Entra callbacks. See [subdomain hosting](subdomains.md).
@@ -61,9 +59,9 @@ The portal reads no directory data from the identity provider. People are rememb
 3. Run the displayed command against that downloaded file.
 4. Open a new terminal and run `hex init my-app`.
 
-No separate `hex setup` command, downloaded configuration import, or manual JSON editing is required from employees. The script contains the non-secret connection settings and invokes the CLI's import internally, saving the company profile as the default while preserving other profiles.
+No separate `hex setup` command, downloaded configuration import, or manual JSON editing is required from employees. The script contains the non-secret connection settings, including auth type, issuer, client ID and scopes, and invokes the CLI's import internally, saving the company profile as the default while preserving other profiles.
 
-The browser download is intentional: terminal `curl`/PowerShell requests cannot reuse an Entra browser session. Installer scripts do not fetch protected platform configuration, transfer browser cookies, or register OAuth clients. Hosting SSO protects script downloads; the release files must be reachable by the terminal independently.
+The browser download is intentional: terminal `curl`/PowerShell requests cannot reuse a hosting-authentication browser session. Installer scripts do not fetch protected platform configuration, transfer browser cookies, or register OAuth clients. Hosting SSO protects script downloads; the release files must be reachable by the terminal independently.
 
 | Installer | Targets | User installation directory |
 | --- | --- | --- |
@@ -73,7 +71,7 @@ The browser download is intentional: terminal `curl`/PowerShell requests cannot 
 
 Unix scripts require Bash, curl, base64, and sha256sum or shasum. They add the bin directory to common shell startup files idempotently. The Windows script uses PowerShell and adds its bin directory to the user's PATH. Neither requires administrator privileges. The displayed PowerShell command sets execution policy only for that installation process.
 
-The installer verifies SHA-256 before installing the CLI, imports settings without network access to the platform, and removes temporary files. After installation, `hex update` installs newer binaries while preserving profiles. Rerunning a newly downloaded installer also refreshes platform settings. The first `hex publish` opens the browser for Entra sign-in with MFA support and saves the session; employees need no other tools.
+The installer verifies SHA-256 before installing the CLI, imports settings without network access to the platform, and removes temporary files. After installation, `hex update` installs newer binaries while preserving profiles. Rerunning a newly downloaded installer also refreshes platform settings. The first `hex publish` opens the configured identity provider in the browser and saves the session; employees need no other tools.
 
 ## Release source
 

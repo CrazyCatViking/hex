@@ -48,12 +48,14 @@ Publishing replaces files in place; it is not an atomic whole-site release.
 
 ## Authentication
 
-API calls, including `hex`-protocol uploads, use `HEX_TOKEN` when set. Otherwise, when the profile has a `resource` (advertised by platforms that set `HEX_API_RESOURCE`), the CLI obtains a token for `<resource>/.default` once per command:
+API calls, including `hex`-protocol uploads, use `HEX_TOKEN` when set. Otherwise a profile with `auth.type: "oidc"` discovers the configured issuer and uses authorization code + PKCE through the browser. The CLI checks state and nonce and verifies the signed ID token's issuer, audience and expiry. It privately saves the session per platform/issuer/client/scopes and silently refreshes expired tokens. `hex login` always opens a new sign-in so users can switch identities; `hex logout` removes that platform's saved CLI session. A browser-open failure prints the sign-in URL, allowing manual use from headless terminals. `auth.type: "none"` skips CLI sign-in. See [connection configuration](setup.md#configure-a-hex-server).
+
+The CLI [automatically migrates](setup.md#automatic-auth-format-migration) legacy profiles with a public client and tenant GUID to OIDC. Profiles that still have no `auth` retain the legacy behavior: when the profile has a `resource` (advertised by platforms that set `HEX_API_RESOURCE`), the CLI obtains a token for `<resource>/.default` once per command:
 
 - **Built-in sign-in** when the platform also advertises a `clientId` and `tenantId` (`HEX_CLI_CLIENT_ID`, `HEX_CLI_TENANT_ID`). The CLI signs in as that public-client app registration against `https://login.microsoftonline.com/<tenantId>`, using the browser authorization-code flow with PKCE on an `http://localhost` redirect, with MFA and Conditional Access. The session is saved in `sign-in.json` in the Hex configuration directory (next to `profiles.json`, readable only by the user) and refreshed silently by later commands. No other tools are needed.
 - **Azure CLI fallback** for platforms that advertise a resource without a client ID, and for a `--resource` override naming a different resource. The CLI requests the token with `az account get-access-token` and, in an interactive terminal, runs `az login --allow-no-subscriptions --scope <resource>/.default` when there is no session. `HEX_TENANT_ID` pins the tenant for this fallback only.
 
-Interactive commands without a session open the browser automatically; non-interactive commands fail and ask for `hex login`. `hex login` forces a new browser sign-in, and `hex logout` forgets the saved built-in session (Azure CLI sessions are managed with `az logout`). Linux sign-in needs a desktop session (DISPLAY or WAYLAND_DISPLAY); headless sessions and Codespaces are rejected rather than falling back to device-code sign-in. Automation supplies `HEX_TOKEN`.
+Interactive commands without a session open the browser automatically; non-interactive commands fail and ask for `hex login`. Azure CLI sessions are managed with `az logout`. The legacy Microsoft sign-in requires a Linux desktop session (DISPLAY or WAYLAND_DISPLAY); headless sessions and Codespaces are rejected rather than falling back to device-code sign-in. Automation supplies `HEX_TOKEN`.
 
 The app registration requirements for built-in sign-in:
 

@@ -14,6 +14,8 @@ import (
 	"runtime"
 	"strings"
 	"unicode"
+
+	hex "github.com/crazycatviking/hex/server"
 )
 
 const connectionPath = "/api/hex/config"
@@ -63,15 +65,16 @@ func (c *Capabilities) UnmarshalJSON(data []byte) error {
 }
 
 type Connection struct {
-	Version       int           `json:"version"`
-	Name          string        `json:"name"`
-	Server        string        `json:"server"`
-	SiteBaseURL   string        `json:"siteBaseURL"`
-	CLIReleaseURL string        `json:"cliReleaseURL,omitempty"`
-	Resource      string        `json:"resource,omitempty"`
-	ClientID      string        `json:"clientId,omitempty"`
-	TenantID      string        `json:"tenantId,omitempty"`
-	Capabilities  *Capabilities `json:"capabilities"`
+	Version       int             `json:"version"`
+	Name          string          `json:"name"`
+	Server        string          `json:"server"`
+	SiteBaseURL   string          `json:"siteBaseURL"`
+	CLIReleaseURL string          `json:"cliReleaseURL,omitempty"`
+	Resource      string          `json:"resource,omitempty"`
+	ClientID      string          `json:"clientId,omitempty"`
+	TenantID      string          `json:"tenantId,omitempty"`
+	Auth          *hex.AuthConfig `json:"auth,omitempty"`
+	Capabilities  *Capabilities   `json:"capabilities"`
 	// LegacyPublishing is the storage destination older platforms advertised
 	// and older CLIs saved in profiles. Publishing now goes through the API,
 	// so it is accepted and ignored.
@@ -94,17 +97,19 @@ type Project struct {
 	Access json.RawMessage `json:"access,omitempty"`
 	// ClientID and TenantID come from the platform profile and select the
 	// CLI's own browser sign-in.
-	ClientID     string        `json:"-"`
-	TenantID     string        `json:"-"`
-	Capabilities *Capabilities `json:"-"`
+	ClientID     string          `json:"-"`
+	TenantID     string          `json:"-"`
+	Auth         *hex.AuthConfig `json:"-"`
+	Capabilities *Capabilities   `json:"-"`
 }
 
 // withResource overrides the API resource. The profile's sign-in app only
 // applies to the platform's own resource, so other resources use Azure CLI.
 func (p Project) withResource(resource string) Project {
-	if resource != p.Resource {
+	if resource != p.Resource && !authMatchesResource(p.Auth, resource) {
 		p.ClientID = ""
 		p.TenantID = ""
+		p.Auth = nil
 	}
 	p.Resource = resource
 	return p
@@ -191,6 +196,12 @@ func parseConnection(data []byte, expectedServer string) (Connection, error) {
 	}
 	if connection.Resource != "" && !apiResourcePattern.MatchString(connection.Resource) {
 		return connection, errors.New("invalid API resource identifier in connection file")
+	}
+	if err := connection.Auth.Validate(); err != nil {
+		return connection, fmt.Errorf("invalid connection auth: %w", err)
+	}
+	if connection.Auth != nil && (connection.Resource != "" || connection.ClientID != "" || connection.TenantID != "") {
+		return connection, errors.New("auth cannot be combined with legacy sign-in settings")
 	}
 	if connection.ClientID != "" || connection.TenantID != "" {
 		if connection.Resource == "" || !clientIDPattern.MatchString(connection.ClientID) || !tenantPattern.MatchString(connection.TenantID) {

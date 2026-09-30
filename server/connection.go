@@ -10,15 +10,16 @@ import (
 )
 
 // ConnectionConfig is the non-secret platform description the CLI imports.
-// Resource is the API the CLI requests tokens for. ClientID and TenantID
-// identify a public-client app registration the CLI signs in with through
-// the browser; without them the CLI falls back to Azure CLI tokens.
+// Auth selects the sign-in protocol, issuer, public client and scopes.
+// Resource, ClientID and TenantID are legacy Entra settings, supported for
+// existing installations. New platforms should configure Auth instead.
 type ConnectionConfig struct {
 	Name     string
 	Server   string
 	Resource string
 	ClientID string
 	TenantID string
+	Auth     *AuthConfig
 }
 
 type connectionDocument struct {
@@ -30,6 +31,7 @@ type connectionDocument struct {
 	Resource      string         `json:"resource,omitempty"`
 	ClientID      string         `json:"clientId,omitempty"`
 	TenantID      string         `json:"tenantId,omitempty"`
+	Auth          *AuthConfig    `json:"auth,omitempty"`
 	Capabilities  map[string]any `json:"capabilities"`
 }
 
@@ -64,6 +66,7 @@ func (s *Server) connectionSettings() (connectionDocument, error) {
 		Resource:      connection.Resource,
 		ClientID:      connection.ClientID,
 		TenantID:      connection.TenantID,
+		Auth:          connection.Auth,
 		Capabilities:  s.capabilityDescription(),
 	}, nil
 }
@@ -75,6 +78,12 @@ var (
 )
 
 func validateConnection(connection *ConnectionConfig, siteBaseURL string) error {
+	if err := connection.Auth.Validate(); err != nil {
+		return err
+	}
+	if connection.Auth != nil && (connection.Resource != "" || connection.ClientID != "" || connection.TenantID != "") {
+		return fmt.Errorf("auth cannot be combined with legacy resource/clientId/tenantId settings")
+	}
 	if strings.TrimSpace(connection.Name) == "" {
 		return fmt.Errorf("platform name is required")
 	}

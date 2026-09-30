@@ -63,6 +63,11 @@ func (e *Environment) configureConnection(settings settings) error {
 		ClientID: os.Getenv("HEX_CLI_CLIENT_ID"),
 		TenantID: os.Getenv("HEX_CLI_TENANT_ID"),
 	}
+	auth, err := hex.ParseAuthConfig(os.Getenv("HEX_AUTH_CONFIG"))
+	if err != nil {
+		return fmt.Errorf("HEX_AUTH_CONFIG: %w", err)
+	}
+	e.Config.Connection.Auth = auth
 	return nil
 }
 

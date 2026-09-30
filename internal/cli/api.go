@@ -115,12 +115,17 @@ func (a *App) apiSend(ctx context.Context, project Project, method, path string,
 	return data, nil
 }
 
-// apiToken returns HEX_TOKEN, or a token for the platform's API resource:
-// from the CLI's own sign-in when the platform advertises a sign-in app, or
-// from Azure CLI for platforms that do not.
+// apiToken returns HEX_TOKEN or uses the platform's configured sign-in flow.
+// Profiles without Auth retain the legacy Microsoft/Azure CLI behavior.
 func (a *App) apiToken(ctx context.Context, project Project) (string, error) {
 	if token := os.Getenv("HEX_TOKEN"); token != "" {
 		return token, nil
+	}
+	if project.Auth != nil {
+		if project.Auth.Type == "none" {
+			return "", nil
+		}
+		return a.oidcToken(ctx, project, false)
 	}
 	if project.Resource == "" {
 		return "", nil
@@ -334,6 +339,9 @@ func (a *App) loginCommand() *cobra.Command {
 				return err
 			}
 			switch {
+			case project.Auth != nil && project.Auth.Type == "oidc":
+				_, err := a.oidcToken(cmd.Context(), project, true)
+				return err
 			case project.Resource == "":
 				fmt.Fprintln(a.Out, "This platform does not require a sign-in for the CLI.")
 				return nil
@@ -358,6 +366,13 @@ func (a *App) logoutCommand() *cobra.Command {
 			project, err := a.commandConfig(profile, false)
 			if err != nil {
 				return err
+			}
+			if project.Auth != nil {
+				if project.Auth.Type == "oidc" {
+					return a.oidcLogout(project)
+				}
+				fmt.Fprintln(a.Out, "This platform has no saved CLI sign-in.")
+				return nil
 			}
 			if project.ClientID == "" {
 				fmt.Fprintln(a.Out, "This platform has no saved Hex sign-in; Azure CLI sessions are managed with az logout.")

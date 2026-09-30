@@ -44,6 +44,8 @@ This downloads the latest prebuilt binary for the current OS/architecture, verif
 
 The default source is the latest CLI release in `crazycatviking/hex`. A platform's optional `cliReleaseURL` is saved in its profile and used automatically for organization mirrors. `HEX_CLI_RELEASE_URL` or `hex update --release-url <directory-url>` can override the source. URLs require HTTPS, with loopback HTTP allowed for tests. No request to the protected Hex API is needed.
 
+After an update, the next command that reads platform profiles automatically migrates eligible legacy auth settings to the explicit `auth` format. Existing Entra client/tenant-GUID settings become OIDC settings, and unauthenticated profiles become `auth.type: "none"`. This migration works offline and also applies to settings imported from older installers. See [automatic auth-format migration](setup.md#automatic-auth-format-migration) for compatibility and sign-in details.
+
 On Windows, the running executable is moved aside as `hex.exe.previous` before replacement and restored if replacement fails. Windows may keep that previous executable locked until processes exit; it is removed on the next update that replaces the binary. Close processes using that older version if Windows prevents cleanup. Unix replacement uses an atomic rename. Native macOS and Windows execution should be validated before broad rollout.
 
 Older CLI releases without `update` need one more installation through the platform script to gain this command. Publish the new CLI release before distributing the updated server's installer/configuration. Use `hex skills` inside existing projects to refresh their agent instructions after updating.

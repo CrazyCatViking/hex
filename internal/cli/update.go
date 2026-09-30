@@ -182,7 +182,7 @@ func (a *App) updateExecutable(ctx context.Context, executable, releaseURL strin
 	} else if err := os.Rename(downloaded, executable); err != nil {
 		return fmt.Errorf("replace installed CLI: %w", err)
 	}
-	fmt.Fprintf(a.Out, "Updated Hex to %s. Platform profiles and project files are unchanged.\n", strings.TrimPrefix(version, "hex version "))
+	fmt.Fprintf(a.Out, "Updated Hex to %s.\n", strings.TrimPrefix(version, "hex version "))
 	return nil
 }
 

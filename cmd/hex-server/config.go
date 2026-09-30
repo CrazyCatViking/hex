@@ -188,12 +188,17 @@ func configure(ctx context.Context, getenv func(string) string) (hex.Config, fun
 	config.Groups = hex.ParseGroups(getenv("HEX_GROUPS"))
 
 	if serverURL := getenv("HEX_PUBLIC_URL"); serverURL != "" {
+		auth, err := hex.ParseAuthConfig(getenv("HEX_AUTH_CONFIG"))
+		if err != nil {
+			return config, nil, fmt.Errorf("HEX_AUTH_CONFIG: %w", err)
+		}
 		config.Connection = &hex.ConnectionConfig{
 			Name:     environmentValue(getenv, "HEX_PLATFORM_NAME", "Hex"),
 			Server:   serverURL,
 			Resource: getenv("HEX_API_RESOURCE"),
 			ClientID: getenv("HEX_CLI_CLIENT_ID"),
 			TenantID: getenv("HEX_CLI_TENANT_ID"),
+			Auth:     auth,
 		}
 	}
 

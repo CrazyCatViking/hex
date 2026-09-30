@@ -45,6 +45,7 @@ Other reference executable settings:
 | `HEX_PUBLISHER_GROUPS` | Comma-separated principals allowed to claim new site names; empty lets every signed-in user. Owners can always republish. |
 | `HEX_GROUPS` | Groups offered by name in the management portal, as `name=object-id,name=object-id`. List the groups assigned to the app registration; only those appear in sign-in tokens. |
 | `HEX_API_RESOURCE` | Non-secret Entra resource identifier (for example `api://<client-id>`) advertised in connection settings; the CLI requests tokens for it. |
+| `HEX_AUTH_CONFIG` | JSON auth object: `{"type":"none"}` or `{"type":"oidc","issuer":"https://identity.example","clientId":"hex-cli","scopes":["openid","offline_access","hex-api"]}`. Embedded in installer/profile configuration; cannot be combined with legacy Entra sign-in fields. |
 | `HEX_CLI_CLIENT_ID`, `HEX_CLI_TENANT_ID` | Public-client app registration and tenant the CLI signs in with; set both together with `HEX_API_RESOURCE`, or neither (Azure CLI fallback). See [Publishing](publishing.md#authentication). |
 | `HEX_FILES_DIR` | Filesystem root for local uploads; defaults to `.hex-data/files`. |
 | `AZURE_BLOB_ENDPOINT` | Blob service endpoint for the Azure upload provider. |

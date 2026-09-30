@@ -36,6 +36,15 @@ func readProfiles() (profiles, string, error) {
 	if err := decodeStrict(data, &decoded); err != nil || decoded.Version != 1 || decoded.Profiles == nil {
 		return store, path, errors.New("invalid Hex profile store")
 	}
+	changed, err := migrateProfileAuth(&decoded)
+	if err != nil {
+		return store, path, fmt.Errorf("migrate Hex profiles: %w", err)
+	}
+	if changed {
+		if err := writeJSONFile(path, decoded); err != nil {
+			return store, path, fmt.Errorf("save migrated Hex profiles: %w", err)
+		}
+	}
 	return decoded, path, nil
 }
 
@@ -65,6 +74,7 @@ func loadProfile(name string, optional bool) (*Connection, string, error) {
 }
 
 func saveProfile(connection Connection, name string) (string, error) {
+	connection, _ = migrateConnectionAuth(connection)
 	if name == "" {
 		server, err := url.Parse(connection.Server)
 		if err != nil {
@@ -129,9 +139,10 @@ func (a *App) readProjectIn(directory string, optional bool) (Project, error) {
 		if project.Resource == "" {
 			project.Resource = connection.Resource
 		}
-		if project.Resource == connection.Resource {
+		if project.Resource == connection.Resource || authMatchesResource(connection.Auth, project.Resource) {
 			project.ClientID = connection.ClientID
 			project.TenantID = connection.TenantID
+			project.Auth = connection.Auth
 		}
 		project.Capabilities = connection.Capabilities
 	}
@@ -164,6 +175,7 @@ func (a *App) commandConfigIn(directory, profile string, needsProject bool) (Pro
 		project.Resource = connection.Resource
 		project.ClientID = connection.ClientID
 		project.TenantID = connection.TenantID
+		project.Auth = connection.Auth
 		project.Capabilities = connection.Capabilities
 	}
 	return project, nil
