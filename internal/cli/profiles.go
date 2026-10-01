@@ -104,13 +104,7 @@ func saveProfile(connection Connection, name string) (string, error) {
 	return name, nil
 }
 
-func (a *App) readProject(optional bool) (Project, error) {
-	return a.readProjectIn(a.Dir, optional)
-}
-
-// readProjectIn reads the hex.json in directory, resolving its platform
-// profile.
-func (a *App) readProjectIn(directory string, optional bool) (Project, error) {
+func readProjectFile(directory string, optional bool) (Project, error) {
 	var project Project
 	data, err := os.ReadFile(filepath.Join(directory, "hex.json"))
 	if optional && errors.Is(err, fs.ErrNotExist) {
@@ -125,6 +119,16 @@ func (a *App) readProjectIn(directory string, optional bool) (Project, error) {
 	if err := json.Unmarshal(data, &project); err != nil {
 		return project, fmt.Errorf("parse project configuration: %w", err)
 	}
+	return project, nil
+}
+
+// readProjectIn reads the hex.json in directory, resolving its platform
+// profile.
+func (a *App) readProjectIn(directory string, optional bool) (Project, error) {
+	project, err := readProjectFile(directory, optional)
+	if err != nil {
+		return project, err
+	}
 	if project.Platform != "" {
 		connection, _, err := loadProfile(project.Platform, false)
 		if err != nil {
@@ -132,9 +136,27 @@ func (a *App) readProjectIn(directory string, optional bool) (Project, error) {
 		}
 		if project.Server == "" {
 			project.Server = connection.Server
+		} else {
+			server, err := origin(project.Server, true)
+			if err != nil {
+				return project, err
+			}
+			if server.String() != connection.Server {
+				return project, fmt.Errorf("project server differs from saved profile %q; configure a separate profile for that server and select it in hex.json or with --platform", project.Platform)
+			}
+			project.Server = server.String()
 		}
 		if project.SiteBaseURL == "" {
 			project.SiteBaseURL = connection.SiteBaseURL
+		} else {
+			base, err := origin(project.SiteBaseURL, true)
+			if err != nil {
+				return project, err
+			}
+			if base.String() != connection.SiteBaseURL {
+				return project, fmt.Errorf("project siteBaseURL differs from saved profile %q; configure a separate profile for that site origin and select it in hex.json or with --platform", project.Platform)
+			}
+			project.SiteBaseURL = base.String()
 		}
 		if project.Resource == "" {
 			project.Resource = connection.Resource
@@ -159,7 +181,11 @@ func (a *App) commandConfigIn(directory, profile string, needsProject bool) (Pro
 	var project Project
 	var err error
 	if profile == "" || needsProject {
-		project, err = a.readProjectIn(directory, !needsProject)
+		if profile != "" {
+			project, err = readProjectFile(directory, !needsProject)
+		} else {
+			project, err = a.readProjectIn(directory, !needsProject)
+		}
 		if err != nil {
 			return project, err
 		}

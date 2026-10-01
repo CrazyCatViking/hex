@@ -121,9 +121,9 @@ func (s *Server) registerRoutes() {
 		s.mux.HandleFunc("DELETE /api/sites/{site}/db/{collection}/{id}", s.siteScoped(s.deleteDocument))
 	}
 	if s.config.Actions != nil {
-		s.mux.HandleFunc("GET /api/sites/{site}/actions", s.actionScoped(s.listActions))
-		s.mux.HandleFunc("GET /api/sites/{site}/actions/{action}", s.actionScoped(s.describeAction))
-		s.mux.HandleFunc("POST /api/sites/{site}/actions/{action}", s.actionScoped(s.runAction))
+		s.mux.HandleFunc("GET /api/sites/{site}/actions", s.siteScoped(s.listActions))
+		s.mux.HandleFunc("GET /api/sites/{site}/actions/{action}", s.siteScoped(s.describeAction))
+		s.mux.HandleFunc("POST /api/sites/{site}/actions/{action}", s.siteScoped(s.runAction))
 	}
 
 	if s.config.Realtime != nil {

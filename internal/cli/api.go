@@ -17,6 +17,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const maxAPIResponseBytes = 16 << 20
+
+var errAPIResponseTooLarge = errors.New("JSON response from Hex exceeds 16 MiB")
+
 // apiStatusError is an unexpected API response status.
 type apiStatusError struct {
 	Status  int
@@ -58,7 +62,7 @@ func (a *App) apiCall(ctx context.Context, project Project, method, path string,
 }
 
 func (a *App) apiSend(ctx context.Context, project Project, method, path string, payload io.Reader, size int64, contentType string) (json.RawMessage, error) {
-	server, err := origin(project.Server, false)
+	server, err := origin(project.Server, true)
 	if err != nil {
 		return nil, err
 	}
@@ -105,9 +109,12 @@ func (a *App) apiSend(ctx context.Context, project Project, method, path string,
 	if !strings.Contains(response.Header.Get("Content-Type"), "application/json") {
 		return nil, errors.New("expected a JSON response from Hex")
 	}
-	data, err := io.ReadAll(io.LimitReader(response.Body, 16<<20))
+	data, err := io.ReadAll(io.LimitReader(response.Body, maxAPIResponseBytes+1))
 	if err != nil {
 		return nil, err
+	}
+	if len(data) > maxAPIResponseBytes {
+		return nil, errAPIResponseTooLarge
 	}
 	if !json.Valid(data) {
 		return nil, errors.New("invalid JSON response from Hex")
@@ -302,7 +309,7 @@ func (a *App) readCommand(name, description, path string, cached bool) *cobra.Co
 			if err != nil {
 				return err
 			}
-			if cached && project.Capabilities != nil && !refresh {
+			if cached && project.Capabilities != nil && !refresh && !cmd.Flags().Changed("server") {
 				return a.printJSON(project.Capabilities)
 			}
 			if server != "" {

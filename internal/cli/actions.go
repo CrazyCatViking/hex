@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -85,7 +86,7 @@ func (a *App) actionCommand(options *siteCommandOptions, execute bool) *cobra.Co
 			if err := definition.ValidateSchemas(); err != nil {
 				return err
 			}
-			result, err := a.apiCall(cmd.Context(), project, http.MethodPost, path, payload)
+			result, err := a.apiSend(cmd.Context(), project, http.MethodPost, path, bytes.NewReader(payload), int64(len(payload)), "application/json")
 			if err != nil {
 				return err
 			}

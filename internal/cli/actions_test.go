@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -13,6 +14,42 @@ import (
 	hex "github.com/crazycatviking/hex/server"
 	"github.com/crazycatviking/hex/server/providers/memory"
 )
+
+func TestActionsCLIPreservesHTMLHeavyInput(t *testing.T) {
+	directory := t.TempDir()
+	payload := []byte(`{"title":"` + strings.Repeat("<>&", (hex.MaxActionInputBytes-12)/3) + `"}`)
+	if len(payload) > hex.MaxActionInputBytes || !json.Valid(payload) {
+		t.Fatal("invalid regression payload")
+	}
+	expanded, err := json.Marshal(json.RawMessage(payload))
+	if err != nil || len(expanded) <= hex.MaxActionInputBytes {
+		t.Fatal("payload must exceed the server limit when HTML escaped")
+	}
+	registry := new(hex.ActionRegistry)
+	calls := 0
+	if err := registry.Register("demo", hex.Action{
+		Definition: cliActionDefinition(),
+		Handler: func(ctx context.Context, caller hex.ActionContext, input json.RawMessage) (any, error) {
+			calls++
+			if !bytes.Equal(input, payload) {
+				t.Error("action input bytes changed")
+			}
+			return map[string]string{"id": "task-1"}, nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	platform := httptest.NewServer(hex.New(hex.Config{Actions: registry}))
+	defer platform.Close()
+	saveReadProfile(t, directory, platform.URL)
+	if err := os.WriteFile(filepath.Join(directory, "input.json"), payload, 0600); err != nil {
+		t.Fatal(err)
+	}
+	got := run(t, directory, "actions", "run", "--site", "demo", "create-task", "--input", "@input.json")
+	if calls != 1 || !strings.Contains(got, `"id": "task-1"`) {
+		t.Fatalf("action did not execute: %d %s", calls, got)
+	}
+}
 
 func cliActionDefinition() hex.ActionDefinition {
 	return hex.ActionDefinition{

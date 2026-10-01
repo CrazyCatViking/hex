@@ -45,10 +45,13 @@ func (s *Server) canCreateSites(identity *Identity) bool {
 }
 
 // siteRole resolves the caller's role on a site. Sites without a policy are
-// open: everyone may view and edit, and only admins own them. Within a
-// policy, empty viewers means every signed-in user may view and empty editors
-// means every viewer may edit.
+// open: everyone may view and edit, and only admins own them. A configured
+// identity resolver requires a signed-in caller. Within a policy, empty viewers
+// means every signed-in user may view and empty editors means every viewer may edit.
 func (s *Server) siteRole(identity *Identity, access SiteAccess, exists bool) siteRole {
+	if s.config.Identity != nil && identity == nil {
+		return roleNone
+	}
 	if s.isAdmin(identity) {
 		return roleOwner
 	}
@@ -181,6 +184,18 @@ func (a siteAuthorization) collection(name string) dataAccess {
 	return ruleAccess(a.role, a.identity, namedRule(a.access.Collections, name))
 }
 
+// collectionWriteOptions records the creator and applies creator-only writes.
+func (a siteAuthorization) collectionWriteOptions(name string) (WriteOptions, error) {
+	options := WriteOptions{Creator: a.creator()}
+	switch a.collection(name).write {
+	case grantNone:
+		return WriteOptions{}, ErrForbidden
+	case grantOwn:
+		options.CreatorOnly = true
+	}
+	return options, nil
+}
+
 func (a siteAuthorization) file(key string) dataAccess {
 	return ruleAccess(a.role, a.identity, fileRule(a.access.Files, key))
 }
@@ -243,7 +258,13 @@ func (s *Server) siteScoped(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		authorization, err := s.authorizeSite(r.Context(), s.requestIdentity(r), r.PathValue("site"))
+		identity := s.requestIdentity(r)
+		if s.config.Identity != nil && identity == nil {
+			writeError(w, http.StatusUnauthorized, "authentication required")
+			return
+		}
+
+		authorization, err := s.authorizeSite(r.Context(), identity, r.PathValue("site"))
 		if err != nil {
 			writeServerError(w, err)
 			return
@@ -384,9 +405,10 @@ func withDefaultRule(rules map[string]DataRule) map[string]DataRule {
 // through this server invalidate their entry immediately; the TTL bounds how
 // long another replica's change can take to apply.
 type policyCache struct {
-	mu      sync.Mutex
-	ttl     time.Duration
-	entries map[string]cachedPolicy
+	mu         sync.Mutex
+	ttl        time.Duration
+	entries    map[string]cachedPolicy
+	generation uint64
 }
 
 // maxCachedPolicies bounds the cache, since any signed-in caller can make the
@@ -407,6 +429,7 @@ func (c *policyCache) get(ctx context.Context, store AccessStore, site string) (
 	now := time.Now()
 	c.mu.Lock()
 	entry, ok := c.entries[site]
+	generation := c.generation
 	c.mu.Unlock()
 	if ok && now.Before(entry.expires) {
 		return entry.access, entry.exists, nil
@@ -425,16 +448,20 @@ func (c *policyCache) get(ctx context.Context, store AccessStore, site string) (
 	}
 
 	c.mu.Lock()
-	if len(c.entries) >= maxCachedPolicies {
-		c.entries = make(map[string]cachedPolicy)
+	// An invalidation during the store read must not be undone by this fill.
+	if c.generation == generation {
+		if len(c.entries) >= maxCachedPolicies {
+			c.entries = make(map[string]cachedPolicy)
+		}
+		c.entries[site] = cachedPolicy{access: access, exists: exists, expires: now.Add(c.ttl)}
 	}
-	c.entries[site] = cachedPolicy{access: access, exists: exists, expires: now.Add(c.ttl)}
 	c.mu.Unlock()
 	return access, exists, nil
 }
 
 func (c *policyCache) invalidate(site string) {
 	c.mu.Lock()
+	c.generation++
 	delete(c.entries, site)
 	c.mu.Unlock()
 }

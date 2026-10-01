@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -109,7 +110,7 @@ func TestSiteAccessLifecycle(t *testing.T) {
 	requestAs(t, server, admin, "GET", "/api/sites/demo/db/tasks/a", nil, 200)
 	requestAs(t, server, outsider, "GET", "/api/sites/demo/db/tasks/a", nil, 403)
 	requestAs(t, server, outsider, "PUT", "/api/sites/demo/files/report.txt", []byte("data"), 403)
-	requestAs(t, server, nil, "GET", "/api/sites/demo/db/tasks/a", nil, 403)
+	requestAs(t, server, nil, "GET", "/api/sites/demo/db/tasks/a", nil, 401)
 
 	// Only owners and admins manage the policy; a takeover attempt fails.
 	requestAs(t, server, member, "GET", "/api/hex/sites/demo/access", nil, 403)
@@ -481,4 +482,148 @@ func TestPublisherGroupsLimitNewSites(t *testing.T) {
 	})
 	requestAs(t, server, principalHeaders("someone"), "PUT", "/api/hex/sites/demo/access", []byte(`{}`), 403)
 	requestAs(t, server, principalHeaders("publisher", "publishers"), "PUT", "/api/hex/sites/demo/access", []byte(`{}`), 200)
+}
+
+type unresolvedSiteIdentity struct {
+	err error
+}
+
+func (s unresolvedSiteIdentity) ResolveIdentity(*http.Request) (*hex.Identity, error) {
+	return nil, s.err
+}
+
+func TestSiteEndpointsRejectUnresolvedIdentity(t *testing.T) {
+	_, store := setup(t)
+	if err := store.Put(context.Background(), "public/sites/demo/index.html", strings.NewReader("app")); err != nil {
+		t.Fatal(err)
+	}
+	registry := new(hex.ActionRegistry)
+	if err := registry.Register("demo", taskAction()); err != nil {
+		t.Fatal(err)
+	}
+	for _, resolver := range []struct {
+		name string
+		err  error
+	}{
+		{name: "failure", err: errors.New("resolver unavailable")},
+		{name: "anonymous"},
+	} {
+		for _, policy := range []string{"disabled", "missing", "open", "restricted"} {
+			t.Run(resolver.name+"/"+policy, func(t *testing.T) {
+				var access hex.AccessStore
+				if policy != "disabled" {
+					access = memory.NewAccessStore()
+				}
+				if policy == "open" || policy == "restricted" {
+					value := hex.SiteAccess{}
+					if policy == "restricted" {
+						value.Viewers = []string{"user:alice"}
+					}
+					if err := access.PutSiteAccess(context.Background(), "demo", value); err != nil {
+						t.Fatal(err)
+					}
+				}
+				server := hex.New(hex.Config{
+					Files: store, Sites: store, Database: memory.NewDatabase(), Realtime: memory.NewRealtime(),
+					Actions: registry, Access: access, Identity: unresolvedSiteIdentity{err: resolver.err},
+				})
+				for _, endpoint := range []struct {
+					method string
+					path   string
+					body   string
+				}{
+					{"GET", "/actions", ""},
+					{"GET", "/actions/create-task", ""},
+					{"POST", "/actions/create-task", `{"title":"Task"}`},
+					{"GET", "/db/tasks", ""},
+					{"POST", "/db/tasks", `{}`},
+					{"GET", "/db/tasks/a", ""},
+					{"PUT", "/db/tasks/a", `{}`},
+					{"DELETE", "/db/tasks/a", ""},
+					{"GET", "/files", ""},
+					{"GET", "/files/a.txt", ""},
+					{"PUT", "/files/a.txt", "data"},
+					{"DELETE", "/files/a.txt", ""},
+					{"GET", "/realtime/room", ""},
+				} {
+					response := request(t, server, endpoint.method, "/api/sites/demo"+endpoint.path, []byte(endpoint.body), 401)
+					if !strings.Contains(response.Body.String(), "authentication required") {
+						t.Fatal(response.Body.String())
+					}
+				}
+				requestAs(t, server, http.Header{"X-Hex-Site": {"demo"}}, "GET", "/api/hex/authz", nil, 403)
+				request(t, server, "GET", "/api/hex/authz", nil, 204)
+				if body := request(t, server, "GET", "/api/sites", nil, 200).Body.String(); body != "[]\n" {
+					t.Fatalf("unresolved caller discovered site: %s", body)
+				}
+				permissions := request(t, server, "GET", "/api/hex/sites/demo/permissions", nil, 200).Body.String()
+				if !strings.Contains(permissions, `"role":"none"`) {
+					t.Fatalf("unresolved caller granted role: %s", permissions)
+				}
+			})
+		}
+	}
+}
+
+func TestSiteEndpointsStayOpenWithoutIdentityResolver(t *testing.T) {
+	_, store := setup(t)
+	if err := store.Put(context.Background(), "public/sites/demo/index.html", strings.NewReader("app")); err != nil {
+		t.Fatal(err)
+	}
+	registry := new(hex.ActionRegistry)
+	if err := registry.Register("demo", taskAction()); err != nil {
+		t.Fatal(err)
+	}
+	for _, policy := range []string{"disabled", "missing", "open"} {
+		t.Run(policy, func(t *testing.T) {
+			var access hex.AccessStore
+			if policy != "disabled" {
+				access = memory.NewAccessStore()
+			}
+			if policy == "open" {
+				if err := access.PutSiteAccess(context.Background(), "demo", hex.SiteAccess{}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			server := hex.New(hex.Config{
+				Files: store, Sites: store, Database: memory.NewDatabase(), Realtime: memory.NewRealtime(),
+				Actions: registry, Access: access,
+			})
+			request(t, server, "GET", "/api/sites/demo/actions", nil, 200)
+			request(t, server, "GET", "/api/sites/demo/actions/create-task", nil, 200)
+			request(t, server, "POST", "/api/sites/demo/actions/create-task", []byte(`{"title":"Task"}`), 200)
+			created := request(t, server, "POST", "/api/sites/demo/db/tasks", []byte(`{}`), 201)
+			var document hex.Document
+			if err := json.Unmarshal(created.Body.Bytes(), &document); err != nil {
+				t.Fatal(err)
+			}
+			if document.CreatedBy != "" {
+				t.Fatalf("anonymous creator: %q", document.CreatedBy)
+			}
+			request(t, server, "PUT", "/api/sites/demo/db/tasks/a", []byte(`{}`), 200)
+			request(t, server, "GET", "/api/sites/demo/db/tasks/a", nil, 200)
+			request(t, server, "GET", "/api/sites/demo/db/tasks", nil, 200)
+			request(t, server, "DELETE", "/api/sites/demo/db/tasks/a", nil, 204)
+			request(t, server, "PUT", "/api/sites/demo/files/a.txt", []byte("data"), 200)
+			request(t, server, "GET", "/api/sites/demo/files/a.txt", nil, 200)
+			request(t, server, "GET", "/api/sites/demo/files", nil, 200)
+			request(t, server, "DELETE", "/api/sites/demo/files/a.txt", nil, 204)
+			requestAs(t, server, http.Header{"X-Hex-Site": {"demo"}}, "GET", "/api/hex/authz", nil, 204)
+			if body := request(t, server, "GET", "/api/sites", nil, 200).Body.String(); !strings.Contains(body, `"name":"demo"`) {
+				t.Fatalf("open site missing from discovery: %s", body)
+			}
+			httpServer := httptest.NewServer(server)
+			defer httpServer.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			url := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/api/sites/demo/realtime/room"
+			connection, _, err := websocket.Dial(ctx, url, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := connection.CloseNow(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
 }

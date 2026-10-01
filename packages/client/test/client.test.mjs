@@ -31,9 +31,10 @@ test("identity resolves the caller and degrades to null when unavailable", async
   const responses = new Map([
     [
       200,
-      new Response('{"provider":"aad","id":"user-id","groups":["sales"]}', {
-        headers: { "Content-Type": "application/json" },
-      }),
+      new Response(
+        '{"provider":"aad","id":"user-id","email":"alex@example.com","groups":["sales"]}',
+        { headers: { "Content-Type": "application/json" } },
+      ),
     ],
     [404, new Response('{"error":"not found"}', { status: 404 })],
     [401, new Response('{"error":"not authenticated"}', { status: 401 })],
@@ -51,6 +52,7 @@ test("identity resolves the caller and degrades to null when unavailable", async
   assert.deepEqual(await hex.identity(), {
     provider: "aad",
     id: "user-id",
+    email: "alex@example.com",
     groups: ["sales"],
   });
   status = 404;

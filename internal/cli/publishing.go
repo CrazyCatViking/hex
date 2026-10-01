@@ -44,8 +44,7 @@ type publishPlan struct {
 }
 
 type publishResult struct {
-	URL     string `json:"url"`
-	Deleted int    `json:"deleted"`
+	URL string `json:"url"`
 }
 
 const uploadConcurrency = 4
@@ -129,9 +128,9 @@ func collectFiles(directory string, skip func(path string, entry fs.DirEntry) bo
 
 // manifest describes every source file by size and MD5, which lets the
 // platform skip files that are already published.
-func manifest(source sourceDirectory) ([]hex.SiteFile, error) {
-	files := make([]hex.SiteFile, 0, len(source.Files))
-	for _, entry := range source.Files {
+func manifest(sources []sourceFile) ([]hex.SiteFile, error) {
+	files := make([]hex.SiteFile, 0, len(sources))
+	for _, entry := range sources {
 		size, digest, err := fileDigest(entry.Path)
 		if err != nil {
 			return nil, err
@@ -179,7 +178,7 @@ func (a *App) publish(ctx context.Context, project Project, directory, name stri
 // files directly to them (index.html last), and completes the publication.
 func (a *App) publishFiles(ctx context.Context, project Project, name string, sources []sourceFile, metadata *hex.SiteMetadata, access json.RawMessage) (publishResult, error) {
 	var result publishResult
-	files, err := manifest(sourceDirectory{Files: sources})
+	files, err := manifest(sources)
 	if err != nil {
 		return result, err
 	}

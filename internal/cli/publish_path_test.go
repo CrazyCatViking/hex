@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -12,6 +14,47 @@ import (
 	hex "github.com/crazycatviking/hex/server"
 	"github.com/crazycatviking/hex/server/providers/memory"
 )
+
+func TestPublishRejectsExplicitFileSymlinks(t *testing.T) {
+	directory := t.TempDir()
+	requests := 0
+	platform := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		t.Errorf("symlink publication reached the API: %s %s", r.Method, r.URL)
+	}))
+	defer platform.Close()
+	saveReadProfile(t, directory, platform.URL)
+	writePublishFixture(t, directory, map[string]string{
+		"notes.txt": "ordinary text", ".env": "SECRET=private", "private.key": "private key",
+	})
+	for i, target := range []string{"notes.txt", ".env", "private.key"} {
+		t.Run(target, func(t *testing.T) {
+			link := fmt.Sprintf("share-%d.txt", i)
+			path := filepath.Join(directory, link)
+			if err := os.Symlink(filepath.Join(directory, target), path); err != nil {
+				t.Fatal(err)
+			}
+			temporary := t.TempDir()
+			if _, err := shareFiles(path, "Title", temporary); err == nil || !strings.Contains(err.Error(), "symlinks") {
+				t.Fatalf("symlink preview accepted: %v", err)
+			}
+			entries, err := os.ReadDir(temporary)
+			if err != nil || len(entries) != 0 {
+				t.Fatalf("symlink created a preview: %v %v", entries, err)
+			}
+			app, output := testApp(t, directory)
+			if err := app.Execute(context.Background(), []string{"publish", link, "--yes"}, "test"); err == nil || !strings.Contains(err.Error(), "symlinks") {
+				t.Fatalf("symlink publication accepted: %v", err)
+			}
+			if output.Len() != 0 {
+				t.Fatalf("symlink generated publication output: %s", output)
+			}
+		})
+	}
+	if requests != 0 {
+		t.Fatal("symlink created a network artifact")
+	}
+}
 
 var artifactURL = regexp.MustCompile(`http://([a-z][a-z0-9]{9})\.localhost:8080/`)
 

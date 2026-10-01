@@ -41,6 +41,10 @@ func validKey(key string) bool {
 }
 
 func (s *Store) Put(ctx context.Context, key string, source io.Reader) error {
+	return s.put(ctx, key, source, -1)
+}
+
+func (s *Store) put(ctx context.Context, key string, source io.Reader, expectedSize int64) error {
 	if !validKey(key) {
 		return fs.ErrInvalid
 	}
@@ -65,7 +69,22 @@ func (s *Store) Put(ctx context.Context, key string, source io.Reader) error {
 	}
 	defer s.removeTemporaryFile(temporaryPath)
 
-	_, copyError := io.Copy(file, source)
+	reader := source
+	if expectedSize >= 0 {
+		reader = io.LimitReader(source, expectedSize)
+	}
+	written, copyError := io.Copy(file, reader)
+	if copyError == nil && expectedSize >= 0 {
+		if written != expectedSize {
+			copyError = fmt.Errorf("received %d bytes, expected %d", written, expectedSize)
+		} else {
+			var extra int64
+			extra, copyError = io.Copy(io.Discard, io.LimitReader(source, 1))
+			if extra != 0 {
+				copyError = errors.Join(copyError, fmt.Errorf("received more than the expected %d bytes", expectedSize))
+			}
+		}
+	}
 	closeError := file.Close()
 	if err := errors.Join(copyError, closeError); err != nil {
 		return fmt.Errorf("write object %q: %w", key, err)

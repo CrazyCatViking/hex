@@ -32,6 +32,8 @@ Data and file listings return JSON. Documents retain the existing `{id, data, cr
 
 These are read-only helpers over existing APIs and work on platforms without action support. The API applies existing collection rules, creator-only reads and file-prefix rules. Changes through this CLI interface go through app actions.
 
+JSON CLI responses are limited to 16 MiB. If a document page exceeds that budget, reduce `--limit` and paginate with `--after`. Raw page and file downloads are streamed and use a five-minute transfer timeout.
+
 ## Discover and execute actions
 
 ```sh

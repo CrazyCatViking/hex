@@ -37,14 +37,7 @@ func (c ActionContext) CollectionWriteOptions(collection string) (WriteOptions, 
 	if !namePattern.MatchString(collection) {
 		return WriteOptions{}, errors.New("invalid collection")
 	}
-	options := WriteOptions{Creator: c.authorization.creator()}
-	switch c.authorization.collection(collection).write {
-	case grantNone:
-		return WriteOptions{}, ErrForbidden
-	case grantOwn:
-		options.CreatorOnly = true
-	}
-	return options, nil
+	return c.authorization.collectionWriteOptions(collection)
 }
 
 func (c ActionContext) CanReadDocument(collection string, document Document) bool {
@@ -150,16 +143,6 @@ func (r *ActionRegistry) actions(site string) []*registeredAction {
 
 func actionAllowed(action *registeredAction, authorization siteAuthorization) bool {
 	return audienceGrant(authorization.role, authorization.identity, action.audience, LevelEditors) == grantAll
-}
-
-func (s *Server) actionScoped(next http.HandlerFunc) http.HandlerFunc {
-	return s.siteScoped(func(w http.ResponseWriter, r *http.Request) {
-		if s.config.Identity != nil && requestAuthorization(r).identity == nil {
-			writeError(w, http.StatusUnauthorized, "authentication required")
-			return
-		}
-		next(w, r)
-	})
 }
 
 func (s *Server) listActions(w http.ResponseWriter, r *http.Request) {

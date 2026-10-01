@@ -126,6 +126,118 @@ func TestActionAccessAndDataRules(t *testing.T) {
 	}
 }
 
+func TestActionProviderWritesAgreeWithCRUD(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		level string
+		owner bool
+		allow bool
+		own   bool
+	}{
+		{name: "denied", level: hex.LevelOwners},
+		{name: "unrestricted", level: hex.LevelViewers, allow: true},
+		{name: "creator-only", level: hex.LevelCreator, allow: true, own: true},
+		{name: "owner", level: hex.LevelCreator, owner: true, allow: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			database := memory.NewDatabase()
+			access := memory.NewAccessStore()
+			policy := hex.SiteAccess{
+				Owners: []string{"user:owner"}, Editors: []string{"user:editor"},
+				Collections: map[string]hex.DataRule{"tasks": {Write: hex.Audience{Level: test.level}}},
+			}
+			if test.owner {
+				policy.Owners = []string{"user:alice"}
+			}
+			if err := access.PutSiteAccess(ctx, "demo", policy); err != nil {
+				t.Fatal(err)
+			}
+			registry := new(hex.ActionRegistry)
+			action := hex.Action{
+				Definition: hex.ActionDefinition{
+					Name: "write-task", Description: "Write or delete a task.",
+					InputSchema: json.RawMessage(`{"type":"object"}`), OutputSchema: json.RawMessage(`{"type":"object"}`),
+				},
+				Audience: hex.Audience{Level: hex.LevelViewers},
+				Handler: func(ctx context.Context, caller hex.ActionContext, input json.RawMessage) (any, error) {
+					var operation struct{ ID, Method string }
+					if err := json.Unmarshal(input, &operation); err != nil {
+						return nil, err
+					}
+					options, err := caller.CollectionWriteOptions("tasks")
+					if err != nil {
+						return nil, err
+					}
+					if operation.Method == "DELETE" {
+						return map[string]any{}, database.Delete(ctx, caller.Site, "tasks", operation.ID, options)
+					}
+					return database.Put(ctx, caller.Site, "tasks", operation.ID, json.RawMessage(`{"updated":true}`), options)
+				},
+			}
+			if err := registry.Register("demo", action); err != nil {
+				t.Fatal(err)
+			}
+			server := hex.New(hex.Config{
+				Actions: registry, Database: database, Access: access,
+				Identity: hex.StaticIdentity{Identity: hex.Identity{ID: "alice"}},
+			})
+			for _, transport := range []string{"action", "crud"} {
+				write := func(method, id string, status int) *httptest.ResponseRecorder {
+					t.Helper()
+					if transport == "action" {
+						data, err := json.Marshal(map[string]string{"id": id, "method": method})
+						if err != nil {
+							t.Fatal(err)
+						}
+						return request(t, server, "POST", "/api/sites/demo/actions/write-task", data, status)
+					}
+					if method == "DELETE" && status == 200 {
+						status = 204
+					}
+					return request(t, server, method, "/api/sites/demo/db/tasks/"+id, []byte(`{"updated":true}`), status)
+				}
+				status := 403
+				if test.allow {
+					status = 200
+				}
+				id := transport + "-new"
+				write("PUT", id, status)
+				if test.allow {
+					document, err := database.Get(ctx, "demo", "tasks", id)
+					if err != nil || document.CreatedBy != "alice" {
+						t.Fatalf("%s creator: %+v, %v", transport, document, err)
+					}
+					write("PUT", id, 200)
+					write("DELETE", id, 200)
+				} else if _, err := database.Get(ctx, "demo", "tasks", id); !errors.Is(err, hex.ErrNotFound) {
+					t.Fatalf("%s denied write persisted: %v", transport, err)
+				}
+				id = transport + "-other"
+				if _, err := database.Put(ctx, "demo", "tasks", id, json.RawMessage(`{"original":true}`), hex.WriteOptions{Creator: "bob"}); err != nil {
+					t.Fatal(err)
+				}
+				if test.own {
+					status = 403
+				}
+				write("PUT", id, status)
+				document, err := database.Get(ctx, "demo", "tasks", id)
+				if err != nil || document.CreatedBy != "bob" {
+					t.Fatalf("%s changed creator: %+v, %v", transport, document, err)
+				}
+				if status == 403 && string(document.Data) != `{"original":true}` {
+					t.Fatalf("%s denied update persisted: %s", transport, document.Data)
+				}
+				write("DELETE", id, status)
+				_, err = database.Get(ctx, "demo", "tasks", id)
+				if (status == 403 && err != nil) || (status == 200 && !errors.Is(err, hex.ErrNotFound)) {
+					t.Fatalf("%s delete result: %v", transport, err)
+				}
+			}
+		})
+	}
+}
+
 func TestActionHandlerFailures(t *testing.T) {
 	for _, test := range []struct {
 		name   string

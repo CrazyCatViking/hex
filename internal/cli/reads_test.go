@@ -12,10 +12,61 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	hex "github.com/crazycatviking/hex/server"
 	"github.com/crazycatviking/hex/server/providers/memory"
 )
+
+func TestRawGetStreamingTimeoutAndCancellation(t *testing.T) {
+	t.Setenv("HEX_TOKEN", "")
+	platform := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		if r.URL.Path == "/cancel" {
+			<-r.Context().Done()
+			return
+		}
+		timer := time.NewTimer(10 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			_, _ = io.WriteString(w, "slow body")
+		case <-r.Context().Done():
+		}
+	}))
+	defer platform.Close()
+	app, _ := testApp(t, t.TempDir())
+	app.HTTP = platform.Client()
+	app.HTTP.Timeout = time.Millisecond
+	original := app.HTTP
+	transport := app.HTTP.Transport
+	project := Project{Server: platform.URL}
+	response, err := app.rawGet(context.Background(), project, platform.URL+"/slow")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(response.Body)
+	response.Body.Close()
+	if err != nil || string(data) != "slow body" {
+		t.Fatalf("streaming body retained short API timeout: %q %v", data, err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	response, err = app.rawGet(ctx, project, platform.URL+"/cancel")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	_, err = io.ReadAll(response.Body)
+	response.Body.Close()
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("download ignored cancellation: %v", err)
+	}
+	if app.HTTP != original || app.HTTP.Timeout != time.Millisecond || app.HTTP.Transport != transport || app.HTTP.CheckRedirect != nil {
+		t.Fatal("download mutated the shared HTTP client")
+	}
+}
 
 func saveReadProfile(t *testing.T, directory, server string) {
 	t.Helper()

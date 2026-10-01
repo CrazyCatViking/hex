@@ -75,22 +75,15 @@ func (s *Store) ReadSiteFile(ctx context.Context, site, name string) (io.ReadClo
 }
 
 func (s *Store) WriteSiteFile(ctx context.Context, site, name string, size int64, source io.Reader) error {
+	if size < 0 {
+		return fmt.Errorf("site file %s/%s: negative size %d: %w", site, name, size, fs.ErrInvalid)
+	}
 	key, err := sitePath(site, name)
 	if err != nil {
 		return err
 	}
 
-	counter := &countingReader{reader: source}
-	if err := s.Put(ctx, key, counter); err != nil {
-		return err
-	}
-	if counter.count != size {
-		return errors.Join(
-			fmt.Errorf("site file %s/%s: received %d bytes, expected %d", site, name, counter.count, size),
-			s.Delete(ctx, key),
-		)
-	}
-	return nil
+	return s.put(ctx, key, source, size)
 }
 
 func (s *Store) DeleteSiteFile(ctx context.Context, site, name string) error {
@@ -113,15 +106,4 @@ func (s *Store) DeleteSite(ctx context.Context, site string) error {
 		return fmt.Errorf("delete site %q: %w", site, err)
 	}
 	return nil
-}
-
-type countingReader struct {
-	reader io.Reader
-	count  int64
-}
-
-func (c *countingReader) Read(buffer []byte) (int, error) {
-	read, err := c.reader.Read(buffer)
-	c.count += int64(read)
-	return read, err
 }

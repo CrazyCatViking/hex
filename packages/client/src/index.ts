@@ -16,6 +16,7 @@ export interface Identity {
   provider?: string;
   id: string;
   name?: string;
+  email?: string;
   groups?: string[];
   roles?: string[];
 }

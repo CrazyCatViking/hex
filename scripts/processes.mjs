@@ -1,38 +1,6 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { setTimeout as delay } from "node:timers/promises";
-import { createServer } from "node:net";
-
-export async function checkPortsAvailable(ports) {
-  const listeners = [];
-  try {
-    for (const port of ports) {
-      const listener = createServer();
-      try {
-        listener.listen(port, "127.0.0.1");
-        await once(listener, "listening");
-        listeners.push(listener);
-      } catch (cause) {
-        throw new Error(`Development port ${port} is unavailable`, { cause });
-      }
-    }
-  } finally {
-    await Promise.all(
-      listeners.map(
-        (listener) =>
-          new Promise((resolve, reject) => {
-            listener.close((error) => {
-              if (error) {
-                reject(error);
-                return;
-              }
-              resolve();
-            });
-          }),
-      ),
-    );
-  }
-}
 
 export async function startProcess(command, args, options) {
   const child = spawn(command, args, options);
@@ -84,42 +52,5 @@ export async function stopProcess(child, timeoutMilliseconds = 5000) {
     await exited;
   } finally {
     clearTimeout(timeout);
-  }
-}
-
-export async function waitForStop(children, signal) {
-  const listeners = [];
-  try {
-    await new Promise((resolve, reject) => {
-      if (signal.aborted) {
-        resolve();
-        return;
-      }
-      const stop = () => resolve();
-      signal.addEventListener("abort", stop, { once: true });
-      listeners.push(() => signal.removeEventListener("abort", stop));
-
-      for (const [name, child] of Object.entries(children)) {
-        const exited = (code, reason) =>
-          reject(new Error(`${name} exited unexpectedly (${reason ?? code})`));
-        const failed = (error) =>
-          reject(
-            new Error(`${name} failed: ${error.message}`, { cause: error }),
-          );
-        child.once("exit", exited);
-        child.once("error", failed);
-        listeners.push(() => {
-          child.removeListener("exit", exited);
-          child.removeListener("error", failed);
-        });
-        if (child.exitCode !== null || child.signalCode !== null) {
-          exited(child.exitCode, child.signalCode);
-        }
-      }
-    });
-  } finally {
-    for (const remove of listeners) {
-      remove();
-    }
   }
 }

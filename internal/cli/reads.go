@@ -91,6 +91,9 @@ func (a *App) dataReadCommand(options *siteCommandOptions, get bool) *cobra.Comm
 			}
 			data, err := a.apiRequest(cmd.Context(), project, path)
 			if err != nil {
+				if !get && errors.Is(err, errAPIResponseTooLarge) {
+					return fmt.Errorf("%w; reduce --limit and paginate with --after <last-document-id>", err)
+				}
 				return err
 			}
 			return a.printJSON(data)

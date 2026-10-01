@@ -19,10 +19,7 @@ import (
 // site ("artifact") that the creator shares by adding viewers.
 
 type artifact struct {
-	Name    string   `json:"name"`
-	URL     string   `json:"url"`
-	Title   string   `json:"title,omitempty"`
-	Viewers []string `json:"viewers"`
+	Name string `json:"name"`
 }
 
 const maxInlineText = 1 << 20
@@ -159,9 +156,12 @@ func (a *App) shareAccess(ctx context.Context, project Project, with []string) (
 // shareFiles lists what to publish for a file or folder, adding a generated
 // index.html (written to temporary) when the target has none.
 func shareFiles(target, title, temporary string) ([]sourceFile, error) {
-	info, err := os.Stat(target)
+	info, err := os.Lstat(target)
 	if err != nil {
 		return nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("symlinks cannot be published: %s", target)
 	}
 
 	if info.IsDir() {

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -122,6 +123,8 @@ func (a *App) rawGet(ctx context.Context, project Project, address string) (*htt
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
 	client := *a.HTTP
+	// Streamed downloads can take longer than JSON API requests.
+	client.Timeout = 5 * time.Minute
 	// Browsers resolve *.localhost themselves; Go's system resolver may not.
 	// Keep the site Host/TLS name while connecting directly to loopback.
 	if strings.HasSuffix(strings.ToLower(request.URL.Hostname()), ".localhost") {

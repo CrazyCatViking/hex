@@ -54,6 +54,7 @@ func (s *Server) rememberPerson(ctx context.Context, identity *Identity) {
 	person := *personOf(identity)
 
 	now := time.Now()
+	attempted := seenPerson{person: person, at: now}
 	s.seen.mu.Lock()
 	previous, ok := s.seen.entries[person.ID]
 	fresh := ok && previous.person == person && now.Sub(previous.at) < rememberInterval
@@ -61,7 +62,7 @@ func (s *Server) rememberPerson(ctx context.Context, identity *Identity) {
 		if len(s.seen.entries) >= maxCachedPolicies {
 			s.seen.entries = make(map[string]seenPerson)
 		}
-		s.seen.entries[person.ID] = seenPerson{person: person, at: now}
+		s.seen.entries[person.ID] = attempted
 	}
 	s.seen.mu.Unlock()
 	if fresh {
@@ -69,6 +70,11 @@ func (s *Server) rememberPerson(ctx context.Context, identity *Identity) {
 	}
 
 	if err := s.config.People.RememberPerson(ctx, person); err != nil {
+		s.seen.mu.Lock()
+		if s.seen.entries[person.ID] == attempted {
+			delete(s.seen.entries, person.ID)
+		}
+		s.seen.mu.Unlock()
 		slog.Error("remember person", "id", person.ID, "error", err)
 	}
 }

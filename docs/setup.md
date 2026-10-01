@@ -101,6 +101,8 @@ By default, initialization creates only the site name and commands use the curre
 
 Publishing, unpublishing, `hex sites`, `whoami` and `access` call the protected API. They authenticate with `HEX_TOKEN` or the profile's configured sign-in flow. `hex capabilities` uses cached capabilities when a profile supplies them; `--refresh` explicitly requests the current API response. Setup deliberately does not transfer browser sessions to the CLI.
 
+When a project pins a platform profile, explicit `server` and `siteBaseURL` settings in hex.json must match that profile's normalized origins. Configure a separate profile for different destinations or select it with `--platform`; an explicit platform override replaces the project's connection settings. API requests require HTTPS, except on loopback. `hex capabilities --server <origin>` requests that server's capabilities rather than returning another platform's cached description.
+
 ## Configure a Hex server
 
 An operator explicitly supplies connection settings:

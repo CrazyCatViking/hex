@@ -53,7 +53,7 @@ mux.Handle("/", hex.New(environment.Config))
 
 The imports are `github.com/crazycatviking/hex/server` (aliased to `hex`) and `github.com/crazycatviking/hex/server/dev`. They are packages in the same root Go module, not separate repositories. Listen on `environment.Address`. Calling `dev.Open` selects local defaults; it does not inspect a development-mode flag or detect how the application was launched. Environment variables can override its defaults but are not required. The address defaults to `127.0.0.1:8081`; choosing a different listener is the application's responsibility.
 
-Copy [the complete custom-server example](../examples/custom-server/main.go) into your own repository, then run `go mod tidy`. It defines `/api/platform` to demonstrate that the executable is yours. This example explicitly chooses local defaults. For deployment, your application chooses hosted providers instead; Hex does not switch configurations based on a mode flag.
+Copy `main.go`, `actions.go`, and `hex.dev.json` from [the complete custom-server example](../examples/custom-server/README.md) into your own repository, then run `go mod tidy`. It defines `/api/platform` and an app action to demonstrate that the executable is yours. This example explicitly chooses local defaults. For deployment, your application chooses hosted providers instead; Hex does not switch configurations based on a mode flag.
 
 You may construct local providers yourself instead of importing `server/dev`; consume the environment contract below. The CLI only expects the resulting HTTP handler to expose `/api/hex/capabilities` for readiness.
 

@@ -141,13 +141,10 @@ func (s *Server) deleteDocument(w http.ResponseWriter, r *http.Request) {
 // rule additionally limits changes to the caller's own documents.
 func documentWriteOptions(w http.ResponseWriter, r *http.Request) (WriteOptions, bool) {
 	authorization := requestAuthorization(r)
-	options := WriteOptions{Creator: authorization.creator()}
-	switch authorization.collection(r.PathValue("collection")).write {
-	case grantNone:
+	options, err := authorization.collectionWriteOptions(r.PathValue("collection"))
+	if err != nil {
 		writeError(w, http.StatusForbidden, "writing this collection is restricted")
 		return WriteOptions{}, false
-	case grantOwn:
-		options.CreatorOnly = true
 	}
 	return options, true
 }
