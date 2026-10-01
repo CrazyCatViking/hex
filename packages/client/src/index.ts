@@ -8,6 +8,7 @@ export interface Capabilities {
   accessControl?: boolean;
   publishing?: boolean;
   artifacts?: boolean;
+  actions?: boolean;
   maxUploadBytes: number;
 }
 

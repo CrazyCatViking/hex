@@ -15,6 +15,28 @@ If a user needs to connect to a platform, run `hex setup <platform-url> --json`.
 
 Use `hex init <app-name>` to create `hex.json` and this skill, or `hex init` in an existing app. It does not scaffold an app or install dependencies. By default hex.json contains only `name`; commands resolve the current default platform profile. Use `hex init --platform <profile>` to pin a destination, or `hex publish --platform <profile>` to override it for a command. Local platforms need no sign-in. `hex update` installs the latest verified CLI; `hex skills` refreshes this skill afterward.
 
+## Using deployed apps
+
+Use the existing CLI sign-in to read protected apps and call their exposed actions. All commands below accept `--platform <profile>`; otherwise the normal project/default platform applies. Start with `hex sites` and, when useful, `hex access check <site>`.
+
+```sh
+hex fetch --site my-app --path /
+hex fetch https://my-app.hex.company.example/help/
+hex data list --site my-app --collection tasks --limit 100
+hex data get --site my-app --collection tasks --id task-123
+hex files list --site my-app --prefix exports/
+hex files get --site my-app --key exports/latest.csv --output latest.csv
+hex actions list --site my-app
+hex actions describe --site my-app create-task
+hex actions run --site my-app create-task --input @task.json
+```
+
+`fetch` returns the original HTML/text/JSON/bytes and does not run JavaScript. It only accepts the selected platform's configured origins/direct site subdomains and follows same-origin redirects. `--output` saves the response to a file. Data and file listings and action results return JSON; document lists paginate with `--after <last-id>` until empty. Data/file commands are read-only.
+
+Before changing data, discover an available action and read its description and input/output schemas. Save the intended JSON input to a file and pass `--input @<path>`. The CLI fetches the current contract and validates input before sending; the backend also checks permissions and the contract. Do not infer undeclared action names or execution URLs. Extra fields are rejected when the schema sets `additionalProperties: false`. Do not automatically retry a mutating action after an ambiguous failure; check the resulting state first.
+
+Action handlers are registered by the consuming Go backend in `hex.Config.Actions`, not by publishing a static manifest. They run as the existing user, default to the site's editors, and use existing site/data permissions. No separate agent sign-in or scopes are needed. Ask the platform developer to expose an action if an app does not offer the operation needed.
+
 ## Building an app
 
 Read `hex.json` for the site name, source directory, and selected platform profile or explicit connection settings. `hex capabilities` reads cached profile capabilities when available; `--refresh` requests them from the API. Discovery is never a prerequisite for publishing. Read the existing app before editing it.
@@ -120,4 +142,4 @@ Set `"discoverable": false` in hex.json for an app that should not appear in the
 
 To share a single report, export or build without creating an app, use `hex publish <file or folder without hex.json> -n "<title>"`: it prints a private link only the user can open, `--with user:<email>` or `--with group:<object id>` shares it, and `--update <site>` replaces its content at the same link. Ask the user who should see it before adding `--with`. `hex sites --mine` lists the user's sites. Publishing refuses node_modules, .git and secret-looking files such as .env or *.pem, and asks before more than 100 files or 20 MB; pass `--yes` only after the user agrees.
 
-All API commands (`publish`, `delete`, `sites`, `capabilities --refresh`, `whoami`, `access`) use the saved sign-in for the profile's `resource`, or an operator-supplied `HEX_TOKEN`. Never store tokens in app files or hex.json. Hex does not implement custom integrations, AI calls or code generation yet.
+All API commands, including `fetch`, `data`, `files` and `actions`, use the saved platform sign-in or an operator-supplied `HEX_TOKEN`. Never store tokens in app files or hex.json. Hex does not implement AI calls or code generation yet.
