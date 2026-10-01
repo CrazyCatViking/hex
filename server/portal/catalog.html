@@ -1,46 +1,68 @@
 {{define "catalog"}}
 <div id="catalog">
-  <section class="statistics" aria-label="Discoverable site statistics">
+  <dl class="stats" aria-label="Catalogue statistics">
     <div>
-      <strong id="site-count">{{.Statistics.Sites}}</strong
-      ><span>Published apps</span>
+      <dt>Apps</dt>
+      <dd id="site-count">{{.Statistics.Sites}}</dd>
     </div>
     <div>
-      <strong id="author-count">{{.Statistics.Authors}}</strong
-      ><span>Contributors</span>
+      <dt>Contributors</dt>
+      <dd id="author-count">{{.Statistics.Authors}}</dd>
     </div>
     <div>
-      <strong id="recent-count">{{.Statistics.UpdatedRecently}}</strong
-      ><span>Updated in the last 30 days</span>
+      <dt>Updated this month</dt>
+      <dd id="recent-count">{{.Statistics.UpdatedRecently}}</dd>
     </div>
-  </section>
-  <p id="site-status" role="status" aria-live="polite">
-    {{len .Sites}} apps{{if .Search}} matching your search{{else}} to
-    explore{{end}}
+  </dl>
+  <p id="site-status" class="visually-hidden" role="status" aria-live="polite">
+    {{len .Sites}} apps{{if .Search}} matching your search{{end}}
   </p>
-  <div id="site-list" class="site-grid">
-    {{range .Sites}}
-    <article class="site-card">
-      <div class="card-top">
-        <span class="site-label">{{.Name}}</span
-        ><span aria-hidden="true">↗</span>
+  <div id="site-list" class="card-grid">
+    {{range .Sites}}{{template "site-card" .}}{{else}}
+    <div class="empty-state">
+      <div>
+        <strong
+          >{{if .Search}}No apps match your search.{{else}}No apps are listed
+          yet.{{end}}</strong
+        >
+        <p class="muted">
+          {{if .Search}}Try another word, or clear the search.{{else}}Build the
+          first one, or make an existing app discoverable.{{end}}
+        </p>
       </div>
-      <h3><a class="site-link" href="{{.URL}}">{{.Title}}</a></h3>
-      <p class="site-description">{{.Description}}</p>
-      <div class="card-details">
-        <span class="site-author">{{.Author}}</span>{{if .PublishedISO}}<time
-          class="site-date"
-          datetime="{{.PublishedISO}}"
-          >{{.Published}}</time
-        >{{else}}<span class="site-date">{{.Published}}</span>{{end}}
-      </div>
-    </article>
-    {{else}}
-    <p>
-      {{if .Search}}No apps match your search.{{else}}No apps are listed yet.
-      Build the first one, or make an existing app discoverable.{{end}}
-    </p>
+    </div>
     {{end}}
   </div>
 </div>
+{{end}} {{define "site-card"}}
+<article class="site-card">
+  <div class="site-card-top">
+    {{template "site-icon" .}} {{if .Access}}<span
+      class="site-card-spacer"
+    ></span
+    >{{template "access-badge" .}}{{else}}<span class="site-label"
+      >{{.Name}}</span
+    >{{end}}
+  </div>
+  <h3><a class="site-link" href="{{.URL}}">{{.Title}}</a></h3>
+  {{if .Description}}
+  <p class="site-description">{{.Description}}</p>
+  {{end}}
+  <div class="site-card-meta">
+    <span class="site-author"
+      >{{if .CreatedBy}}{{.CreatedBy}}{{else}}Your team{{end}}</span
+    >
+    {{if .Updated}}<time class="site-date" datetime="{{.UpdatedISO}}"
+      >{{.Updated}}</time
+    >{{end}}
+  </div>
+  {{if .Owned}}
+  <div class="site-card-actions">
+    <a class="link-button" href="/manage/{{.Name}}">Manage</a>
+    <button class="link-button" type="button" data-copy="{{.URL}}">
+      Copy link
+    </button>
+  </div>
+  {{end}}
+</article>
 {{end}}

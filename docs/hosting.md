@@ -59,7 +59,7 @@ Site access policies need durable storage: with `easyauth`, access control activ
 
 For a provider not supported by this executable, write a small executable that imports `server/`, constructs the providers and calls `hex.New`. The cloud SDK is then a dependency of that provider/composition, not the HTTP framework. The browser client and the publishing protocol remain unchanged.
 
-An embedded server sets `Config.Connection` to expose non-secret platform settings and OS-specific installers from its built-in main-domain landing page. Employees download a script through their signed-in browser; it installs the CLI and imports those settings automatically. All platform pages and download endpoints use the existing hosting authentication. No user tokens are issued or stored by Hex. See [landing page and installers](portal.md) and [manual setup](setup.md).
+An embedded server sets `Config.Connection` to expose non-secret platform settings and OS-specific installers from its built-in main-domain landing page. Employees download a script through their signed-in browser; it installs the CLI and imports those settings automatically. All platform pages and download endpoints use the existing hosting authentication. No user tokens are issued or stored by Hex. See [portal and installers](portal.md) and [manual setup](setup.md).
 
 ## A future GCP deployment
 

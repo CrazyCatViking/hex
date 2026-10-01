@@ -86,7 +86,7 @@ func TestPublishFilesWithGeneratedPages(t *testing.T) {
 	}
 
 	artifacts := run(t, directory, "sites", "--mine")
-	for _, expected := range []string{pdf, "Q3 report", "Artifact", "Only owners", bundle} {
+	for _, expected := range []string{pdf, "Q3 report", "File", "Only owners", bundle} {
 		if !strings.Contains(artifacts, expected) {
 			t.Fatalf("artifact list lacks %q: %s", expected, artifacts)
 		}

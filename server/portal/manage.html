@@ -1,143 +1,250 @@
-{{define "manage-head"}}
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>{{.}}</title>
-<meta
-  name="htmx-config"
-  content='{"selfRequestsOnly":true,"allowEval":false,"includeIndicatorStyles":false}'
-/>
-<link rel="stylesheet" href="/api/hex/portal.css" />
-<script src="/api/hex/htmx.min.js" defer></script>
-<script src="/api/hex/manage.js" defer></script>
-{{end}} {{define "manage-header"}}
-<header class="header">
-  <a class="brand" href="/" aria-label="Hex home"
-    ><span class="mark" aria-hidden="true">⬡</span>
-    <span>{{.Platform}}</span></a
-  >
-  <nav aria-label="Main navigation">
-    <a href="/">Explore apps</a><a href="/manage">Your sites</a> {{with
-    .Viewer}}<span class="viewer"
-      >{{if .Name}}{{.Name}}{{else}}{{.Email}}{{end}}</span
-    >{{end}}
-  </nav>
-</header>
-<p id="manage-error" class="notice error" role="alert" hidden></p>
-{{end}} {{define "manage"}}
+{{define "manage"}}
 <!doctype html>
 <html lang="en">
   <head>
-    {{template "manage-head" (printf "%s · Your sites" .Platform)}}
+    {{template "head" (printf "%s · Your sites" .Platform)}}
+    <script src="/api/hex/manage.js" defer></script>
   </head>
   <body hx-headers='{"X-Hex-Request":"1"}'>
-    {{template "manage-header" .}}
-    <main>
-      <section class="manage-intro">
-        <p class="eyebrow">Manage</p>
-        <h1 class="page-title">
-          {{if .All}}All sites{{else}}Your sites{{end}}
-        </h1>
-        <p class="intro">
-          Apps you publish and artifacts you share with
-          <code>hex publish ./file</code>. Open one to see its history, decide
-          who can use it, and look at its data.
-        </p>
-        {{if .Admin}}
-        <p>
-          {{if .All}}<a href="/manage">Show only yours</a>{{else}}<a
-            href="/manage?all=1"
-            >Show all sites (admin)</a
-          >{{end}}
-        </p>
-        {{end}}
+    {{template "header" .Chrome}}
+    <main id="main" class="page">
+      <section class="page-heading">
+        <div>
+          <p class="eyebrow">Your sites</p>
+          <h1>
+            {{if .All}}All sites{{else}}Everything you've published{{end}}
+          </h1>
+          <p class="lead">
+            Apps and files you own. Open one to decide who can see it, look at
+            its data, or take it down.
+          </p>
+        </div>
+        <a class="button button-secondary" href="/start">Publish something</a>
       </section>
+
+      <form class="toolbar" action="/manage" method="get" role="search">
+        {{if .All}}<input type="hidden" name="all" value="1" />{{end}}
+        <label class="field field-grow"
+          ><span class="field-label">Search your sites</span
+          ><input
+            id="manage-search"
+            name="q"
+            type="search"
+            value="{{.Query}}"
+            placeholder="Filter by title or name…"
+            autocomplete="off"
+            data-filter-target="#manage-list"
+        /></label>
+        <nav class="segmented" aria-label="Filter by kind">
+          <a
+            href="/manage?{{if .All}}all=1&amp;{{end}}q={{.Query}}"
+            aria-current="{{if eq .Filter ``}}page{{else}}false{{end}}"
+            >All <span>{{.Counts.All}}</span></a
+          >
+          <a
+            href="/manage?{{if .All}}all=1&amp;{{end}}kind=apps&amp;q={{.Query}}"
+            aria-current="{{if eq .Filter `apps`}}page{{else}}false{{end}}"
+            >Apps <span>{{.Counts.Apps}}</span></a
+          >
+          <a
+            href="/manage?{{if .All}}all=1&amp;{{end}}kind=files&amp;q={{.Query}}"
+            aria-current="{{if eq .Filter `files`}}page{{else}}false{{end}}"
+            >Files <span>{{.Counts.Files}}</span></a
+          >
+        </nav>
+        {{if .Viewer.Admin}}
+        <a
+          class="link-button"
+          href="{{if .All}}/manage{{else}}/manage?all=1{{end}}"
+        >
+          {{if .All}}Show only yours{{else}}Show all sites (admin){{end}}
+        </a>
+        {{end}}
+      </form>
+
       {{if .Sites}}
-      <table class="manage-table">
-        <thead>
-          <tr>
-            <th scope="col">Site</th>
-            <th scope="col">Kind</th>
-            <th scope="col">Who can open it</th>
-            <th scope="col">Last published</th>
-          </tr>
-        </thead>
-        <tbody>
-          {{range .Sites}}
-          <tr>
-            <td>
-              <a class="site-title" href="/manage/{{.Name}}">{{.Title}}</a>
-              <span class="muted">{{.Name}}</span>
-            </td>
-            <td>{{.Kind}}</td>
-            <td>{{.Audience}}</td>
-            <td>
-              {{if .Published}}{{.Published}}{{if .PublishedBy}}
-              <span class="muted">by {{.PublishedBy}}</span
-              >{{end}}{{else}}—{{end}}
-            </td>
-          </tr>
-          {{end}}
-        </tbody>
-      </table>
-      {{else}}
-      <p class="empty">
-        {{if .All}}No sites are published yet.{{else}}You don't own any sites
-        yet. Publish an app with <code>hex publish</code>, or share a file with
-        <code>hex publish ./file</code>.{{end}}
+      <ul id="manage-list" class="site-list">
+        {{range .Sites}}
+        <li
+          class="site-row"
+          data-filter-text="{{.Title}} {{.Name}} {{.Description}}"
+        >
+          {{template "site-icon" .}}
+          <div class="site-row-main">
+            <a class="site-title" href="/manage/{{.Name}}">{{.Title}}</a>
+            <span class="muted">
+              {{if eq .Kind "File"}}File{{else}}App{{end}} · {{.Name}}{{if
+              .Updated}} · updated
+              <time datetime="{{.UpdatedISO}}">{{.Updated}}</time>{{if
+              .PublishedBy}} by {{.PublishedBy}}{{end}}{{end}}
+            </span>
+          </div>
+          {{template "access-badge" .}}
+          <div class="row-actions">
+            <a class="button button-secondary button-small" href="{{.URL}}"
+              >Open</a
+            >
+            <button
+              class="button button-secondary button-small"
+              type="button"
+              data-copy="{{.URL}}"
+            >
+              Copy link
+            </button>
+            <a class="button button-small" href="/manage/{{.Name}}?tab=sharing"
+              >Share</a
+            >
+          </div>
+        </li>
+        {{end}}
+      </ul>
+      <p id="manage-list-empty" class="empty-state" hidden>
+        <strong>No sites match that search.</strong>
       </p>
+      {{else}}
+      <div class="empty-state">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 3v12M7 8l5-5 5 5" />
+          <path d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4" />
+        </svg>
+        <div>
+          <strong
+            >{{if or .Query .Filter}}Nothing matches.{{else if .All}}No sites
+            are published yet.{{else}}You don't own any sites
+            yet.{{end}}</strong
+          >
+          <p class="muted">
+            {{if or .Query .Filter}}<a href="/manage">Clear the filters</a
+            >.{{else}}Share a file with <code>hex publish ./report.pdf</code>,
+            or publish an app. <a href="/start">See how</a>.{{end}}
+          </p>
+        </div>
+      </div>
       {{end}}
     </main>
+    {{template "footer" .Chrome}}
   </body>
 </html>
 {{end}} {{define "site"}}
 <!doctype html>
 <html lang="en">
   <head>
-    {{template "manage-head" (printf "%s · %s" .Platform .Site.Title)}}
+    {{template "head" (printf "%s · %s" .Platform .Site.Title)}}
+    <script src="/api/hex/manage.js" defer></script>
   </head>
   <body hx-headers='{"X-Hex-Request":"1"}'>
-    {{template "manage-header" .}}
-    <main>
+    {{template "header" .Chrome}}
+    <main id="main" class="page">
+      <nav class="breadcrumbs" aria-label="Breadcrumb">
+        <a href="/manage">Your sites</a><span aria-hidden="true">/</span
+        ><span aria-current="page">{{.Site.Title}}</span>
+      </nav>
       {{with .Site}}
-      <section class="manage-intro">
-        <p class="eyebrow"><a href="/manage">Your sites</a> · {{.Kind}}</p>
-        <h1 class="page-title">{{.Title}}</h1>
-        <p><a href="{{.URL}}">{{.URL}}</a></p>
-        <dl class="facts">
-          <div>
-            <dt>Created by</dt>
-            <dd>{{if .CreatedBy}}{{.CreatedBy}}{{else}}Unknown{{end}}</dd>
-          </div>
-          <div>
-            <dt>Last published</dt>
-            <dd>
-              {{if .Published}}{{.Published}}{{if .PublishedBy}} by
-              {{.PublishedBy}}{{end}}{{else}}Not published{{end}}
-            </dd>
-          </div>
-          <div>
-            <dt>Who can open it</dt>
-            <dd>{{.Audience}}</dd>
-          </div>
-        </dl>
+      <section class="site-header">
+        {{template "site-icon" .}}
+        <div class="site-header-main">
+          <h1>{{.Title}}</h1>
+          <p class="muted">
+            {{if eq .Kind "File"}}Shared file{{else}}App{{end}} ·
+            <a href="{{.URL}}">{{.URL}}</a>
+          </p>
+        </div>
+        <div class="row-actions">
+          {{template "access-badge" .}}
+          <button
+            class="button button-secondary"
+            type="button"
+            data-copy="{{.URL}}"
+          >
+            Copy link
+          </button>
+          <a class="button" href="{{.URL}}">Open</a>
+        </div>
       </section>
       {{end}}
 
-      <section class="panel" aria-labelledby="access-heading">
-        <h2 id="access-heading">Access</h2>
-        {{template "access" .Access}}
-      </section>
+      <nav class="tabs" aria-label="Site sections">
+        {{range .Tabs}}
+        <a
+          href="/manage/{{$.Site.Name}}?tab={{.ID}}"
+          aria-current="{{if eq .ID $.Tab}}page{{else}}false{{end}}"
+          >{{.Label}}</a
+        >
+        {{end}}
+      </nav>
 
-      {{if or .Data .Files}}
+      {{if eq .Tab "overview"}}
+      <div class="panel-grid">
+        <section class="panel" aria-labelledby="about-heading">
+          <h2 id="about-heading">About</h2>
+          <dl class="facts">
+            <div>
+              <dt>Created by</dt>
+              <dd>
+                {{if
+                .Facts.CreatedBy}}{{.Facts.CreatedBy}}{{else}}Unknown{{end}}
+              </dd>
+            </div>
+            <div>
+              <dt>Created</dt>
+              <dd>
+                {{if .Facts.Created}}<time datetime="{{.Facts.CreatedISO}}"
+                  >{{.Facts.Created}}</time
+                >{{else}}Unknown{{end}}
+              </dd>
+            </div>
+            <div>
+              <dt>Last updated</dt>
+              <dd>
+                {{if .Facts.Published}}{{.Facts.Published}}{{if
+                .Facts.PublishedBy}} by {{.Facts.PublishedBy}}{{end}}{{else}}Not
+                published{{end}}
+              </dd>
+            </div>
+            <div>
+              <dt>Contents</dt>
+              <dd>
+                {{if .Facts.Size}}{{.Facts.Files}} files ·
+                {{.Facts.Size}}{{else}}Unknown{{end}}
+              </dd>
+            </div>
+          </dl>
+          {{with .Site.Description}}
+          <p>{{.}}</p>
+          {{end}}
+        </section>
+        <section class="panel" aria-labelledby="access-summary-heading">
+          <div class="panel-heading">
+            <h2 id="access-summary-heading">Who can open it</h2>
+            <a class="link-button" href="/manage/{{.Site.Name}}?tab=sharing"
+              >Manage sharing</a
+            >
+          </div>
+          <p>{{template "general-summary" .Sharing}}</p>
+          <ul class="people compact">
+            {{range .People}}{{template "person" .}}{{end}}
+          </ul>
+        </section>
+      </div>
+      {{end}} {{if eq .Tab "sharing"}}
+      <section class="panel" aria-labelledby="sharing-heading">
+        <h2 id="sharing-heading">Sharing</h2>
+        {{template "sharing" .Sharing}}
+      </section>
+      {{end}} {{if eq .Tab "data"}}
       <section class="panel" aria-labelledby="data-heading">
         <h2 id="data-heading">Data</h2>
+        <p class="muted">
+          What the app has stored. You can look at records and remove them; the
+          app cannot get deleted records back.
+        </p>
         {{if .Data}}
         <div
           hx-get="/api/hex/manage/sites/{{.Site.Name}}/collections"
           hx-trigger="load"
           hx-swap="outerHTML"
         >
-          <p class="muted">Loading collections…</p>
+          <p class="muted">Loading…</p>
         </div>
         <div id="documents"></div>
         <div id="document-view"></div>
@@ -148,259 +255,334 @@
           hx-trigger="load"
           hx-swap="outerHTML"
         >
-          <p class="muted">Loading files…</p>
+          <p class="muted">Loading…</p>
         </div>
         {{end}}
       </section>
-      {{end}}
-
+      {{end}} {{if eq .Tab "history"}}
       <section class="panel" aria-labelledby="history-heading">
-        <h2 id="history-heading">Publication history</h2>
+        <h2 id="history-heading">History</h2>
         {{if .History}}
-        <table class="manage-table">
-          <thead>
-            <tr>
-              <th scope="col">When</th>
-              <th scope="col">By</th>
-              <th scope="col">Files</th>
-              <th scope="col">Size</th>
-            </tr>
-          </thead>
-          <tbody>
-            {{range .History}}
-            <tr>
-              <td><time datetime="{{.ISO}}">{{.When}}</time></td>
-              <td>{{if .By}}{{.By}}{{else}}Unknown{{end}}</td>
-              <td>{{.Files}}</td>
-              <td>{{.Size}}</td>
-            </tr>
-            {{end}}
-          </tbody>
-        </table>
+        <ol class="timeline">
+          {{range .History}}
+          <li>
+            <strong>{{if .By}}{{.By}}{{else}}Someone{{end}}</strong> published
+            {{.Files}} files ({{.Size}})
+            <time class="muted" datetime="{{.ISO}}">{{.When}}</time>
+          </li>
+          {{end}}
+        </ol>
         {{else}}
         <p class="muted">No publications recorded yet.</p>
         {{end}}
       </section>
-
-      <section class="panel danger" aria-labelledby="unpublish-heading">
-        <h2 id="unpublish-heading">Unpublish</h2>
+      {{end}} {{if eq .Tab "settings"}}
+      <section class="panel panel-danger" aria-labelledby="unpublish-heading">
+        <h2 id="unpublish-heading">Take it down</h2>
         <p>
-          Removes the site's files, metadata and history. Its data, uploads and
-          access policy are kept, and the name stays reserved for its owners.
+          Removes the {{if eq .Site.Kind "File"}}file{{else}}app{{end}} and its
+          history. Its stored data and sharing settings are kept, and the name
+          stays reserved for its owners.
         </p>
         <form
           hx-post="/api/hex/manage/sites/{{.Site.Name}}/unpublish"
-          hx-confirm="Unpublish {{.Site.Name}}? This cannot be undone."
+          hx-confirm="Take {{.Site.Title}} down? This cannot be undone."
         >
-          <label
-            >Type <code>{{.Site.Name}}</code> to confirm
+          <label class="field"
+            ><span class="field-label"
+              >Type <code>{{.Site.Name}}</code> to confirm</span
+            >
             <input name="confirm" autocomplete="off" required
           /></label>
-          <button class="button danger-button" type="submit">Unpublish</button>
+          <button class="button button-danger" type="submit">
+            Take it down
+          </button>
         </form>
       </section>
+      {{end}}
     </main>
+    {{template "footer" .Chrome}}
   </body>
 </html>
-{{end}} {{define "access"}}
+{{end}} {{define "general-summary"}} {{if eq .General "restricted"}}Only the
+people and groups below can open it.{{else if eq .General "view"}}Everyone at
+{{.Platform}} can open it.{{else}}Everyone at {{.Platform}} can open and edit
+it.{{end}} {{end}} {{define "person"}}
+<li class="person">
+  <span class="avatar {{.Tone}}" aria-hidden="true"
+    >{{if eq .Kind "group"}}<svg viewBox="0 0 24 24">
+      <circle cx="9" cy="8" r="3.5" />
+      <path d="M2.5 20a6.5 6.5 0 0 1 13 0" />
+      <path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6.5 6.5 0 0 1 3.5 6" /></svg
+    >{{else}}{{.Initials}}{{end}}</span
+  >
+  <span class="person-main"
+    ><strong>{{.Name}}</strong>{{if .Detail}}<span class="muted"
+      >{{.Detail}}</span
+    >{{end}}</span
+  >
+  <span class="muted"
+    >{{if eq .Role "owner"}}Owner{{else if eq .Role "editor"}}Can
+    edit{{else}}Can view{{end}}</span
+  >
+</li>
+{{end}} {{define "sharing"}}
 <form
-  class="access-form"
-  hx-put="/api/hex/manage/sites/{{.Site}}/access"
+  id="sharing-form"
+  class="sharing"
+  hx-put="/api/hex/manage/sites/{{.Site}}/sharing"
   hx-target="this"
   hx-swap="outerHTML"
+  data-platform="{{.Platform}}"
 >
   {{if .Message}}
-  <p class="notice" role="status">{{.Message}}</p>
+  <p class="banner banner-success" role="status">{{.Message}}</p>
   {{end}} {{if .Error}}
-  <p class="notice error" role="alert">{{.Error}}</p>
-  {{end}} {{if .Artifact}}<input
-    type="hidden"
-    name="artifact"
-    value="1"
-  />{{end}} {{range .Lists}}{{template "principal-list" .}}{{end}}
-  <details class="rules">
-    <summary>Path and data rules</summary>
-    <p class="hint">
-      Restrict pages by path and data by collection, file prefix or channel, for
-      example
-      <code
-        >{"paths":[{"prefix":"/admin/","viewers":"owners"}],"collections":{"drafts":{"read":"creator","write":"creator"}}}</code
-      >. See the access control docs for the format.
+  <p class="banner banner-error" role="alert">{{.Error}}</p>
+  {{end}}
+
+  <div class="combobox" data-combobox>
+    <label class="field-label" for="share-search">Add people or groups</label>
+    <div class="combobox-control">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="11" cy="11" r="7" />
+        <path d="m20 20-3.5-3.5" />
+      </svg>
+      <input
+        id="share-search"
+        type="text"
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded="false"
+        aria-controls="share-options"
+        autocomplete="off"
+        placeholder="Search by name or email, or pick a group"
+        form="none"
+      />
+    </div>
+    <ul
+      id="share-options"
+      class="combobox-options"
+      role="listbox"
+      aria-label="People and groups"
+      hidden
+    ></ul>
+    <p class="field-hint">
+      Only people who have used {{.Platform}} appear by name. Type a full email
+      address to add anyone else.
     </p>
-    <label
-      >Rules (JSON)
-      <textarea name="rules" rows="8" spellcheck="false">{{.Rules}}</textarea>
-    </label>
-  </details>
-  <button class="button" type="submit">Save access</button>
-</form>
-{{end}} {{define "principal-list"}}
-<fieldset class="principals">
-  <legend>{{.Title}}</legend>
-  <p class="hint">{{.Help}}</p>
-  <ul class="chips" id="list-{{.Name}}">
-    {{range .Labels}}
-    <li class="chip">
-      <span
-        >{{.Name}}{{if .Detail}}
-        <span class="muted">{{.Detail}}</span>{{end}}</span
+  </div>
+
+  <h3 class="list-heading">People with access</h3>
+  <ul id="share-people" class="people">
+    {{range .Entries}}
+    <li class="person" data-principal="{{.Principal}}">
+      <span class="avatar {{.Tone}}" aria-hidden="true"
+        >{{if eq .Kind "group"}}<svg viewBox="0 0 24 24">
+          <circle cx="9" cy="8" r="3.5" />
+          <path d="M2.5 20a6.5 6.5 0 0 1 13 0" />
+          <path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6.5 6.5 0 0 1 3.5 6" /></svg
+        >{{else}}{{.Initials}}{{end}}</span
       >
-      <input type="hidden" name="{{$.Name}}" value="{{.Principal}}" />
-      <button type="button" class="remove" aria-label="Remove {{.Name}}">
-        ×
+      <span class="person-main"
+        ><strong>{{.Name}}</strong>{{if .Detail}}<span class="muted"
+          >{{.Detail}}</span
+        >{{end}}</span
+      >
+      <input type="hidden" name="principal" value="{{.Principal}}" />
+      <label class="visually-hidden" for="role-{{.Principal}}"
+        >Role for {{.Name}}</label
+      >
+      <select id="role-{{.Principal}}" name="role" class="role-select">
+        {{range .RoleChoices}}
+        <option value="{{.Value}}" {{.Attr}}>{{.Label}}</option>
+        {{end}}
+      </select>
+      <button
+        class="icon-button"
+        type="button"
+        data-remove-person
+        aria-label="Remove {{.Name}}"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M6 6l12 12M18 6 6 18" />
+        </svg>
       </button>
     </li>
     {{end}}
   </ul>
-  <label class="picker"
-    >Add a person, email or group
-    <input
-      type="search"
-      name="query"
-      autocomplete="off"
-      placeholder="Name, email or group…"
-      hx-get="/api/hex/manage/directory?list={{.Name}}"
-      hx-trigger="input changed delay:200ms, focus"
-      hx-sync="this:replace"
-      hx-target="next .suggestions"
-      hx-swap="innerHTML"
-      hx-params="query"
-  /></label>
-  <div class="suggestions" aria-live="polite"></div>
-</fieldset>
-{{end}} {{define "suggestions"}} {{range .Suggestions}}
-<button
-  type="button"
-  class="suggestion"
-  data-list="{{$.List}}"
-  data-principal="{{.Principal}}"
-  data-name="{{.Name}}"
-  data-detail="{{.Detail}}"
->
-  {{.Name}} <span class="muted">{{.Detail}}</span>
-</button>
-{{else}}
-<p class="muted">
-  {{if .Query}}No one found. Type a full email address to add someone who hasn't
-  used Hex yet.{{else}}Type a name, email or group.{{end}}
-</p>
-{{end}} {{end}} {{define "collections"}}
+  <p id="share-people-empty" class="muted" {{.EmptyAttr}}>
+    No one is added yet. You become the owner when you save.
+  </p>
+
+  <h3 class="list-heading">General access</h3>
+  <div class="general-access">
+    <span class="general-icon" aria-hidden="true"
+      ><svg viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg
+    ></span>
+    <label class="field field-grow"
+      ><span class="visually-hidden">General access</span
+      ><select name="general" id="general-access">
+        {{range .GeneralChoices}}
+        <option value="{{.Value}}" {{.Attr}}>{{.Label}}</option>
+        {{end}}
+      </select></label
+    >
+  </div>
+  <p
+    class="banner banner-warning"
+    id="general-warning"
+    role="status"
+    hidden
+  ></p>
+  <p class="field-hint" id="general-hint">
+    Owners can always open, edit and share it. "Can edit" lets people change
+    what the app stores; "Can view" lets them look without changing anything.
+  </p>
+
+  <details class="advanced" {{.AdvancedAttr}}>
+    <summary>Advanced rules</summary>
+    <p class="field-hint">
+      For app builders: restrict pages by path, and data by collection, file
+      prefix or channel. Example:
+      <code>{"paths":[{"prefix":"/admin/","viewers":"owners"}]}</code>
+    </p>
+    <label class="field"
+      ><span class="visually-hidden">Advanced rules as JSON</span>
+      <textarea name="rules" rows="7" spellcheck="false">{{.Rules}}</textarea>
+    </label>
+  </details>
+
+  <div class="form-actions">
+    <button class="button" type="submit">Save sharing</button>
+    <span class="muted" id="sharing-dirty" hidden
+      >You have unsaved changes.</span
+    >
+  </div>
+</form>
+{{end}} {{define "collections"}}
 <div class="collections">
-  <h3>Collections</h3>
   {{if .Unsupported}}
-  <p class="muted">This platform's database cannot list collections.</p>
+  <p class="muted">This platform's database cannot list its contents.</p>
   {{else if .Collections}}
-  <ul class="collection-list">
+  <p class="field-label">Collections</p>
+  <ul class="chip-list">
     {{range .Collections}}
     <li>
       <button
         type="button"
-        class="secondary"
+        class="chip-button"
         hx-get="/api/hex/manage/sites/{{$.Site}}/collections/{{.Name}}"
         hx-target="#documents"
       >
-        {{.Name}} <span class="muted">{{.Documents}}</span>
+        {{.Name}} <span>{{.Documents}}</span>
       </button>
     </li>
     {{end}}
   </ul>
   {{else}}
-  <p class="muted">No documents stored yet.</p>
+  <p class="muted">The app has not stored any records yet.</p>
   {{end}}
 </div>
 {{end}} {{define "documents"}}
 <div class="documents">
   <h3>{{.Collection}}</h3>
   {{if .Documents}}
-  <table class="manage-table">
-    <thead>
-      <tr>
-        <th scope="col">ID</th>
-        <th scope="col">Created by</th>
-        <th scope="col">Data</th>
-        <th scope="col"><span class="visually-hidden">Actions</span></th>
-      </tr>
-    </thead>
-    <tbody>
-      {{range .Documents}}
-      <tr>
-        <td><code>{{.ID}}</code></td>
-        <td>{{if .CreatedBy}}{{.CreatedBy}}{{else}}—{{end}}</td>
-        <td><code class="preview">{{.Preview}}</code></td>
-        <td class="actions">
-          <button
-            type="button"
-            class="secondary"
-            hx-get="/api/hex/manage/sites/{{$.Site}}/collections/{{$.Collection}}/{{.ID}}"
-            hx-target="#document-view"
-          >
-            View
-          </button>
-          <button
-            type="button"
-            class="secondary"
-            hx-delete="/api/hex/manage/sites/{{$.Site}}/collections/{{$.Collection}}/{{.ID}}"
-            hx-confirm="Delete document {{.ID}}? The app cannot recover it."
-            hx-target="closest tr"
-            hx-swap="outerHTML"
-          >
-            Delete
-          </button>
-        </td>
-      </tr>
-      {{end}}
-    </tbody>
-  </table>
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th scope="col">Record</th>
+          <th scope="col">Added by</th>
+          <th scope="col">Contents</th>
+          <th scope="col"><span class="visually-hidden">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Documents}}
+        <tr>
+          <td><code>{{.ID}}</code></td>
+          <td>{{if .CreatedBy}}{{.CreatedBy}}{{else}}—{{end}}</td>
+          <td><code class="preview">{{.Preview}}</code></td>
+          <td class="row-actions">
+            <button
+              type="button"
+              class="button button-secondary button-small"
+              hx-get="/api/hex/manage/sites/{{$.Site}}/collections/{{$.Collection}}/{{.ID}}"
+              hx-target="#document-view"
+            >
+              View
+            </button>
+            <button
+              type="button"
+              class="button button-secondary button-small"
+              hx-delete="/api/hex/manage/sites/{{$.Site}}/collections/{{$.Collection}}/{{.ID}}"
+              hx-confirm="Delete this record? The app cannot get it back."
+              hx-target="closest tr"
+              hx-swap="outerHTML"
+            >
+              Delete
+            </button>
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
   {{if .Next}}
   <button
     type="button"
-    class="secondary"
+    class="button button-secondary"
     hx-get="/api/hex/manage/sites/{{.Site}}/collections/{{.Collection}}?after={{.Next}}"
     hx-target="#documents"
   >
     Next page
   </button>
   {{end}} {{else}}
-  <p class="muted">No documents.</p>
+  <p class="muted">No records.</p>
   {{end}}
 </div>
 {{end}} {{define "document"}}
 <div class="document">
-  <h3>Document <code>{{.ID}}</code></h3>
+  <h3>Record <code>{{.ID}}</code></h3>
   <pre>{{.JSON}}</pre>
 </div>
 {{end}} {{define "files"}}
 <div class="files">
   {{if .Files}}
-  <table class="manage-table">
-    <thead>
-      <tr>
-        <th scope="col">File</th>
-        <th scope="col">Size</th>
-        <th scope="col"><span class="visually-hidden">Actions</span></th>
-      </tr>
-    </thead>
-    <tbody>
-      {{range .Files}}
-      <tr>
-        <td><a href="{{.Link}}">{{.Key}}</a></td>
-        <td>{{.Size}}</td>
-        <td class="actions">
-          <button
-            type="button"
-            class="secondary"
-            hx-delete="{{.DeleteLink}}"
-            hx-confirm="Delete {{.Key}}? The app cannot recover it."
-            hx-target="closest tr"
-            hx-swap="outerHTML"
-          >
-            Delete
-          </button>
-        </td>
-      </tr>
-      {{end}}
-    </tbody>
-  </table>
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th scope="col">File</th>
+          <th scope="col">Size</th>
+          <th scope="col"><span class="visually-hidden">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Files}}
+        <tr>
+          <td><a href="{{.Link}}">{{.Key}}</a></td>
+          <td>{{.Size}}</td>
+          <td class="row-actions">
+            <button
+              type="button"
+              class="button button-secondary button-small"
+              hx-delete="{{.DeleteLink}}"
+              hx-confirm="Delete {{.Key}}? The app cannot get it back."
+              hx-target="closest tr"
+              hx-swap="outerHTML"
+            >
+              Delete
+            </button>
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
   {{else}}
   <p class="muted">No uploaded files.</p>
   {{end}}

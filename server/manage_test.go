@@ -2,9 +2,11 @@ package hex_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 
@@ -66,6 +68,10 @@ func TestPortalListsAndProtectsOwnedSites(t *testing.T) {
 	if body := page.Body.String(); !strings.Contains(body, `href="/manage/dashboard"`) || strings.Contains(body, "beas-app") {
 		t.Fatalf("listing should show only Alex's sites: %s", body)
 	}
+	// HTMX changes carry the request marker the API requires.
+	if !strings.Contains(page.Body.String(), `hx-headers='{"X-Hex-Request":"1"}'`) {
+		t.Fatal("portal pages must send the X-Hex-Request marker with HTMX requests")
+	}
 	if csp := page.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "default-src 'self'") {
 		t.Fatalf("portal pages need the content security policy: %q", csp)
 	}
@@ -77,10 +83,16 @@ func TestPortalListsAndProtectsOwnedSites(t *testing.T) {
 	}
 
 	site := requestAs(t, server, alex, "GET", "/manage/dashboard", nil, 200).Body.String()
-	for _, expected := range []string{"Demo", "Alex Andersen", "Publication history", "Unpublish"} {
+	for _, expected := range []string{"Demo", "Alex Andersen", "Who can open it", `href="/manage/dashboard?tab=sharing"`} {
 		if !strings.Contains(site, expected) {
 			t.Fatalf("site page lacks %q", expected)
 		}
+	}
+	for _, tab := range []string{"sharing", "data", "history", "settings"} {
+		requestAs(t, server, alex, "GET", "/manage/dashboard?tab="+tab, nil, 200)
+	}
+	if settings := requestAs(t, server, alex, "GET", "/manage/dashboard?tab=settings", nil, 200).Body.String(); !strings.Contains(settings, "Take it down") {
+		t.Fatal("settings tab lacks unpublishing")
 	}
 	requestAs(t, server, bea, "GET", "/manage/dashboard", nil, 403)
 	requestAs(t, server, admin, "GET", "/manage/dashboard", nil, 200)
@@ -98,56 +110,68 @@ func TestPortalListsAndProtectsOwnedSites(t *testing.T) {
 	}
 }
 
-func TestPortalEditsAccess(t *testing.T) {
+func TestPortalSharing(t *testing.T) {
 	server, _ := setupPortal(t)
 	alex := signedIn(t, "alex-id", "Alex Andersen", "alex@example.test")
 	bea := signedIn(t, "bea-id", "<img src=x onerror=alert(1)>", "bea@example.test")
 	publishSite(t, server, alex, "dashboard", map[string]string{"index.html": "app"}, "")
 	requestAs(t, server, bea, "GET", "/api/hex/me", nil, 200)
 
-	// The picker offers configured groups, remembered people (escaped) and
-	// typed email addresses.
-	suggestions := requestAs(t, server, alex, "GET", "/api/hex/manage/directory?list=viewer&query=e", nil, 200).Body.String()
-	if !strings.Contains(suggestions, `data-principal="group:sales-id"`) || !strings.Contains(suggestions, `data-principal="user:bea-id"`) {
-		t.Fatalf("picker lacks the group or person: %s", suggestions)
-	}
-	if strings.Contains(suggestions, "<img") || !strings.Contains(suggestions, "&lt;img") {
-		t.Fatalf("a person's name was not escaped: %s", suggestions)
-	}
-	byEmail := requestAs(t, server, alex, "GET", "/api/hex/manage/directory?list=viewer&query=new.person@example.test", nil, 200).Body.String()
-	if !strings.Contains(byEmail, `data-principal="user:new.person@example.test"`) {
-		t.Fatalf("an email address cannot be added: %s", byEmail)
-	}
-
-	path := "/api/hex/manage/sites/dashboard/access"
+	path := "/api/hex/manage/sites/dashboard/sharing"
 	saved := formRequest(t, server, alex, "PUT", path, url.Values{
-		"owner":  {"user:alex-id"},
-		"viewer": {"user:alex-id", "group:sales-id", "user:new.person@example.test"},
-		"rules":  {`{"paths":[{"prefix":"/admin/","viewers":"owners"}]}`},
+		"principal": {"user:alex-id", "group:sales-id", "user:bea-id", "user:new.person@example.test"},
+		"role":      {"owner", "viewer", "editor", "viewer"},
+		"general":   {"restricted"},
+		"rules":     {`{"paths":[{"prefix":"/admin/","viewers":"owners"}]}`},
 	}, 200)
 	if !strings.Contains(saved, "Saved") || !strings.Contains(saved, "Sales") || !strings.Contains(saved, "/admin/") {
-		t.Fatalf("access form did not save: %s", saved)
+		t.Fatalf("sharing form did not save: %s", saved)
 	}
-	policy := requestAs(t, server, alex, "GET", "/api/hex/sites/dashboard/access", nil, 200).Body.String()
-	if !strings.Contains(policy, `"group:sales-id"`) || !strings.Contains(policy, `"prefix":"/admin/"`) {
-		t.Fatalf("policy was not stored: %s", policy)
+	// Names from the directory are escaped.
+	if strings.Contains(saved, "<img src=x") || !strings.Contains(saved, "&lt;img src=x") {
+		t.Fatalf("a person's name was not escaped: %s", saved)
+	}
+
+	var policy hex.SiteAccess
+	if err := json.Unmarshal(requestAs(t, server, alex, "GET", "/api/hex/sites/dashboard/access", nil, 200).Body.Bytes(), &policy); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(policy.Owners, []string{"user:alex-id"}) || !slices.Equal(policy.Editors, []string{"user:bea-id"}) ||
+		!slices.Equal(policy.Viewers, []string{"group:sales-id", "user:new.person@example.test"}) || len(policy.Paths) != 1 {
+		t.Fatalf("unexpected policy: %+v", policy)
+	}
+
+	// Opening it to everyone keeps the people who may edit.
+	formRequest(t, server, alex, "PUT", path, url.Values{
+		"principal": {"user:alex-id", "user:bea-id"},
+		"role":      {"owner", "editor"},
+		"general":   {"view"},
+	}, 200)
+	policy = hex.SiteAccess{}
+	if err := json.Unmarshal(requestAs(t, server, alex, "GET", "/api/hex/sites/dashboard/access", nil, 200).Body.Bytes(), &policy); err != nil {
+		t.Fatal(err)
+	}
+	if len(policy.Viewers) != 0 || !slices.Equal(policy.Editors, []string{"user:bea-id"}) || len(policy.Paths) != 0 {
+		t.Fatalf("everyone-can-view policy: %+v", policy)
 	}
 
 	// Mistakes are shown in the form, not applied.
 	for _, values := range []url.Values{
-		{"owner": {"user:someone-else"}},
-		{"owner": {"user:alex-id"}, "rules": {"{not json"}},
-		{"owner": {"user:alex-id"}, "viewer": {"sales"}},
-		{"owner": {}},
+		{"principal": {"user:bea-id"}, "role": {"viewer"}, "general": {"restricted"}},
+		{"principal": {"user:someone-else"}, "role": {"owner"}, "general": {"restricted"}},
+		{"principal": {"user:alex-id"}, "role": {"owner"}, "general": {"restricted"}, "rules": {"{not json"}},
+		{"principal": {"user:alex-id"}, "role": {"owner"}, "general": {"restricted"}, "rules": {`{"owners":["user:x"]}`}},
+		{"principal": {"user:alex-id", "sales"}, "role": {"owner", "viewer"}, "general": {"restricted"}},
+		{"principal": {"user:alex-id"}, "role": {"owner", "viewer"}, "general": {"restricted"}},
 	} {
-		if body := formRequest(t, server, alex, "PUT", path, values, 200); !strings.Contains(body, "notice error") {
-			t.Fatalf("invalid access form was accepted: %v: %s", values, body)
+		if body := formRequest(t, server, alex, "PUT", path, values, 200); !strings.Contains(body, "banner-error") {
+			t.Fatalf("invalid sharing form was accepted: %v: %s", values, body)
 		}
 	}
-	formRequest(t, server, bea, "PUT", path, url.Values{"owner": {"user:bea-id"}}, 403)
+	formRequest(t, server, bea, "PUT", path, url.Values{"principal": {"user:bea-id"}, "role": {"owner"}, "general": {"edit"}}, 403)
 
 	// Changes need the request marker, like every API change.
-	r := httptest.NewRequest("PUT", path, strings.NewReader("owner=user%3Aalex-id"))
+	r := httptest.NewRequest("PUT", path, strings.NewReader("principal=user%3Aalex-id&role=owner&general=edit"))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	for name, values := range alex {
 		r.Header[name] = values
@@ -156,6 +180,28 @@ func TestPortalEditsAccess(t *testing.T) {
 	server.ServeHTTP(w, r)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("a cross-site form post was accepted: %d", w.Code)
+	}
+}
+
+func TestHomeShowsSharedAndOwnedSites(t *testing.T) {
+	server, _ := setupPortal(t)
+	alex := signedIn(t, "alex-id", "Alex Andersen", "alex@example.test")
+	bea := signedIn(t, "bea-id", "Bea Berg", "bea@example.test")
+	publishSite(t, server, alex, "report", map[string]string{"index.html": "report"}, `{"viewers":["user:alex-id","user:bea@example.test"]}`)
+	publishSite(t, server, alex, "private", map[string]string{"index.html": "private"}, `{"viewers":["user:alex-id"]}`)
+
+	home := requestAs(t, server, bea, "GET", "/", nil, 200).Body.String()
+	shared := home[strings.Index(home, "Shared with you"):strings.Index(home, `id="mine-heading"`)]
+	if !strings.Contains(shared, `href="http://report.example.com/"`) || strings.Contains(shared, "private.example.com") {
+		t.Fatalf("shared section is wrong: %s", shared)
+	}
+	if !strings.Contains(home, "Welcome back, Bea") || !strings.Contains(home, "Nothing published yet") {
+		t.Fatal("home is not personal")
+	}
+
+	own := requestAs(t, server, alex, "GET", "/", nil, 200).Body.String()
+	if strings.Contains(own, "Shared with you") || !strings.Contains(own, `href="/manage/report"`) || !strings.Contains(own, "Only owners") {
+		t.Fatalf("owner's home is wrong")
 	}
 }
 

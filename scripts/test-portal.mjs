@@ -42,6 +42,13 @@ export async function verifyPortal(port) {
     await page.waitForFunction(
       () => document.querySelector(".site-label").textContent === "other",
     );
+    const refreshed = page.waitForResponse((response) =>
+      response.url().includes("/api/hex/catalog"),
+    );
+    await page.locator("#refresh").click();
+    assert.equal((await refreshed).status(), 200);
+    assert.equal(await page.locator("#page-error").isVisible(), false);
+    await page.goto(`http://localhost:${port}/start`);
     for (const os of ["macos", "windows", "linux"]) {
       await page.locator("#os").selectOption(os);
       assert.match(
@@ -57,31 +64,28 @@ export async function verifyPortal(port) {
       );
       assert.equal(await download.failure(), null);
     }
-    const refreshed = page.waitForResponse((response) =>
-      response.url().includes("/api/hex/catalog"),
-    );
-    await page.locator("#refresh").click();
-    assert.equal((await refreshed).status(), 200);
-    assert.equal(await page.locator("#catalog-error").isVisible(), false);
     await page.setViewportSize({ width: 390, height: 844 });
-    const overflow = await page.evaluate(() =>
-      [...document.querySelectorAll("body *")]
-        .filter(
-          (element) =>
-            element.getBoundingClientRect().right > window.innerWidth,
-        )
-        .map(
-          (element) =>
-            `${element.tagName}.${element.className}: ${element.getBoundingClientRect().right}`,
+    for (const path of ["/", "/start"]) {
+      await page.goto(`http://localhost:${port}${path}`);
+      const overflow = await page.evaluate(() =>
+        [...document.querySelectorAll("body *")]
+          .filter(
+            (element) =>
+              element.getBoundingClientRect().right > window.innerWidth,
+          )
+          .map(
+            (element) =>
+              `${element.tagName}.${element.className}: ${element.getBoundingClientRect().right}`,
+          ),
+      );
+      assert.equal(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= window.innerWidth,
         ),
-    );
-    assert.equal(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth <= window.innerWidth,
-      ),
-      true,
-      `mobile content overflows the viewport: ${overflow.join(", ")}`,
-    );
+        true,
+        `mobile content on ${path} overflows the viewport: ${overflow.join(", ")}`,
+      );
+    }
     assert.deepEqual(errors, []);
     const noJavaScript = await browser.newContext({ javaScriptEnabled: false });
     const staticPage = await noJavaScript.newPage();
@@ -92,7 +96,7 @@ export async function verifyPortal(port) {
       "Team dashboard",
     );
     console.log(
-      "Portal passed: Go-rendered HTML, HTMX search/sort/refresh, statistics, installer downloads, mobile layout, and no-JavaScript browsing.",
+      "Portal passed: Go-rendered HTML, HTMX search/sort/refresh, statistics, build-and-publish installer downloads, mobile layout, and no-JavaScript browsing.",
     );
   } finally {
     await browser.close();

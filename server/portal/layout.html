@@ -1,0 +1,108 @@
+{{define "head"}}
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>{{.}}</title>
+<meta
+  name="htmx-config"
+  content='{"selfRequestsOnly":true,"allowEval":false,"includeIndicatorStyles":false}'
+/>
+<link rel="icon" href="/api/hex/favicon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="/api/hex/portal.css" />
+<script src="/api/hex/htmx.min.js" defer></script>
+<script src="/api/hex/portal.js" defer></script>
+{{end}} {{define "header"}}
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="/">
+      <svg class="brand-mark" viewBox="0 0 32 36" aria-hidden="true">
+        <path d="M16 1 31 9.5v17L16 35 1 26.5v-17z" />
+        <path
+          class="brand-mark-inner"
+          d="M16 10 23.5 14.25v8.5L16 27l-7.5-4.25v-8.5z"
+        />
+      </svg>
+      <span id="platform-name">{{.Platform}}</span>
+    </a>
+    <nav class="primary-nav" aria-label="Main">
+      <a
+        href="/"
+        aria-current="{{if eq .Active `home`}}page{{else}}false{{end}}"
+        >Home</a
+      >
+      {{if .Manage}}<a
+        href="/manage"
+        aria-current="{{if eq .Active `manage`}}page{{else}}false{{end}}"
+        >Your sites</a
+      >{{end}}
+      <a
+        href="/start"
+        aria-current="{{if eq .Active `start`}}page{{else}}false{{end}}"
+        >Build &amp; publish</a
+      >
+    </nav>
+    {{with .Viewer}}
+    <details class="account">
+      <summary aria-label="Your account">
+        <span class="avatar {{.Tone}}" aria-hidden="true">{{.Initials}}</span>
+        <span class="account-name">{{.FirstName}}</span>
+      </summary>
+      <div class="account-menu">
+        <div class="account-card">
+          <span class="avatar avatar-lg {{.Tone}}" aria-hidden="true"
+            >{{.Initials}}</span
+          >
+          <div>
+            <strong>{{.Name}}</strong>
+            {{if .Email}}<span class="muted">{{.Email}}</span>{{end}}
+          </div>
+        </div>
+        {{if or .Groups .Admin}}
+        <p class="menu-label">Your access</p>
+        <ul class="tag-list">
+          {{if .Admin}}
+          <li class="tag tag-accent">Platform admin</li>
+          {{end}} {{range .Groups}}
+          <li class="tag">{{.}}</li>
+          {{end}}
+        </ul>
+        {{end}}
+        <a class="menu-link" href="/manage">Your sites</a>
+        <a class="menu-link" href="/.auth/logout">Sign out</a>
+      </div>
+    </details>
+    {{end}}
+  </div>
+</header>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<p id="page-error" class="banner banner-error" role="alert" hidden></p>
+{{end}} {{define "footer"}}
+<footer class="footer">
+  <span>{{.Platform}} · Built by your team, for your team.</span>
+  <a href="/start">Build something</a>
+</footer>
+{{end}} {{define "site-icon"}}
+<span class="site-icon {{.Tone}}" aria-hidden="true">
+  {{if eq .Kind "File"}}<svg viewBox="0 0 24 24">
+    <path d="M6 2h8l6 6v14H6z" />
+    <path class="fold" d="M14 2v6h6" /></svg
+  >{{else}}{{.Initial}}{{end}}
+</span>
+{{end}} {{define "access-badge"}}
+<span class="badge badge-{{.AccessTone}}">
+  {{if eq .AccessTone "private"}}<svg viewBox="0 0 24 24" aria-hidden="true">
+    <rect x="5" y="11" width="14" height="10" rx="2" />
+    <path d="M8 11V8a4 4 0 0 1 8 0v3" /></svg
+  >{{else if eq .AccessTone "shared"}}<svg
+    viewBox="0 0 24 24"
+    aria-hidden="true"
+  >
+    <circle cx="9" cy="8" r="3.5" />
+    <path d="M2.5 20a6.5 6.5 0 0 1 13 0" />
+    <path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6.5 6.5 0 0 1 3.5 6" /></svg
+  >{{else}}<svg viewBox="0 0 24 24" aria-hidden="true">
+    <circle cx="12" cy="12" r="9" />
+    <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg
+  >{{end}} {{.Access}}
+</span>
+{{end}}

@@ -1,0 +1,143 @@
+{{define "home"}}
+<!doctype html>
+<html lang="en">
+  <head>
+    {{template "head" (printf "%s · Home" .Platform)}}
+  </head>
+  <body hx-headers='{"X-Hex-Request":"1"}'>
+    {{template "header" .Chrome}}
+    <main id="main" class="page">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">{{.Platform}}</p>
+          <h1>
+            {{with .Viewer}}Welcome back, {{.FirstName}}.{{else}}Your team's
+            apps, in one place.{{end}}
+          </h1>
+          <p class="lead">
+            Open the tools your colleagues built, find what has been shared with
+            you, and keep track of your own.
+          </p>
+        </div>
+        <form class="hero-search" action="/" method="get" role="search">
+          <label class="visually-hidden" for="hero-search">Search apps</label>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="11" cy="11" r="7" />
+            <path d="m20 20-3.5-3.5" />
+          </svg>
+          <input
+            id="hero-search"
+            name="search"
+            type="search"
+            placeholder="Search apps by name, purpose or person…"
+            value="{{.Catalog.Search}}"
+            autocomplete="off"
+          />
+        </form>
+      </section>
+
+      {{if .Shared}}
+      <section class="section" aria-labelledby="shared-heading">
+        <div class="section-heading">
+          <div>
+            <h2 id="shared-heading">Shared with you</h2>
+            <p class="muted">
+              Links people have shared with you directly or with one of your
+              groups.
+            </p>
+          </div>
+        </div>
+        <div class="card-grid">
+          {{range .Shared}}{{template "site-card" .}}{{end}}
+        </div>
+        {{if .SharedMore}}
+        <p class="muted">And {{.SharedMore}} more.</p>
+        {{end}}
+      </section>
+      {{end}} {{if .Manage}}
+      <section class="section" aria-labelledby="mine-heading">
+        <div class="section-heading">
+          <div>
+            <h2 id="mine-heading">Your sites</h2>
+            <p class="muted">Apps and files you have published.</p>
+          </div>
+          {{if .Mine}}<a class="button button-secondary" href="/manage"
+            >Manage all</a
+          >{{end}}
+        </div>
+        {{if .Mine}}
+        <div class="card-grid">
+          {{range .Mine}}{{template "site-card" .}}{{end}}
+        </div>
+        {{if .MineMore}}
+        <p class="muted">
+          And {{.MineMore}} more under <a href="/manage">Your sites</a>.
+        </p>
+        {{end}} {{else}}
+        <div class="empty-state">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 3v12M7 8l5-5 5 5" />
+            <path d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4" />
+          </svg>
+          <div>
+            <strong>Nothing published yet</strong>
+            <p class="muted">
+              Share a report or file in seconds, or publish an app your agent
+              built. <a href="/start">See how</a>.
+            </p>
+          </div>
+        </div>
+        {{end}}
+      </section>
+      {{end}}
+
+      <section id="sites" class="section" aria-labelledby="sites-heading">
+        <div class="section-heading">
+          <div>
+            <h2 id="sites-heading">Apps for everyone</h2>
+            <p class="muted">
+              Tools your colleagues have published for the team.
+            </p>
+          </div>
+        </div>
+        <form
+          id="site-filters"
+          class="toolbar"
+          action="/"
+          method="get"
+          hx-get="/api/hex/catalog"
+          hx-target="#catalog"
+          hx-swap="outerHTML"
+          hx-trigger="submit, input changed delay:250ms, change"
+          hx-sync="this:replace"
+          hx-disabled-elt="#refresh"
+        >
+          <label class="field field-grow"
+            ><span class="field-label">Search</span
+            ><input
+              id="search"
+              name="search"
+              type="search"
+              placeholder="Filter apps…"
+              value="{{.Catalog.Search}}"
+              autocomplete="off"
+          /></label>
+          <label class="field"
+            ><span class="field-label">Sort by</span
+            ><select id="sort" name="sort">
+              {{range .Catalog.SortChoices}}
+              <option value="{{.Value}}" {{.Attr}}>{{.Label}}</option>
+              {{end}}
+            </select></label
+          >
+          <button id="refresh" class="button button-secondary" type="submit">
+            Refresh
+          </button>
+        </form>
+        {{template "catalog" .Catalog}}
+      </section>
+    </main>
+    {{template "footer" .Chrome}}
+  </body>
+</html>
+{{end}}

@@ -1,10 +1,21 @@
-# Company landing page and installers
+# Company portal and installers
 
-Each Hex server includes a landing page at the main domain, for example **https://hex.smartdok.dev/**. Published apps remain on **https://<site>.hex.smartdok.dev/**.
+Each Hex server includes a portal at the main domain, for example **https://hex.smartdok.dev/**. Published apps remain on **https://<site>.hex.smartdok.dev/**. The portal is written for everyone who uses the apps, not only the people who build them, so it avoids technical terms and puts sharing and finding things first.
+
+## Pages
+
+| Page | Path | Contents |
+| --- | --- | --- |
+| Home | `/` | A greeting for the signed-in person, a search across all apps, **Shared with you** (sites that name the person or one of their groups), **Your sites** (what they own), and **Apps for everyone** (the discoverable catalog with search, sort and statistics). Without an identity provider only the catalog is shown. |
+| Your sites | `/manage` | Every site the person owns, filterable instantly by text and by kind (apps and files), with open, copy-link and share actions. Platform admins see every site. |
+| Site | `/manage/<site>` | Tabs for **Overview** (who created and last published it, and its audience), **Sharing**, **Data**, **History** and **Settings** (taking the site down). |
+| Build & publish | `/start` | The installer for the detected OS and three steps: install, share a file or folder, and build an app with a coding agent. |
+
+The account menu in the header shows the person's name, email, their configured groups and whether they are a platform admin, and links to sign out through `/.auth/logout`.
 
 ## Hosting
 
-The Go framework renders the landing page and catalog fragments with `html/template`. HTMX handles search, sort, and refresh requests. The page, styles, scripts, and pinned HTMX distribution are embedded in the server, so there is no frontend build step when installing the Go framework and no runtime CDN dependency. A small script detects the visitor's OS and copies installer commands. Browsing also works with ordinary GET forms when JavaScript is disabled.
+The Go framework renders the portal pages and catalog fragments with `html/template`. HTMX handles search, sort, and refresh requests. The page, styles, scripts, and pinned HTMX distribution are embedded in the server, so there is no frontend build step when installing the Go framework and no runtime CDN dependency. Small scripts detect the visitor's OS, copy links and commands, filter lists and run the sharing picker. Light and dark themes follow the operating system. Browsing also works with ordinary GET forms when JavaScript is disabled.
 
 NGINX forwards main-domain requests to Go and serves published app files directly from storage on subdomains. The existing hosting authentication protects the landing page, catalog, and installer downloads. Preserve the external `Host` header when configuring another reverse proxy.
 
@@ -44,18 +55,18 @@ Set `discoverable` to `true` or remove it and republish to list the app. Missing
 With an identity provider and access control, signed-in users get **Your sites** at `/manage` on the platform domain. It lists the apps and artifacts they own; platform admins can list every site. Each site's page shows:
 
 - who created it and who published it last, and its publication history;
-- an access editor for owners, viewers and editors, with a picker for people and groups, plus a JSON editor for path, collection, file and channel rules;
+- sharing in the style of familiar document tools: a searchable picker for people and groups, a role per entry (**Owner**, **Can edit**, **Can view**), and a **General access** choice between *Only people added*, *Everyone can view* and *Everyone can edit*. The page warns before saving when general access makes listed roles redundant, and keeps at least one owner. Path, collection, file and channel rules stay available as JSON under **Advanced rules**;
 - a data browser: collections and their documents (with the verified creator of each), the JSON of a document, uploaded files, and deleting documents and files;
-- unpublishing, confirmed by typing the site's name.
+- unpublishing from **Settings**, confirmed by typing the site's name.
 
 Only a site's owners and platform admins can open its page; every change goes through `/api/hex/manage/…` with the API's same-origin and `X-Hex-Request` checks. Pages are rendered by the server with HTMX under the same content security policy as the landing page.
 
-The portal reads no directory data from the identity provider. People are remembered from their own sign-ins (ID, name and email, refreshed at most hourly) and can be found by name once they have used the platform; anyone else can be added by typing their email address. Groups come from `HEX_GROUPS`, which should list the groups assigned to the app registration, the only ones sign-in tokens carry. The remembered people are stored in PostgreSQL (`hex_people`), or in memory for local development.
+The portal reads no directory data from the identity provider. People are remembered from their own sign-ins (ID, name and email, refreshed at most hourly) and can be found by name once they have used the platform; anyone else can be added by typing their email address. The sharing picker is an accessible combobox: it searches `/api/hex/directory` as you type, groups results into groups, people and an "add by email" entry, and supports the arrow keys, Enter and Escape. Groups come from `HEX_GROUPS`, which should list the groups assigned to the app registration, the only ones sign-in tokens carry. The remembered people are stored in PostgreSQL (`hex_people`), or in memory for local development.
 
 ## Employee onboarding
 
 1. Visit the main domain and sign in through the company's existing hosting provider.
-2. In **Get started**, download the installer for the detected OS (or select another OS).
+2. Open **Build & publish**, download the installer for the detected OS (or select another OS).
 3. Run the displayed command against that downloaded file.
 4. Open a new terminal and run `hex init my-app`.
 
@@ -91,4 +102,4 @@ Configured mirrors are included as optional `cliReleaseURL` in connection settin
 
 HTMX is pinned in the root npm lockfile. After updating it, run `npm run build:portal` and commit the updated `server/portal/htmx.min.js`, including its license header. `npm run check:portal` checks synchronization. Go builds use the checked-in asset directly.
 
-`go test ./server ./internal/cli` covers rendering, escaping, visibility, installer generation, and a real Linux installer run against fixture release files. `npm run test:browser` exercises the main-domain proxy, HTMX interactions, browser downloads for all OS options, mobile layout, and non-JavaScript browsing. macOS and Windows installers still need native OS execution validation; cross-compiling CLI binaries and validating generated scripts does not replace that check.
+`go test ./server ./internal/cli` covers rendering, escaping, visibility, installer generation, and a real Linux installer run against fixture release files. `npm run test:browser` (which needs NGINX on the PATH) exercises the main-domain proxy, HTMX interactions, browser downloads for all OS options on `/start`, mobile layout, and non-JavaScript browsing. macOS and Windows installers still need native OS execution validation; cross-compiling CLI binaries and validating generated scripts does not replace that check.

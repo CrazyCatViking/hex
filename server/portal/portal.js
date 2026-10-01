@@ -1,4 +1,62 @@
 const element = (id) => document.getElementById(id);
+
+// Brief confirmation messages, such as after copying a link.
+let toastTimer;
+function toast(message) {
+  const box = element("toast");
+  if (!box) {
+    return;
+  }
+  box.textContent = message;
+  box.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    box.hidden = true;
+  }, 2400);
+}
+window.hexToast = toast;
+
+function showError(message) {
+  const banner = element("page-error");
+  if (!banner) {
+    return;
+  }
+  banner.textContent = message;
+  banner.hidden = false;
+}
+window.hexError = showError;
+
+document.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-copy]");
+  if (!button) {
+    return;
+  }
+  event.preventDefault();
+  try {
+    await navigator.clipboard.writeText(button.dataset.copy);
+    toast("Link copied");
+  } catch {
+    toast("Select the address bar to copy the link");
+  }
+});
+
+// The account menu closes on Escape and when clicking elsewhere.
+const account = document.querySelector(".account");
+if (account) {
+  document.addEventListener("click", (event) => {
+    if (account.open && !account.contains(event.target)) {
+      account.open = false;
+    }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && account.open) {
+      account.open = false;
+      account.querySelector("summary").focus();
+    }
+  });
+}
+
+// Installer downloads on the build and publish page.
 const commands = {
   macos: 'bash "$HOME/Downloads/install-hex-macos.sh"',
   linux: 'bash "$HOME/Downloads/install-hex-linux.sh"',
@@ -37,28 +95,36 @@ if (element("installer-controls")) {
   updateInstaller();
 }
 
-for (const event of [
-  "htmx:responseError",
-  "htmx:sendError",
-  "htmx:swapError",
-]) {
-  document.addEventListener(event, () => {
-    element("catalog-error").hidden = false;
-    element("catalog-error").textContent =
-      "The overview could not be refreshed. Reload this page to check your company sign-in, then try again.";
-  });
-}
+// HTMX errors: show the API's message, or a sign-in hint when a session
+// expired and the gateway answered with its login page instead.
+document.addEventListener("htmx:responseError", (event) => {
+  let message = "That did not work. Reload the page and try again.";
+  try {
+    message = JSON.parse(event.detail.xhr.responseText).error || message;
+  } catch {
+    // Not a JSON error; keep the generic message.
+  }
+  showError(message);
+});
+document.addEventListener("htmx:sendError", () => {
+  showError("The platform could not be reached. Check your connection.");
+});
 document.addEventListener("htmx:beforeSwap", (event) => {
+  const text = event.detail.xhr.responseText.trim();
+  const expected = event.detail.target?.id === "catalog";
   if (
+    expected &&
     event.detail.xhr.status === 200 &&
-    !event.detail.xhr.responseText.trim().startsWith('<div id="catalog">')
+    !text.startsWith('<div id="catalog">')
   ) {
     event.detail.shouldSwap = false;
-    element("catalog-error").hidden = false;
-    element("catalog-error").textContent =
-      "Your session may have expired. Reload this page to sign in again.";
+    showError(
+      "Your session may have expired. Reload this page to sign in again.",
+    );
   }
 });
-document.addEventListener("htmx:afterSwap", () => {
-  element("catalog-error").hidden = true;
+document.addEventListener("htmx:afterRequest", (event) => {
+  if (event.detail.successful && element("page-error")) {
+    element("page-error").hidden = true;
+  }
 });

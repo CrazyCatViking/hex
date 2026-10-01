@@ -60,6 +60,7 @@ As browser request hygiene, state-changing API requests require `X-Hex-Request: 
 | GET | `/api/hex/capabilities` | Enabled built-ins, contract version and upload limit |
 | GET | `/api/hex/config` | Optional non-secret connection document for CLI setup; JSON attachment |
 | GET | `/` on the main domain | Go-rendered landing page with app browsing and onboarding |
+| GET | `/start` on the main domain | Build-and-publish onboarding with installers |
 | GET | `/api/hex/catalog` | HTMX catalog HTML fragment; `search` and `sort` query parameters |
 | GET | `/api/hex/overview` | Platform name, visible sites, statistics, and installer availability |
 | GET | `/api/hex/install/{os}` | Platform-configured installer attachment for `macos`, `linux`, or `windows` |

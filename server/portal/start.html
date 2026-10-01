@@ -1,0 +1,118 @@
+{{define "start"}}
+<!doctype html>
+<html lang="en">
+  <head>
+    {{template "head" (printf "%s · Build and publish" .Platform)}}
+  </head>
+  <body hx-headers='{"X-Hex-Request":"1"}'>
+    {{template "header" .Chrome}}
+    <main id="main" class="page">
+      <section class="hero hero-compact">
+        <div>
+          <p class="eyebrow">Build &amp; publish</p>
+          <h1>From idea to a link you can share.</h1>
+          <p class="lead">
+            Publish a report or file in seconds, or build a small app with a
+            coding agent. Everything you publish is yours to manage and share.
+          </p>
+        </div>
+      </section>
+
+      <section id="start" class="section steps" aria-labelledby="start-heading">
+        <h2 id="start-heading" class="visually-hidden">Steps</h2>
+        <article class="step-card">
+          <span class="step">1</span>
+          <div>
+            <h3>Install the Hex tool</h3>
+            <p>
+              Download the installer for your computer and run the command
+              below. It installs Hex and connects it to {{.Platform}}; there is
+              nothing to configure.
+            </p>
+            <label class="field"
+              ><span class="field-label">Your computer</span
+              ><select id="os">
+                <option value="macos">Mac</option>
+                <option value="windows">Windows</option>
+                <option value="linux" selected>Linux</option>
+              </select></label
+            >
+            {{if .InstallersAvailable}}
+            <div id="installer-controls" class="stack">
+              <a
+                id="download-installer"
+                class="button"
+                href="/api/hex/install/linux"
+                download
+                >Download installer</a
+              >
+              <div class="command">
+                <pre><code id="install-command">bash "$HOME/Downloads/install-hex-linux.sh"</code></pre>
+                <button
+                  id="copy-command"
+                  type="button"
+                  class="button button-secondary"
+                >
+                  Copy
+                </button>
+              </div>
+              <p
+                id="copy-status"
+                class="muted"
+                role="status"
+                aria-live="polite"
+              ></p>
+              <p class="muted">
+                Open a terminal, paste the command and press Enter. Already
+                installed? Run <code>hex update</code>.
+              </p>
+            </div>
+            {{else}}
+            <p id="installer-status" class="banner">
+              Your platform operator needs to configure connection settings
+              before installers are available.
+            </p>
+            {{end}}
+          </div>
+        </article>
+
+        <article class="step-card">
+          <span class="step">2</span>
+          <div>
+            <h3>Share a file or folder</h3>
+            <p>Publish anything to a private link that only you can open:</p>
+            <pre><code>hex publish ./report.pdf -n "Q3 report"</code></pre>
+            <p>
+              Hex prints the link. Share it with colleagues from
+              <a href="/manage">Your sites</a>, or straight away with
+              <code>--with user:name@company.com</code>.
+            </p>
+          </div>
+        </article>
+
+        <article class="step-card">
+          <span class="step">3</span>
+          <div>
+            <h3>Build an app with your coding agent</h3>
+            <p>
+              Start a project, then describe the app you want to your agent:
+            </p>
+            <pre><code>hex init my-app</code></pre>
+            <p>
+              Hex adds instructions your agent understands, including how to
+              store data and who may use it. When it is ready, publish it from
+              the project folder:
+            </p>
+            <pre><code>hex publish</code></pre>
+            <p class="muted">
+              The first time, Hex opens your company sign-in in the browser. The
+              first person to publish a name owns it.
+            </p>
+          </div>
+        </article>
+      </section>
+    </main>
+    {{template "footer" .Chrome}}
+  </body>
+</html>
+{{end}}

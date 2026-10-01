@@ -15,37 +15,48 @@ import (
 )
 
 // The management portal lets signed-in owners manage their sites and
-// artifacts from the platform's landing page: publication history, access
-// policies, the site's data, and unpublishing. Pages are rendered here and
-// enhanced with HTMX; every change goes through /api/hex/manage/ routes, so
-// the API's same-origin and request-marker checks apply. Owners and platform
-// admins pass, as for the API.
+// artifacts: who can open them, their data, their history, and unpublishing.
+// Pages are rendered here and enhanced with HTMX; every change goes through
+// /api/hex/manage/ routes, so the API's same-origin and request-marker checks
+// apply. Owners and platform admins pass, as for the API.
 
 const managePageSize = 25
 
-type manageView struct {
-	Platform string
-	Viewer   *Person
-	Admin    bool
-	All      bool
-	Sites    []manageSite
-	Site     *manageSite
-	History  []historyEntry
-	Access   accessView
-	Data     bool
-	Files    bool
+type manageListView struct {
+	Chrome
+	Sites  []siteCard
+	Filter string
+	Query  string
+	All    bool
+	Counts struct{ All, Apps, Files int }
 }
 
-type manageSite struct {
-	Name        string    `json:"name"`
-	URL         string    `json:"url"`
-	Title       string    `json:"title"`
-	Kind        string    `json:"kind"`
-	CreatedBy   string    `json:"createdBy,omitempty"`
-	PublishedBy string    `json:"publishedBy,omitempty"`
-	Published   string    `json:"-"`
-	Audience    string    `json:"audience"`
-	Timestamp   time.Time `json:"publishedAt,omitzero"`
+type sitePageView struct {
+	Chrome
+	Site    siteCard
+	Tab     string
+	Tabs    []siteTab
+	Facts   siteFacts
+	People  []shareEntry
+	History []historyEntry
+	Sharing sharingView
+	Data    bool
+	Files   bool
+}
+
+type siteTab struct {
+	ID    string
+	Label string
+}
+
+type siteFacts struct {
+	CreatedBy   string
+	Created     string
+	CreatedISO  string
+	PublishedBy string
+	Published   string
+	Files       int
+	Size        string
 }
 
 type historyEntry struct {
@@ -54,24 +65,6 @@ type historyEntry struct {
 	By    string
 	Files int
 	Size  string
-}
-
-type accessView struct {
-	Site     string
-	Lists    []principalList
-	Rules    string
-	Message  string
-	Error    string
-	Artifact bool
-}
-
-// principalList is one of the owner, viewer and editor lists in the access
-// form; Name is the form field.
-type principalList struct {
-	Name   string
-	Title  string
-	Help   string
-	Labels []principalLabel
 }
 
 // manageEnabled reports whether the portal has what it needs: identities to
@@ -85,11 +78,10 @@ func (s *Server) registerManageRoutes() {
 		return
 	}
 	s.mux.HandleFunc("GET /manage", s.managePage)
-	s.mux.HandleFunc("GET /api/hex/my-sites", s.mySites)
 	s.mux.HandleFunc("GET /manage/{site}", s.manageSitePage)
+	s.mux.HandleFunc("GET /api/hex/my-sites", s.mySites)
 	s.mux.HandleFunc("GET /api/hex/manage.js", s.portalAsset)
-	s.mux.HandleFunc("GET /api/hex/manage/directory", s.manageDirectory)
-	s.mux.HandleFunc("PUT /api/hex/manage/sites/{site}/access", s.manageUpdateAccess)
+	s.mux.HandleFunc("PUT /api/hex/manage/sites/{site}/sharing", s.manageUpdateSharing)
 	if s.config.Publisher != nil {
 		s.mux.HandleFunc("POST /api/hex/manage/sites/{site}/unpublish", s.manageUnpublish)
 	}
@@ -105,8 +97,8 @@ func (s *Server) registerManageRoutes() {
 	}
 }
 
-// managePage lists the sites and artifacts the viewer owns; admins can list
-// every site.
+// managePage lists the sites and files the viewer owns, filtered by kind and
+// search text; admins can list every site.
 func (s *Server) managePage(w http.ResponseWriter, r *http.Request) {
 	if !s.platformHost(r.Host) {
 		http.NotFound(w, r)
@@ -118,15 +110,45 @@ func (s *Server) managePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	view := s.baseManageView(identity)
-	view.All = view.Admin && r.URL.Query().Get("all") == "1"
-	sites, err := s.ownedSites(r.Context(), identity, view.All)
+	view := manageListView{Chrome: s.chromeFor(identity, "manage")}
+	query := r.URL.Query()
+	view.All = view.Viewer.Admin && query.Get("all") == "1"
+	view.Filter = query.Get("kind")
+	view.Query = strings.TrimSpace(query.Get("q"))
+
+	mine, _, err := s.personalSites(r.Context(), identity, view.All)
 	if err != nil {
 		writeServerError(w, err)
 		return
 	}
-	view.Sites = sites
-	s.renderPage(w, "manage", view)
+	for _, card := range mine {
+		view.Counts.All++
+		if card.Kind == "File" {
+			view.Counts.Files++
+		} else {
+			view.Counts.Apps++
+		}
+		if !matchesFilter(card, view.Filter, view.Query) {
+			continue
+		}
+		view.Sites = append(view.Sites, card)
+	}
+	s.writePortalPage(w, "manage", view)
+}
+
+func matchesFilter(card siteCard, kind, query string) bool {
+	switch kind {
+	case "apps":
+		if card.Kind != "App" {
+			return false
+		}
+	case "files":
+		if card.Kind != "File" {
+			return false
+		}
+	}
+	text := strings.ToLower(strings.Join([]string{card.Name, card.Title, card.Description}, " "))
+	return strings.Contains(text, strings.ToLower(query))
 }
 
 // mySites lists the sites and artifacts the caller owns, newest first, for
@@ -137,99 +159,26 @@ func (s *Server) mySites(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "not authenticated")
 		return
 	}
-	sites, err := s.ownedSites(r.Context(), identity, false)
+	mine, _, err := s.personalSites(r.Context(), identity, false)
 	if err != nil {
 		writeServerError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, sites)
+	if mine == nil {
+		mine = []siteCard{}
+	}
+	writeJSON(w, http.StatusOK, mine)
 }
 
-func (s *Server) baseManageView(identity *Identity) manageView {
-	return manageView{
-		Platform: s.platformName(),
-		Viewer:   personOf(identity),
-		Admin:    s.isAdmin(identity),
-		Data:     s.config.Database != nil,
-		Files:    s.config.Files != nil,
-	}
+var siteTabs = []siteTab{
+	{"overview", "Overview"},
+	{"sharing", "Sharing"},
+	{"data", "Data"},
+	{"history", "History"},
+	{"settings", "Settings"},
 }
 
-func (s *Server) ownedSites(ctx context.Context, identity *Identity, all bool) ([]manageSite, error) {
-	names, err := s.config.Sites.ListSites(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	sites := []manageSite{}
-	for _, name := range names {
-		if !siteNamePattern.MatchString(name) {
-			continue
-		}
-		access, exists, err := s.sitePolicy(ctx, name)
-		if err != nil {
-			return nil, err
-		}
-		if !all && (!exists || !identity.matchesAny(access.Owners)) {
-			continue
-		}
-		sites = append(sites, s.describeSite(ctx, name, access, exists))
-	}
-
-	slices.SortFunc(sites, func(left, right manageSite) int {
-		return right.Timestamp.Compare(left.Timestamp)
-	})
-	return sites, nil
-}
-
-func (s *Server) describeSite(ctx context.Context, name string, access SiteAccess, exists bool) manageSite {
-	site := manageSite{Name: name, Title: name, Kind: "App", Audience: "Everyone signed in"}
-	site.URL, _ = s.siteURL(name)
-
-	if reader, ok := s.config.Sites.(SiteMetadataReader); ok {
-		metadata, err := reader.ReadSiteMetadata(ctx, name)
-		if err != nil {
-			slog.Warn("unreadable site metadata", "site", name, "error", err)
-		}
-		if metadata != nil {
-			if metadata.Title != "" {
-				site.Title = metadata.Title
-			}
-			if metadata.Kind == KindArtifact {
-				site.Kind = "Artifact"
-			}
-			site.CreatedBy = personName(metadata.CreatedBy)
-			site.PublishedBy = personName(metadata.PublishedBy)
-			site.Timestamp = metadata.PublishedAt
-			if !metadata.PublishedAt.IsZero() {
-				site.Published = metadata.PublishedAt.Format("Jan 2, 2006 15:04")
-			}
-		}
-	}
-
-	switch {
-	case !exists || len(access.Viewers) == 0:
-		site.Audience = "Everyone signed in"
-	case len(access.Viewers) == 1 && slices.Equal(access.Viewers, access.Owners):
-		site.Audience = "Only owners"
-	default:
-		site.Audience = fmt.Sprintf("%d people or groups", len(access.Viewers))
-	}
-	return site
-}
-
-func personName(person *Person) string {
-	if person == nil {
-		return ""
-	}
-	if person.Name != "" {
-		return person.Name
-	}
-	return person.Email
-}
-
-// manageSitePage shows one site: its details and history, and the access
-// and data sections the viewer may manage.
+// manageSitePage shows one site on the selected tab.
 func (s *Server) manageSitePage(w http.ResponseWriter, r *http.Request) {
 	if !s.platformHost(r.Host) {
 		http.NotFound(w, r)
@@ -240,13 +189,65 @@ func (s *Server) manageSitePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	view := s.baseManageView(identity)
-	described := s.describeSite(r.Context(), site, access, exists)
-	view.Site = &described
+	view := sitePageView{
+		Chrome: s.chromeFor(identity, "manage"),
+		Tab:    r.URL.Query().Get("tab"),
+		Tabs:   siteTabs,
+		Data:   s.config.Database != nil,
+		Files:  s.config.Files != nil,
+	}
+	if !slices.ContainsFunc(siteTabs, func(tab siteTab) bool { return tab.ID == view.Tab }) {
+		view.Tab = "overview"
+	}
+
+	var metadata *SiteMetadata
+	if reader, ok := s.config.Sites.(SiteMetadataReader); ok {
+		var err error
+		if metadata, err = reader.ReadSiteMetadata(r.Context(), site); err != nil {
+			slog.Warn("unreadable site metadata", "site", site, "error", err)
+		}
+	}
+	siteURL, _ := s.siteURL(site)
+	view.Site = cardFromMetadata(site, siteURL, metadata, time.Now())
+	view.Site.Access, view.Site.AccessTone = audience(access, exists)
 	view.History = s.historyEntries(r.Context(), site)
-	view.Access = s.accessView(r.Context(), site, access)
-	view.Access.Artifact = described.Kind == "Artifact"
-	s.renderPage(w, "site", view)
+	view.Facts = factsFrom(metadata, view.History)
+	view.Sharing = s.sharingView(r.Context(), site, access, exists)
+	view.People = view.Sharing.Entries
+	s.writePortalPage(w, "site", view)
+}
+
+func factsFrom(metadata *SiteMetadata, history []historyEntry) siteFacts {
+	var facts siteFacts
+	if metadata != nil {
+		facts.CreatedBy = personName(metadata.CreatedBy)
+		if facts.CreatedBy == "" {
+			facts.CreatedBy = metadata.Author
+		}
+		if !metadata.CreatedAt.IsZero() {
+			facts.Created = metadata.CreatedAt.Format("Jan 2, 2006")
+			facts.CreatedISO = metadata.CreatedAt.Format(time.RFC3339)
+		}
+		facts.PublishedBy = personName(metadata.PublishedBy)
+		if !metadata.PublishedAt.IsZero() {
+			facts.Published = relativeTime(metadata.PublishedAt, time.Now())
+		}
+	}
+	if len(history) > 0 {
+		facts.Files = history[0].Files
+		facts.Size = history[0].Size
+	}
+	return facts
+}
+
+func personName(person *Person) string {
+	if person == nil {
+		return ""
+	}
+	if person.Name != "" {
+		return person.Name
+	}
+	return person.Email
 }
 
 // manageCaller authorizes a management request: the caller must own the
@@ -284,10 +285,11 @@ func (s *Server) historyEntries(ctx context.Context, site string) []historyEntry
 		slog.Warn("unreadable publication history", "site", site, "error", err)
 	}
 
+	now := time.Now()
 	entries := make([]historyEntry, 0, len(history))
 	for _, publication := range history {
 		entries = append(entries, historyEntry{
-			When:  publication.PublishedAt.Format("Jan 2, 2006 15:04"),
+			When:  relativeTime(publication.PublishedAt, now),
 			ISO:   publication.PublishedAt.Format(time.RFC3339),
 			By:    personName(publication.PublishedBy),
 			Files: publication.Files,
@@ -295,147 +297,6 @@ func (s *Server) historyEntries(ctx context.Context, site string) []historyEntry
 		})
 	}
 	return entries
-}
-
-func (s *Server) accessView(ctx context.Context, site string, access SiteAccess) accessView {
-	rules := SiteAccess{Paths: access.Paths, Collections: access.Collections, Files: access.Files, Channels: access.Channels}
-	encoded, err := json.MarshalIndent(rules, "", "  ")
-	if err != nil {
-		encoded = []byte("{}")
-	}
-	return accessView{
-		Site: site,
-		Lists: []principalList{
-			{"owner", "Owners", "Manage this page, publish, and see all data.", s.describePrincipals(ctx, access.Owners)},
-			{"viewer", "Viewers", "Can open the site and read its data. Leave empty to let everyone signed in open it.", s.describePrincipals(ctx, access.Viewers)},
-			{"editor", "Editors", "Can change the site's data. Leave empty to let every viewer edit.", s.describePrincipals(ctx, access.Editors)},
-		},
-		Rules: rulesText(encoded),
-	}
-}
-
-// rulesText drops the empty owner, editor and viewer lists from the rule
-// editor, which edits them separately.
-func rulesText(encoded []byte) string {
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(encoded, &fields); err != nil {
-		return "{}"
-	}
-	for _, name := range []string{"owners", "editors", "viewers"} {
-		delete(fields, name)
-	}
-	if len(fields) == 0 {
-		return "{}"
-	}
-	pretty, err := json.MarshalIndent(fields, "", "  ")
-	if err != nil {
-		return "{}"
-	}
-	return string(pretty)
-}
-
-// manageUpdateAccess replaces the site's policy from the access form and
-// re-renders the form with the outcome.
-func (s *Server) manageUpdateAccess(w http.ResponseWriter, r *http.Request) {
-	identity, site, access, _, ok := s.manageCaller(w, r)
-	if !ok {
-		return
-	}
-	if err := r.ParseForm(); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid form")
-		return
-	}
-
-	view := s.accessView(r.Context(), site, access)
-	view.Artifact = r.PostForm.Get("artifact") == "1"
-	requested, err := accessFromForm(r)
-	if err != nil {
-		view.Error = err.Error()
-		view.Rules = r.PostForm.Get("rules")
-		s.renderFragment(w, "access", view)
-		return
-	}
-
-	saved, status, err := s.replaceSiteAccess(r.Context(), identity, site, requested)
-	if err != nil {
-		if status == 0 {
-			writeServerError(w, err)
-			return
-		}
-		view.Error = err.Error()
-		view.Rules = r.PostForm.Get("rules")
-		s.renderFragment(w, "access", view)
-		return
-	}
-
-	slog.Info("site access changed in the portal", "site", site, "by", identityName(identity))
-	view = s.accessView(r.Context(), site, saved)
-	view.Artifact = r.PostForm.Get("artifact") == "1"
-	view.Message = "Saved. Changes apply within a few seconds."
-	s.renderFragment(w, "access", view)
-}
-
-// accessFromForm builds a policy from the form's principal lists and the
-// JSON rules text.
-func accessFromForm(r *http.Request) (SiteAccess, error) {
-	var access SiteAccess
-	rules := strings.TrimSpace(r.PostForm.Get("rules"))
-	if rules != "" {
-		decoder := json.NewDecoder(strings.NewReader(rules))
-		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&access); err != nil {
-			return SiteAccess{}, fmt.Errorf("the rules are not valid: %v", err)
-		}
-	}
-	access.Owners = cleanPrincipals(r.PostForm["owner"])
-	access.Editors = cleanPrincipals(r.PostForm["editor"])
-	access.Viewers = cleanPrincipals(r.PostForm["viewer"])
-	if len(access.Owners) == 0 {
-		return SiteAccess{}, errors.New("a site needs at least one owner")
-	}
-	return access, nil
-}
-
-func cleanPrincipals(values []string) []string {
-	principals := []string{}
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value != "" && !slices.Contains(principals, value) {
-			principals = append(principals, value)
-		}
-	}
-	return principals
-}
-
-// manageDirectory renders picker suggestions: configured groups, people who
-// have used the platform, and a typed email address.
-func (s *Server) manageDirectory(w http.ResponseWriter, r *http.Request) {
-	if s.requestIdentity(r) == nil {
-		writeError(w, http.StatusUnauthorized, "not authenticated")
-		return
-	}
-	query := strings.TrimSpace(r.URL.Query().Get("query"))
-	result, err := s.searchDirectory(r.Context(), query, 8)
-	if err != nil {
-		writeServerError(w, err)
-		return
-	}
-
-	var suggestions []principalLabel
-	for _, group := range result.Groups {
-		suggestions = append(suggestions, principalLabel{Principal: "group:" + group.ID, Kind: "group", Name: group.Name, Detail: "group"})
-	}
-	for _, person := range result.People {
-		suggestions = append(suggestions, principalLabel{Principal: "user:" + person.ID, Kind: "user", Name: person.Name, Detail: person.Email})
-	}
-	if strings.Contains(query, "@") && principalPattern.MatchString("user:"+query) {
-		suggestions = append(suggestions, principalLabel{Principal: "user:" + query, Kind: "user", Name: query, Detail: "by email"})
-	}
-	s.renderFragment(w, "suggestions", struct {
-		List        string
-		Suggestions []principalLabel
-		Query       string
-	}{r.URL.Query().Get("list"), suggestions, query})
 }
 
 // manageUnpublish removes the site's files; the policy stays, keeping the
@@ -639,25 +500,6 @@ func (s *Server) manageDeleteFile(w http.ResponseWriter, r *http.Request) {
 	}
 	slog.Info("file deleted in the portal", "site", site, "key", key, "by", identityName(identity))
 	w.WriteHeader(http.StatusOK)
-}
-
-func (s *Server) renderPage(w http.ResponseWriter, name string, view any) {
-	w.Header().Set("Content-Security-Policy", "default-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
-	w.Header().Set("Referrer-Policy", "same-origin")
-	s.renderFragment(w, name, view)
-}
-
-func (s *Server) renderFragment(w http.ResponseWriter, name string, view any) {
-	var output bytes.Buffer
-	if err := portalTemplates.ExecuteTemplate(&output, name, view); err != nil {
-		writeServerError(w, err)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	if _, err := w.Write(output.Bytes()); err != nil {
-		slog.Error("write portal page", "error", err)
-	}
 }
 
 func formatBytes(size int64) string {

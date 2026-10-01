@@ -40,7 +40,7 @@ func TestPortalVisibilityStatisticsAndHTMX(t *testing.T) {
 		}},
 	})
 	page := request(t, server, http.MethodGet, "https://hex.smartdok.dev/", nil, http.StatusOK)
-	for _, expected := range []string{"SmartDok Hex", "Dashboard", "Notes &lt;script&gt;", "hx-get=", "/api/hex/htmx.min.js", "Download installer"} {
+	for _, expected := range []string{"SmartDok Hex", "Dashboard", "Notes &lt;script&gt;", "hx-get=", "/api/hex/htmx.min.js", `href="/start"`} {
 		if !strings.Contains(page.Body.String(), expected) {
 			t.Fatalf("missing %q from landing page", expected)
 		}
@@ -50,6 +50,12 @@ func TestPortalVisibilityStatisticsAndHTMX(t *testing.T) {
 			t.Fatalf("landing page exposed %q", forbidden)
 		}
 	}
+	// Installers live on the build and publish page.
+	start := request(t, server, http.MethodGet, "https://hex.smartdok.dev/start", nil, http.StatusOK).Body.String()
+	if !strings.Contains(start, "Download installer") || !strings.Contains(start, `id="install-command"`) {
+		t.Fatal("build and publish page lacks the installer")
+	}
+	request(t, server, http.MethodGet, "https://dashboard.hex.smartdok.dev/start", nil, http.StatusNotFound)
 	request(t, server, http.MethodGet, "https://dashboard.hex.smartdok.dev/", nil, http.StatusNotFound)
 	request(t, server, http.MethodGet, "https://evil.example/", nil, http.StatusNotFound)
 	fragment := request(t, server, http.MethodGet, "/api/hex/catalog?search=reports&sort=name", nil, http.StatusOK)
@@ -81,7 +87,8 @@ func TestPortalVisibilityStatisticsAndHTMX(t *testing.T) {
 func TestEmptyPortalWithoutConnection(t *testing.T) {
 	server := hex.New(hex.Config{SiteBaseURL: "https://hex.example.com"})
 	page := request(t, server, http.MethodGet, "https://hex.example.com/", nil, http.StatusOK)
-	if !strings.Contains(page.Body.String(), "No apps are listed yet") || strings.Contains(page.Body.String(), `id="installer-controls"`) {
+	start := request(t, server, http.MethodGet, "https://hex.example.com/start", nil, http.StatusOK).Body.String()
+	if !strings.Contains(page.Body.String(), "No apps are listed") || strings.Contains(start, `id="installer-controls"`) {
 		t.Fatal("empty or unconfigured portal is incorrect")
 	}
 	request(t, server, http.MethodGet, "/api/hex/install/linux", nil, http.StatusNotFound)

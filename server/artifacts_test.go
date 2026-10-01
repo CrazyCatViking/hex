@@ -77,7 +77,7 @@ func TestArtifactsArePrivateUntilShared(t *testing.T) {
 	}
 	// The publication's title ("Demo", from the test helper) replaces the
 	// one given at creation.
-	if len(mine) != 1 || mine[0].Name != created.Name || mine[0].Title != "Demo" || mine[0].Kind != "Artifact" {
+	if len(mine) != 1 || mine[0].Name != created.Name || mine[0].Title != "Demo" || mine[0].Kind != "File" {
 		t.Fatalf("unexpected site list: %+v", mine)
 	}
 	if others := requestAs(t, server, colleague, "GET", "/api/hex/my-sites", nil, 200).Body.String(); strings.Contains(others, created.Name) {

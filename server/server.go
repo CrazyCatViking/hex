@@ -66,6 +66,8 @@ func New(config Config) *Server {
 
 func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /{$}", s.landingPage)
+	s.mux.HandleFunc("GET /start", s.startPage)
+	s.mux.HandleFunc("GET /api/hex/favicon.svg", s.portalAsset)
 	s.mux.HandleFunc("GET /api/hex/overview", s.overview)
 	s.mux.HandleFunc("GET /api/hex/catalog", s.catalog)
 	s.mux.HandleFunc("GET /api/hex/htmx.min.js", s.portalAsset)
