@@ -66,6 +66,10 @@ async function main() {
       join(root, "examples/custom-server/main.go"),
       join(platform, "main.go"),
     );
+    await copyFile(
+      join(root, "examples/custom-server/actions.go"),
+      join(platform, "actions.go"),
+    );
     await writeFile(
       join(platform, "go.mod"),
       `module example.com/my-hex-platform
@@ -136,6 +140,7 @@ replace github.com/crazycatviking/hex => ${JSON.stringify(root)}
     assert.equal(capabilities.realtime, false);
     assert.equal(capabilities.files, true);
     assert.equal(capabilities.database, true);
+    assert.equal(capabilities.actions, true);
 
     const setup = await exec(
       cli,
@@ -146,6 +151,43 @@ replace github.com/crazycatviking/hex => ${JSON.stringify(root)}
       },
     );
     assert.equal(JSON.parse(setup.stdout).status, "ready");
+
+    const actionList = await exec(
+      cli,
+      ["actions", "list", "--site", "my-app"],
+      { cwd: directory, env: cliEnvironment },
+    );
+    assert.equal(JSON.parse(actionList.stdout)[0].name, "create-task");
+    await writeFile(join(directory, "task.json"), '{"title":"Agent task"}');
+    const actionResult = await exec(
+      cli,
+      [
+        "actions",
+        "run",
+        "--site",
+        "my-app",
+        "create-task",
+        "--input",
+        "@task.json",
+      ],
+      { cwd: directory, env: cliEnvironment },
+    );
+    const taskID = JSON.parse(actionResult.stdout).id;
+    const taskResult = await exec(
+      cli,
+      [
+        "data",
+        "get",
+        "--site",
+        "my-app",
+        "--collection",
+        "tasks",
+        "--id",
+        taskID,
+      ],
+      { cwd: directory, env: cliEnvironment },
+    );
+    assert.equal(JSON.parse(taskResult.stdout).data.title, "Agent task");
 
     await exec(cli, ["init", app, "--name", "demo"], {
       env: cliEnvironment,
@@ -160,6 +202,11 @@ replace github.com/crazycatviking/hex => ${JSON.stringify(root)}
       await (await fetch(siteURL, { dispatcher })).text(),
       "consumer website",
     );
+    const fetchedSite = await exec(cli, ["fetch", "--site", "demo"], {
+      cwd: directory,
+      env: cliEnvironment,
+    });
+    assert.equal(fetchedSite.stdout, "consumer website");
 
     await client.files.upload("persist.bin", new Uint8Array([0, 255, 10]));
     const uploadedFile = await client.files.download("persist.bin");
@@ -175,10 +222,12 @@ replace github.com/crazycatviking/hex => ${JSON.stringify(root)}
     await assert.rejects(
       fetch(`http://127.0.0.1:${apiPort}/api/hex/capabilities`),
     );
-    await exec(cli, ["publish"], {
-      cwd: app,
-      env: cliEnvironment,
-    });
+    await assert.rejects(
+      exec(cli, ["publish"], {
+        cwd: app,
+        env: cliEnvironment,
+      }),
+    );
 
     const binary = join(platform, "platform-server");
     await exec("go", ["build", "-o", binary, "."], {

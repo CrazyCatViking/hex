@@ -16,6 +16,8 @@ type Config struct {
 	Identity    IdentityResolver
 	Access      AccessStore
 	AdminGroups []string
+	// Actions exposes contract-validated operations implemented by app backends.
+	Actions *ActionRegistry
 	// Publisher enables publishing through the API. PublisherGroups limits
 	// who may claim new site names; empty lets every signed-in user.
 	Publisher       SitePublisher
@@ -118,6 +120,11 @@ func (s *Server) registerRoutes() {
 		s.mux.HandleFunc("GET /api/sites/{site}/db/{collection}/{id}", s.siteScoped(s.getDocument))
 		s.mux.HandleFunc("DELETE /api/sites/{site}/db/{collection}/{id}", s.siteScoped(s.deleteDocument))
 	}
+	if s.config.Actions != nil {
+		s.mux.HandleFunc("GET /api/sites/{site}/actions", s.actionScoped(s.listActions))
+		s.mux.HandleFunc("GET /api/sites/{site}/actions/{action}", s.actionScoped(s.describeAction))
+		s.mux.HandleFunc("POST /api/sites/{site}/actions/{action}", s.actionScoped(s.runAction))
+	}
 
 	if s.config.Realtime != nil {
 		s.mux.HandleFunc("GET /api/sites/{site}/realtime/{channel}", s.siteScoped(s.websocket))
@@ -214,6 +221,7 @@ func (s *Server) capabilityDescription() map[string]any {
 		"accessControl":  s.config.Identity != nil && s.config.Access != nil,
 		"publishing":     s.config.Publisher != nil,
 		"artifacts":      s.artifactsEnabled(),
+		"actions":        s.config.Actions != nil,
 		"maxUploadBytes": s.config.MaxUploadBytes,
 	}
 }

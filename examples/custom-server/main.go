@@ -35,6 +35,12 @@ func run() error {
 		}
 	}()
 
+	actions, err := appActions(environment.Config.Database)
+	if err != nil {
+		return err
+	}
+	environment.Config.Actions = actions
+
 	mux := http.NewServeMux()
 	mux.Handle("/", hex.New(environment.Config))
 	mux.HandleFunc("GET /api/platform", func(w http.ResponseWriter, r *http.Request) {

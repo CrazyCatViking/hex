@@ -87,6 +87,21 @@ Set `"discoverable": false` in an app's hex.json and republish to hide its listi
 
 Agents such as Claude Code can use `hex setup <url> --json` and, when user sign-in is required, `hex setup --file <downloaded-file> --json`. Setup saves a non-secret default profile, including the platform's configured auth type, OIDC issuer, client ID and scopes. API commands, including publishing, sign in through the browser the first time and reuse the saved session; `hex login` and `hex logout` manage it, and `HEX_TOKEN` overrides it. See [Setup and authentication handoff](docs/setup.md).
 
+## Use deployed apps from a local agent
+
+The CLI reuses the saved sign-in to read protected pages, application records and files, and execute operations explicitly exposed by an app backend:
+
+```sh
+hex fetch --site my-app --path /
+hex data list --site my-app --collection tasks
+hex files list --site my-app --prefix exports/
+hex actions list --site my-app
+hex actions describe --site my-app create-task
+hex actions run --site my-app create-task --input @task.json
+```
+
+Reads respect the user's existing permissions. Changes go through registered actions whose JSON Schema contracts are validated by both the CLI and backend. A consuming server registers contracts and handlers together in `Config.Actions`; the [custom-server example](examples/custom-server/README.md) implements `create-task`. See [Agent access and app actions](docs/agents.md) for the full command API and registration model.
+
 ## Browser API
 
 ```ts
