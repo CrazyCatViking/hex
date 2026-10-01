@@ -157,6 +157,48 @@ func TestPostgresSiteAccess(t *testing.T) {
 	if err := database.DeleteSiteAccess(ctx, site); !errors.Is(err, hex.ErrNotFound) {
 		t.Fatalf("expected not found, got %v", err)
 	}
+
+	// Independent connection pools must serialize even the first claim,
+	// when there is no policy row to lock yet.
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for _, instance := range []*Database{database, reopened} {
+		go func() {
+			<-start
+			results <- instance.UpdateSiteAccess(ctx, site, func(_ hex.SiteAccess, exists bool) (*hex.SiteAccess, error) {
+				if exists {
+					return nil, hex.ErrForbidden
+				}
+				return &entry, nil
+			})
+		}()
+	}
+	close(start)
+	winners, rejected := 0, 0
+	for range 2 {
+		err := <-results
+		switch {
+		case err == nil:
+			winners++
+		case errors.Is(err, hex.ErrForbidden):
+			rejected++
+		default:
+			t.Fatalf("claim failed: %v", err)
+		}
+	}
+	if winners != 1 || rejected != 1 {
+		t.Fatalf("claims: %d winners, %d rejected", winners, rejected)
+	}
+	if err := database.UpdateSiteAccess(ctx, site, func(current hex.SiteAccess, _ bool) (*hex.SiteAccess, error) {
+		current.Owners[0] = "user:attacker"
+		return &current, hex.ErrForbidden
+	}); !errors.Is(err, hex.ErrForbidden) {
+		t.Fatalf("expected rejected update: %v", err)
+	}
+	access, err = reopened.GetSiteAccess(ctx, site)
+	if err != nil || access.Owners[0] != "user:owner-id" {
+		t.Fatalf("rejected update changed policy: %+v, %v", access, err)
+	}
 }
 
 func TestPostgresPeopleAndCollections(t *testing.T) {

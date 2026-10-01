@@ -14,7 +14,7 @@ import (
 // The directory turns principals into names without reading the identity
 // provider's directory: people are remembered from their own sign-ins, and
 // groups come from configuration. Only people who have used the platform can
-// be found by name; anyone else can still be referred to by email.
+// be found by name or email; policies always refer to their stable identity ID.
 
 // PeopleStore remembers the people who have signed in to the platform.
 // FindPeople matches names and emails case-insensitively; GetPeople looks
@@ -31,7 +31,10 @@ type NamedGroup struct {
 	Name string `json:"name"`
 }
 
-const rememberInterval = time.Hour
+const (
+	rememberInterval    = time.Hour
+	maxRememberedPeople = 10000
+)
 
 // peopleSeen limits how often the same person is written to the store.
 type peopleSeen struct {
@@ -59,7 +62,7 @@ func (s *Server) rememberPerson(ctx context.Context, identity *Identity) {
 	previous, ok := s.seen.entries[person.ID]
 	fresh := ok && previous.person == person && now.Sub(previous.at) < rememberInterval
 	if !fresh {
-		if len(s.seen.entries) >= maxCachedPolicies {
+		if len(s.seen.entries) >= maxRememberedPeople {
 			s.seen.entries = make(map[string]seenPerson)
 		}
 		s.seen.entries[person.ID] = attempted
@@ -157,9 +160,6 @@ func (s *Server) describePrincipals(ctx context.Context, principals []string) []
 		}
 		for _, person := range found {
 			people[strings.ToLower(person.ID)] = person
-			if person.Email != "" {
-				people[strings.ToLower(person.Email)] = person
-			}
 		}
 	}
 

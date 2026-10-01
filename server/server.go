@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 )
 
 type Config struct {
@@ -35,10 +34,9 @@ type Config struct {
 }
 
 type Server struct {
-	config   Config
-	mux      *http.ServeMux
-	policies *policyCache
-	seen     peopleSeen
+	config Config
+	mux    *http.ServeMux
+	seen   peopleSeen
 }
 
 func New(config Config) *Server {
@@ -56,10 +54,9 @@ func New(config Config) *Server {
 	}
 
 	server := &Server{
-		config:   config,
-		mux:      http.NewServeMux(),
-		policies: newPolicyCache(10 * time.Second),
-		seen:     peopleSeen{entries: make(map[string]seenPerson)},
+		config: config,
+		mux:    http.NewServeMux(),
+		seen:   peopleSeen{entries: make(map[string]seenPerson)},
 	}
 	server.registerRoutes()
 
@@ -142,12 +139,44 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if strings.HasPrefix(r.URL.Path, "/api/") {
 		w.Header().Set("Cache-Control", "no-store")
+		if !s.allowAppAPI(w, r) {
+			return
+		}
 		if !platformDownloadNavigation(r) && !authorizationSubrequest(r) && !validateRequestOrigin(w, r) {
 			return
 		}
 	}
 
 	s.mux.ServeHTTP(w, r)
+}
+
+// App origins may use only their own data namespace and the small set of
+// platform endpoints needed by the browser client. In particular, an app must
+// not inherit its visitor's authority to manage or read other sites. Non-site
+// API hostnames remain available for the platform and CLI (including hosts
+// configured separately from SiteBaseURL).
+func (s *Server) allowAppAPI(w http.ResponseWriter, r *http.Request) bool {
+	base, err := parseSiteBaseURL(s.config.SiteBaseURL)
+	if err != nil {
+		writeServerError(w, err)
+		return false
+	}
+	host := strings.ToLower(strings.TrimSuffix((&url.URL{Host: r.Host}).Hostname(), "."))
+	domain := strings.ToLower(strings.TrimSuffix(base.Hostname(), "."))
+	suffix := "." + domain
+	if !strings.HasSuffix(host, suffix) {
+		return true
+	}
+	site := strings.TrimSuffix(host, suffix)
+	path := r.URL.Path
+	isRead := r.Method == http.MethodGet || r.Method == http.MethodHead
+	allowed := siteNamePattern.MatchString(site) && (strings.HasPrefix(path, "/api/sites/"+site+"/") ||
+		isRead && (path == "/api/hex/me" || path == "/api/hex/capabilities" ||
+			path == "/api/hex/authz" || path == "/api/hex/sites/"+site+"/permissions"))
+	if !allowed {
+		writeError(w, http.StatusForbidden, "this API is not available from an app hostname")
+	}
+	return allowed
 }
 
 // authorizationSubrequest recognizes NGINX auth_request subrequests for

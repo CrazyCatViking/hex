@@ -20,7 +20,7 @@ import (
 // and an empty Viewers list lets every signed-in user view. Paths restrict
 // static URL prefixes further, and Collections, Files and Channels override
 // who may read and write each part of the site's data. Values are typed
-// principals: user:<id or principal name>, group:<id> or role:<value>.
+// principals: user:<stable identity id>, group:<id> or role:<value>.
 type SiteAccess struct {
 	Owners      []string            `json:"owners"`
 	Editors     []string            `json:"editors"`
@@ -94,7 +94,15 @@ type AccessStore interface {
 	GetSiteAccess(ctx context.Context, site string) (SiteAccess, error)
 	PutSiteAccess(ctx context.Context, site string, access SiteAccess) error
 	DeleteSiteAccess(ctx context.Context, site string) error
+	// UpdateSiteAccess atomically reads, authorizes and changes a policy, even
+	// when the site does not exist yet. All writes to a site must serialize
+	// with this operation across store instances. The callback receives a
+	// detached copy; nil deletes the policy, and an error leaves it unchanged.
+	// Callbacks must not call back into the store.
+	UpdateSiteAccess(ctx context.Context, site string, update AccessUpdate) error
 }
+
+type AccessUpdate func(current SiteAccess, exists bool) (*SiteAccess, error)
 
 var (
 	principalPattern  = regexp.MustCompile(`^(user|group|role):[A-Za-z0-9][A-Za-z0-9@._-]{0,127}$`)
@@ -302,27 +310,28 @@ func (s *Server) replaceSiteAccess(ctx context.Context, identity *Identity, site
 		return SiteAccess{}, http.StatusBadRequest, err
 	}
 
-	existing, exists, err := s.sitePolicy(ctx, site)
+	var saved SiteAccess
+	status := 0
+	err := s.config.Access.UpdateSiteAccess(ctx, site, func(existing SiteAccess, exists bool) (*SiteAccess, error) {
+		if exists && s.siteRole(identity, existing, true) != roleOwner {
+			status = http.StatusForbidden
+			return nil, errors.New("only site owners can change the access policy")
+		}
+		if !exists && !s.canCreateSites(identity) {
+			status = http.StatusForbidden
+			return nil, errors.New("you are not allowed to create sites on this platform")
+		}
+		saved = s.withOwners(identity, requested, existing, exists)
+		if err := s.keepsCallerOwner(identity, saved); err != nil {
+			status = http.StatusBadRequest
+			return nil, err
+		}
+		return &saved, nil
+	})
 	if err != nil {
-		return SiteAccess{}, 0, err
+		return SiteAccess{}, status, err
 	}
-	if exists && s.siteRole(identity, existing, true) != roleOwner {
-		return SiteAccess{}, http.StatusForbidden, errors.New("only site owners can change the access policy")
-	}
-	if !exists && !s.canCreateSites(identity) {
-		return SiteAccess{}, http.StatusForbidden, errors.New("you are not allowed to create sites on this platform")
-	}
-
-	requested = s.withOwners(identity, requested, existing, exists)
-	if err := s.keepsCallerOwner(identity, requested); err != nil {
-		return SiteAccess{}, http.StatusBadRequest, err
-	}
-
-	if err := s.config.Access.PutSiteAccess(ctx, site, requested); err != nil {
-		return SiteAccess{}, 0, err
-	}
-	s.policies.invalidate(site)
-	return requested, 0, nil
+	return saved, 0, nil
 }
 
 // withOwners fills in the owners of a policy that names none: the current
@@ -354,26 +363,26 @@ func (s *Server) deleteSiteAccess(w http.ResponseWriter, r *http.Request) {
 	}
 
 	site := r.PathValue("site")
-	access, exists, err := s.sitePolicy(r.Context(), site)
+	status := 0
+	err := s.config.Access.UpdateSiteAccess(r.Context(), site, func(access SiteAccess, exists bool) (*SiteAccess, error) {
+		if !exists {
+			status = http.StatusNotFound
+			return nil, ErrNotFound
+		}
+		if s.siteRole(identity, access, true) != roleOwner {
+			status = http.StatusForbidden
+			return nil, errors.New("only site owners can remove the access policy")
+		}
+		return nil, nil
+	})
 	if err != nil {
-		writeServerError(w, err)
+		if status == 0 {
+			writeServerError(w, err)
+		} else {
+			writeError(w, status, err.Error())
+		}
 		return
 	}
-	if !exists {
-		writeError(w, http.StatusNotFound, "not found")
-		return
-	}
-	if s.siteRole(identity, access, true) != roleOwner {
-		writeError(w, http.StatusForbidden, "only site owners can remove the access policy")
-		return
-	}
-
-	if err := s.config.Access.DeleteSiteAccess(r.Context(), site); err != nil {
-		writeServerError(w, err)
-		return
-	}
-	s.policies.invalidate(site)
-
 	w.WriteHeader(http.StatusNoContent)
 }
 

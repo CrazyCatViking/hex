@@ -234,7 +234,7 @@ func (s *Server) manageUpdateSharing(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("site sharing changed in the portal", "site", site, "by", identityName(identity))
 	view := s.sharingView(r.Context(), site, saved, true)
-	view.Message = "Saved. Changes apply within a few seconds."
+	view.Message = "Saved. Changes apply to new requests."
 	s.renderFragment(w, "sharing", view)
 }
 

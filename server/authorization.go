@@ -5,8 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"strings"
-	"sync"
-	"time"
 )
 
 type siteRole int
@@ -224,14 +222,21 @@ func (s *Server) authorizeSite(ctx context.Context, identity *Identity, site str
 	}, nil
 }
 
-// sitePolicy returns the site's policy through a short-lived cache, so that
-// the per-asset NGINX authorization subrequest rarely reaches the database.
-// Without an access store every site is open.
+// sitePolicy reads the current policy. Security decisions must not use a
+// replica-local cache: another replica may have restricted a site immediately
+// before uploading private files. Without an access store every site is open.
 func (s *Server) sitePolicy(ctx context.Context, site string) (SiteAccess, bool, error) {
 	if s.config.Access == nil {
 		return SiteAccess{}, false, nil
 	}
-	return s.policies.get(ctx, s.config.Access, site)
+	access, err := s.config.Access.GetSiteAccess(ctx, site)
+	if errors.Is(err, ErrNotFound) {
+		return SiteAccess{}, false, nil
+	}
+	if err != nil {
+		return SiteAccess{}, false, err
+	}
+	return NormalizeSiteAccess(access), true, nil
 }
 
 func (s *Server) canViewSite(ctx context.Context, identity *Identity, site string) (bool, error) {
@@ -399,69 +404,4 @@ func withDefaultRule(rules map[string]DataRule) map[string]DataRule {
 		extended[name] = rule
 	}
 	return extended
-}
-
-// policyCache keeps recently read site policies for a few seconds. Writes
-// through this server invalidate their entry immediately; the TTL bounds how
-// long another replica's change can take to apply.
-type policyCache struct {
-	mu         sync.Mutex
-	ttl        time.Duration
-	entries    map[string]cachedPolicy
-	generation uint64
-}
-
-// maxCachedPolicies bounds the cache, since any signed-in caller can make the
-// server look up arbitrary site names.
-const maxCachedPolicies = 10000
-
-type cachedPolicy struct {
-	access  SiteAccess
-	exists  bool
-	expires time.Time
-}
-
-func newPolicyCache(ttl time.Duration) *policyCache {
-	return &policyCache{ttl: ttl, entries: make(map[string]cachedPolicy)}
-}
-
-func (c *policyCache) get(ctx context.Context, store AccessStore, site string) (SiteAccess, bool, error) {
-	now := time.Now()
-	c.mu.Lock()
-	entry, ok := c.entries[site]
-	generation := c.generation
-	c.mu.Unlock()
-	if ok && now.Before(entry.expires) {
-		return entry.access, entry.exists, nil
-	}
-
-	access, err := store.GetSiteAccess(ctx, site)
-	exists := err == nil
-	if errors.Is(err, ErrNotFound) {
-		err = nil
-	}
-	if err != nil {
-		return SiteAccess{}, false, err
-	}
-	if exists {
-		access = NormalizeSiteAccess(access)
-	}
-
-	c.mu.Lock()
-	// An invalidation during the store read must not be undone by this fill.
-	if c.generation == generation {
-		if len(c.entries) >= maxCachedPolicies {
-			c.entries = make(map[string]cachedPolicy)
-		}
-		c.entries[site] = cachedPolicy{access: access, exists: exists, expires: now.Add(c.ttl)}
-	}
-	c.mu.Unlock()
-	return access, exists, nil
-}
-
-func (c *policyCache) invalidate(site string) {
-	c.mu.Lock()
-	c.generation++
-	delete(c.entries, site)
-	c.mu.Unlock()
 }

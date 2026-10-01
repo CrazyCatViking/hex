@@ -119,7 +119,7 @@ func TestPortalSharing(t *testing.T) {
 
 	path := "/api/hex/manage/sites/dashboard/sharing"
 	saved := formRequest(t, server, alex, "PUT", path, url.Values{
-		"principal": {"user:alex-id", "group:sales-id", "user:bea-id", "user:new.person@example.test"},
+		"principal": {"user:alex-id", "group:sales-id", "user:bea-id", "user:new-person-id"},
 		"role":      {"owner", "viewer", "editor", "viewer"},
 		"general":   {"restricted"},
 		"rules":     {`{"paths":[{"prefix":"/admin/","viewers":"owners"}]}`},
@@ -137,7 +137,7 @@ func TestPortalSharing(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !slices.Equal(policy.Owners, []string{"user:alex-id"}) || !slices.Equal(policy.Editors, []string{"user:bea-id"}) ||
-		!slices.Equal(policy.Viewers, []string{"group:sales-id", "user:new.person@example.test"}) || len(policy.Paths) != 1 {
+		!slices.Equal(policy.Viewers, []string{"group:sales-id", "user:new-person-id"}) || len(policy.Paths) != 1 {
 		t.Fatalf("unexpected policy: %+v", policy)
 	}
 
@@ -187,7 +187,7 @@ func TestHomeShowsSharedAndOwnedSites(t *testing.T) {
 	server, _ := setupPortal(t)
 	alex := signedIn(t, "alex-id", "Alex Andersen", "alex@example.test")
 	bea := signedIn(t, "bea-id", "Bea Berg", "bea@example.test")
-	publishSite(t, server, alex, "report", map[string]string{"index.html": "report"}, `{"viewers":["user:alex-id","user:bea@example.test"]}`)
+	publishSite(t, server, alex, "report", map[string]string{"index.html": "report"}, `{"viewers":["user:alex-id","user:bea-id"]}`)
 	publishSite(t, server, alex, "private", map[string]string{"index.html": "private"}, `{"viewers":["user:alex-id"]}`)
 
 	home := requestAs(t, server, bea, "GET", "/", nil, 200).Body.String()

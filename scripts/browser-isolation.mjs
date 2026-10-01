@@ -75,8 +75,35 @@ export async function verifyBrowserIsolation(port) {
       async () => (await fetch("/api/hex/capabilities")).status,
     );
     assert.equal(apiStatus, 200);
+    const access = await first.evaluate(async () => {
+      const ownFiles = await fetch("/api/sites/demo/files");
+      const otherFiles = await fetch("/api/sites/other/files");
+      const otherWrite = await fetch("/api/sites/other/files/injected.txt", {
+        method: "PUT",
+        headers: { "X-Hex-Request": "1" },
+        body: "untrusted app content",
+      });
+      const management = await fetch("/api/hex/sites/demo/publish", {
+        method: "POST",
+        headers: { "X-Hex-Request": "1", "Content-Type": "application/json" },
+        body: "{}",
+      });
+      return [
+        ownFiles.status,
+        otherFiles.status,
+        otherWrite.status,
+        management.status,
+      ];
+    });
+    assert.deepEqual(access, [200, 403, 403, 403]);
+    assert.equal(
+      await second.evaluate(
+        async () => (await fetch("/api/sites/other/files/injected.txt")).status,
+      ),
+      404,
+    );
     console.log(
-      "Browser isolation passed: localStorage, sessionStorage and IndexedDB are separate per site origin.",
+      "Browser isolation passed: separate browser storage, site-scoped APIs and blocked app-origin management calls.",
     );
   } finally {
     await browser.close();

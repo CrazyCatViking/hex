@@ -81,16 +81,21 @@ type publishResult struct {
 // caller, and returns upload targets for the files that differ from the
 // current publication.
 func (s *Server) startPublish(w http.ResponseWriter, r *http.Request) {
-	site, identity, ok := s.publishCaller(w, r, true)
-	if !ok {
-		return
-	}
-
 	request, ok := s.readPublishRequest(w, r)
 	if !ok {
 		return
 	}
-	if !s.checkRequestedAccess(w, r, site, identity, request.Access) {
+	if request.Access != nil {
+		if err := validateSiteAccess(*request.Access); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	site, identity, ok := s.publishCaller(w, r, true, request.Access)
+	if !ok {
+		return
+	}
+	if _, ok := s.applyPublishAccess(w, r, site, identity, request.Access); !ok {
 		return
 	}
 
@@ -117,7 +122,7 @@ func (s *Server) startPublish(w http.ResponseWriter, r *http.Request) {
 
 // uploadSiteFile receives one file for publishers without direct uploads.
 func (s *Server) uploadSiteFile(w http.ResponseWriter, r *http.Request) {
-	site, _, ok := s.publishCaller(w, r, false)
+	site, _, ok := s.publishCaller(w, r, false, nil)
 	if !ok {
 		return
 	}
@@ -145,7 +150,7 @@ func (s *Server) uploadSiteFile(w http.ResponseWriter, r *http.Request) {
 // files that are no longer part of the site, and records the manifest,
 // metadata and optional access policy.
 func (s *Server) completePublish(w http.ResponseWriter, r *http.Request) {
-	site, identity, ok := s.publishCaller(w, r, false)
+	site, identity, ok := s.publishCaller(w, r, false, nil)
 	if !ok {
 		return
 	}
@@ -154,7 +159,8 @@ func (s *Server) completePublish(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !s.checkRequestedAccess(w, r, site, identity, request.Access) {
+	savedAccess, ok := s.applyPublishAccess(w, r, site, identity, request.Access)
+	if !ok {
 		return
 	}
 
@@ -179,57 +185,44 @@ func (s *Server) completePublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result := publishResult{Name: site, Deleted: deleted}
+	result := publishResult{Name: site, Deleted: deleted, Access: savedAccess}
 	if siteURL, err := s.siteURL(site); err == nil {
 		result.URL = siteURL
 	}
-	if request.Access != nil && s.config.Access != nil {
-		saved, status, err := s.replaceSiteAccess(r.Context(), identity, site, *request.Access)
-		if err != nil {
-			if status == 0 {
-				writeServerError(w, err)
-				return
-			}
-			writeError(w, status, "site published, but the access policy was rejected: "+err.Error())
-			return
-		}
-		result.Access = &saved
-	}
-
 	slog.Info("publication completed", "site", site, "publisher", identityName(identity), "files", len(request.Files), "deleted", deleted)
 	writeJSON(w, http.StatusOK, result)
 }
 
-// checkRequestedAccess rejects a publication whose access policy is invalid
-// or would lock the publisher out, before any file changes.
-func (s *Server) checkRequestedAccess(w http.ResponseWriter, r *http.Request, site string, identity *Identity, requested *SiteAccess) bool {
+// applyPublishAccess saves restrictions before touching served files or
+// issuing direct-upload URLs. Interrupted uploads retain those restrictions.
+func (s *Server) applyPublishAccess(w http.ResponseWriter, r *http.Request, site string, identity *Identity, requested *SiteAccess) (*SiteAccess, bool) {
 	if requested == nil {
-		return true
+		return nil, true
 	}
 	if err := validateSiteAccess(*requested); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
-		return false
+		return nil, false
 	}
 	if s.config.Access == nil || identity == nil {
-		return true
+		writeError(w, http.StatusBadRequest, "publishing an access policy requires identity and access control")
+		return nil, false
 	}
-
-	existing, exists, err := s.sitePolicy(r.Context(), site)
+	saved, status, err := s.replaceSiteAccess(r.Context(), identity, site, *requested)
 	if err != nil {
-		writeServerError(w, err)
-		return false
+		if status == 0 {
+			writeServerError(w, err)
+		} else {
+			writeError(w, status, err.Error())
+		}
+		return nil, false
 	}
-	if err := s.keepsCallerOwner(identity, s.withOwners(identity, *requested, existing, exists)); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return false
-	}
-	return true
+	return &saved, true
 }
 
 // unpublishSite deletes the site's files. Its access policy is kept, so the
 // name stays reserved for its owners.
 func (s *Server) unpublishSite(w http.ResponseWriter, r *http.Request) {
-	site, identity, ok := s.publishCaller(w, r, false)
+	site, identity, ok := s.publishCaller(w, r, false, nil)
 	if !ok {
 		return
 	}
@@ -246,7 +239,7 @@ func (s *Server) unpublishSite(w http.ResponseWriter, r *http.Request) {
 // publishCaller validates the site name and authorizes the caller to
 // publish it. Owners may always publish; with claim set, a caller allowed to
 // create sites also claims an unowned name and becomes its owner.
-func (s *Server) publishCaller(w http.ResponseWriter, r *http.Request, claim bool) (string, *Identity, bool) {
+func (s *Server) publishCaller(w http.ResponseWriter, r *http.Request, claim bool, initialAccess *SiteAccess) (string, *Identity, bool) {
 	site := r.PathValue("site")
 	if !siteNamePattern.MatchString(site) {
 		writeError(w, http.StatusBadRequest, "site names are 1–63 lowercase letters, digits or hyphens")
@@ -290,7 +283,11 @@ func (s *Server) publishCaller(w http.ResponseWriter, r *http.Request, claim boo
 		writeError(w, http.StatusForbidden, "you are not allowed to create sites on this platform")
 		return "", nil, false
 	}
-	if _, status, err := s.replaceSiteAccess(r.Context(), identity, site, SiteAccess{}); err != nil {
+	requested := SiteAccess{}
+	if initialAccess != nil {
+		requested = *initialAccess
+	}
+	if _, status, err := s.replaceSiteAccess(r.Context(), identity, site, requested); err != nil {
 		if status == 0 {
 			writeServerError(w, err)
 		} else {

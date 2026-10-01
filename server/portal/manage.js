@@ -235,18 +235,6 @@ function setupCombobox(form) {
         })),
       ],
     ];
-    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(query)) {
-      const principal = `user:${query.toLowerCase()}`;
-      const known = sections[1][1].some(
-        (entry) => entry.detail?.toLowerCase() === query.toLowerCase(),
-      );
-      if (!known) {
-        sections.push([
-          "By email",
-          [{ principal, name: query, detail: "Add by email", kind: "user" }],
-        ]);
-      }
-    }
 
     for (const [title, entries] of sections) {
       if (entries.length === 0) {
@@ -285,7 +273,7 @@ function setupCombobox(form) {
           "li",
           "combobox-empty",
           query
-            ? "No one found. Type a full email address to add someone who hasn't used the platform yet."
+            ? "No one found. Ask them to sign in to the platform first, or share with a group."
             : "No people or groups to show yet.",
         ),
       );

@@ -146,7 +146,7 @@ func TestSiteAccessLifecycle(t *testing.T) {
 	requestAs(t, server, owner, "DELETE", "/api/hex/sites/demo/access", nil, 404)
 }
 
-func TestUsersMatchByEmail(t *testing.T) {
+func TestUserPrincipalsMatchOnlyStableIDs(t *testing.T) {
 	server, _ := setupWithAccess(t)
 	owner := principalHeaders("owner-id")
 	putPolicy(t, server, owner, "demo", `{"viewers":["user:Alex@Example.test"]}`)
@@ -163,8 +163,20 @@ func TestUsersMatchByEmail(t *testing.T) {
 	alex.Set("X-Ms-Client-Principal-Id", "alex-object-id")
 	alex.Set("X-Ms-Client-Principal-Name", "Alex Example")
 
+	requestAs(t, server, alex, "GET", "/api/sites/demo/db/tasks", nil, 403)
+	putPolicy(t, server, owner, "demo", `{"viewers":["user:alex-object-id"]}`)
 	requestAs(t, server, alex, "GET", "/api/sites/demo/db/tasks", nil, 200)
 	requestAs(t, server, principalHeaders("someone-else"), "GET", "/api/sites/demo/db/tasks", nil, 403)
+
+	// A name equal to the owner's ID must never grant ownership.
+	impostor := principalHeaders("different-id")
+	impostor.Set("X-Ms-Client-Principal-Name", "owner-id")
+	requestAs(t, server, impostor, "GET", "/api/hex/sites/demo/access", nil, 403)
+	requestAs(t, server, impostor, "PUT", "/api/hex/sites/demo/access", []byte(`{"owners":["user:different-id"]}`), 403)
+
+	// Email and ID namespaces must stay separate even for ID-shaped emails.
+	putPolicy(t, server, owner, "mail-owner", `{"owners":["user:owner-id","user:alex@example.test"],"viewers":["user:owner-id"]}`)
+	requestAs(t, server, alex, "GET", "/api/hex/sites/mail-owner/access", nil, 403)
 }
 
 func TestViewersAndEditors(t *testing.T) {

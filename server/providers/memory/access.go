@@ -35,18 +35,21 @@ func (s *AccessStore) GetSiteAccess(ctx context.Context, site string) (hex.SiteA
 }
 
 func (s *AccessStore) PutSiteAccess(ctx context.Context, site string, access hex.SiteAccess) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.entries[site] = hex.CloneSiteAccess(access)
-	return nil
+	return s.UpdateSiteAccess(ctx, site, func(hex.SiteAccess, bool) (*hex.SiteAccess, error) {
+		return &access, nil
+	})
 }
 
 func (s *AccessStore) DeleteSiteAccess(ctx context.Context, site string) error {
+	return s.UpdateSiteAccess(ctx, site, func(_ hex.SiteAccess, exists bool) (*hex.SiteAccess, error) {
+		if !exists {
+			return nil, hex.ErrNotFound
+		}
+		return nil, nil
+	})
+}
+
+func (s *AccessStore) UpdateSiteAccess(ctx context.Context, site string, update hex.AccessUpdate) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -54,10 +57,15 @@ func (s *AccessStore) DeleteSiteAccess(ctx context.Context, site string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, ok := s.entries[site]; !ok {
-		return hex.ErrNotFound
+	current, exists := s.entries[site]
+	next, err := update(hex.CloneSiteAccess(current), exists)
+	if err != nil {
+		return err
 	}
-
-	delete(s.entries, site)
+	if next == nil {
+		delete(s.entries, site)
+	} else {
+		s.entries[site] = hex.CloneSiteAccess(*next)
+	}
 	return nil
 }

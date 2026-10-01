@@ -58,7 +58,7 @@ func (s *Server) requestIdentity(r *http.Request) *Identity {
 
 // matchesAny reports whether the identity is one of the principals. Typed
 // principals (user:, group:, role:) match that kind of claim; a user matches
-// by identity ID, email or principal name. Untyped values, such as configured admin
+// only by stable identity ID. Untyped values, such as configured admin
 // group IDs, match the ID, any group or any role.
 func (identity *Identity) matchesAny(principals []string) bool {
 	if identity == nil {
@@ -82,9 +82,7 @@ func (identity *Identity) matches(principal string) bool {
 		return false
 	}
 
-	matchesUser := strings.EqualFold(identity.ID, value) ||
-		(identity.Email != "" && strings.EqualFold(identity.Email, value)) ||
-		(identity.Name != "" && strings.EqualFold(identity.Name, value))
+	matchesUser := strings.EqualFold(identity.ID, value)
 	matchesGroup := slices.ContainsFunc(identity.Groups, func(group string) bool {
 		return strings.EqualFold(group, value)
 	})

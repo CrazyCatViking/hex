@@ -247,7 +247,7 @@ The end-to-end test requires NGINX. It starts Go and NGINX, publishes through th
 
 ## Initial scope
 
-- Sites use separate origins such as `https://demo.hex.example.com/`, isolating localStorage, sessionStorage and IndexedDB. The former shared `/sites/<name>/` web routes are gone. Subdomains are not per-site data authorization. See [Subdomain hosting](docs/subdomains.md).
+- Sites use separate origins such as `https://demo.hex.example.com/`, isolating localStorage, sessionStorage and IndexedDB. App origins can use only their own data namespace, identity, capabilities and permissions; management APIs use the platform API host. User access policies are checked in addition to origin restrictions. See [Subdomain hosting](docs/subdomains.md).
 - Sites are open to every authenticated user unless their [access policy](docs/access-control.md) says otherwise. A policy names owners, editors and viewers, restricts URL path prefixes, and sets read/write rules per collection, file prefix and realtime channel, including creator-only documents. It covers the site's assets, APIs and discovery listing. Apps read the viewer through `hex.identity()` and `hex.permissions()`.
 - Only a site's owners publish it. The first publisher of a new name becomes its owner; `HEX_PUBLISHER_GROUPS` limits who may claim names.
 - The in-process realtime provider requires one backend replica. Messages are transient; clients handle reconnects and refresh state themselves.

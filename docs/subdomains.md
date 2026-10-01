@@ -28,7 +28,9 @@ The NGINX Docker image generates its configuration from `internal/cli/assets/ngi
 
 Different hostnames isolate localStorage, sessionStorage, IndexedDB and service-worker scopes. NGINX also sends `Origin-Agent-Cluster: ?1` for static responses. Sibling subdomains can still be same-site for cookie policy, and a cookie deliberately scoped to the parent domain can be shared. Use host-scoped cookies for app-specific state.
 
-Origin separation is not backend authorization. Without an [access policy](access-control.md), admitted users can access all site namespaces; policies are enforced by the API on the site path segment, not by origin. Hosting authentication must cover every site's assets, API calls and WebSocket upgrades, and the backend must have no bypassing public listener.
+App hostnames can call only `/api/sites/<their-site>/...`, their own `/api/hex/sites/<site>/permissions`, and the read-only identity and capabilities endpoints. Management, discovery and other sites' namespaces are rejected, even when the visitor is a platform admin. NGINX's static authorization subrequest remains available. Use the platform API hostname for the CLI and portal. Cross-app browser API calls through an app's hostname are not supported.
+
+These origin restrictions supplement [access policies](access-control.md): each request still needs the caller's permission for its target site. Non-site API hostnames can access multiple namespaces subject to those policies. `SiteBaseURL` must match the site domain configured in NGINX so Hex recognizes every app origin. Hosting authentication must cover every site's assets, API calls and WebSocket upgrades, and the backend must have no bypassing public listener.
 
 ## Local development
 

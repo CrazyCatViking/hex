@@ -60,19 +60,13 @@ func (s *Server) createArtifact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	site, err := s.reserveArtifactName(r)
+	owner := "user:" + identity.ID
+	access := NormalizeSiteAccess(SiteAccess{Owners: []string{owner}, Viewers: []string{owner}})
+	site, err := s.reserveArtifactName(r, access)
 	if err != nil {
 		writeServerError(w, err)
 		return
 	}
-
-	owner := "user:" + identity.ID
-	access := NormalizeSiteAccess(SiteAccess{Owners: []string{owner}, Viewers: []string{owner}})
-	if err := s.config.Access.PutSiteAccess(r.Context(), site, access); err != nil {
-		writeServerError(w, err)
-		return
-	}
-	s.policies.invalidate(site)
 
 	hidden := false
 	metadata := SiteMetadata{
@@ -93,13 +87,10 @@ func (s *Server) createArtifact(w http.ResponseWriter, r *http.Request) {
 }
 
 // reserveArtifactName picks a random name that no site uses or owns.
-func (s *Server) reserveArtifactName(r *http.Request) (string, error) {
+func (s *Server) reserveArtifactName(r *http.Request, access SiteAccess) (string, error) {
+	claimed := errors.New("artifact name already claimed")
 	for range artifactNameAttempts {
 		name, err := randomArtifactName()
-		if err != nil {
-			return "", err
-		}
-		_, owned, err := s.sitePolicy(r.Context(), name)
 		if err != nil {
 			return "", err
 		}
@@ -107,9 +98,22 @@ func (s *Server) reserveArtifactName(r *http.Request) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		if !owned && len(files) == 0 {
-			return name, nil
+		if len(files) != 0 {
+			continue
 		}
+		err = s.config.Access.UpdateSiteAccess(r.Context(), name, func(_ SiteAccess, exists bool) (*SiteAccess, error) {
+			if exists {
+				return nil, claimed
+			}
+			return &access, nil
+		})
+		if errors.Is(err, claimed) {
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		return name, nil
 	}
 	return "", errors.New("could not find a free artifact name")
 }

@@ -12,7 +12,7 @@ A **principal** is a typed value in a policy:
 
 | Principal | Matches |
 | --- | --- |
-| `user:<value>` | The caller's identity ID, email address or display name, case-insensitively. Prefer the ID or email; display names are not unique. |
+| `user:<value>` | The caller's stable identity ID, case-insensitively. Email and display-name claims never grant access. |
 | `group:<value>` | One of the caller's group claims (Entra group object IDs) |
 | `role:<value>` | One of the caller's role claims (app role values) |
 
@@ -39,7 +39,7 @@ Defaults keep sharing open:
 
 ```json
 {
-  "owners": ["user:alex@example.com", "group:6f1c1c7e-0000-4000-8000-000000000001"],
+  "owners": ["user:alex-object-id", "group:6f1c1c7e-0000-4000-8000-000000000001"],
   "editors": ["group:6f1c1c7e-0000-4000-8000-000000000002"],
   "viewers": [],
   "paths": [
@@ -97,17 +97,17 @@ The `creator` level is available for collections only. The server records the cr
 ## Enforcement points
 
 1. **Static assets.** The NGINX template sends an `auth_request` subrequest to `/api/hex/authz` for every site-asset request, with the validated site name in `X-Hex-Site` and the normalized path in `X-Hex-Path`. 204 serves the asset; 403 blocks it.
-2. **Site APIs.** Every `/api/sites/{site}/...` route — files, documents, realtime upgrades — first requires the viewer role, then applies the matching data rule. The check keys on the path segment, not the hostname, so a restricted site's data cannot be read from another origin.
+2. **Site APIs.** Every `/api/sites/{site}/...` route — files, documents, realtime upgrades — first requires the viewer role, then applies the matching data rule. App hostnames can access only their own site's namespace and permissions, plus identity and capabilities; management APIs are unavailable there. Platform API hosts retain cross-site access subject to the caller's policies. This prevents a compromised app from borrowing its visitor's authority over another site.
 3. **Discovery.** `GET /api/sites`, the landing page and its statistics omit sites the caller cannot view.
 4. **Publishing.** Only owners publish and unpublish. See [Publishing](publishing.md).
 
 `GET /api/hex/sites/{site}/permissions` (`hex.permissions()` in the browser client, `hex access check` in the CLI) describes what the caller may do: `role`, `admin`, `publish`, each path rule with `allowed`, and `read`/`write` grants (`all`, `own` or `none`) for every configured collection, file prefix and channel plus `"*"`. Apps use it to show or hide links and controls; it is advisory, and every request is checked regardless.
 
-The server caches policies in memory for 10 seconds per site; writes through the server invalidate their entry immediately, and the TTL bounds how long a change made elsewhere takes to apply.
+Authorization reads the current policy from the store on each request. There is no replica-local policy cache, so a restriction saved before uploading files is visible to subsequent authorization checks on every replica. Already authorized requests and established WebSocket connections are not retroactively revoked.
 
 ## Managing policies
 
-Keep the policy in the `access` section of the app's hex.json. `hex publish` sends it with the publication and the server applies it when the publication completes; the platform validates it before any file is uploaded.
+Keep the policy in the `access` section of the app's hex.json. `hex publish` sends it with the publication and the server validates and saves it before changing files or issuing upload URLs. Restrictions also apply to the currently served files; an interrupted publication retains the policy. Publishing a policy requires identity and access control to be configured.
 
 ```json
 {
@@ -129,7 +129,7 @@ The CLI manages policies directly:
 ```sh
 hex whoami
 hex access show my-app
-hex access set my-app --owner user:alex@example.com --viewer group:<object-id>
+hex access set my-app --owner user:<identity-id> --viewer group:<object-id>
 hex access set my-app --file policy.json
 hex access check my-app
 hex access clear my-app
@@ -142,6 +142,14 @@ The HTTP routes are `GET`/`PUT`/`DELETE /api/hex/sites/{site}/access`, registere
 ## Storage
 
 Policies live in the platform database, never in the published site directory. The PostgreSQL provider stores them as JSON in `hex_site_policies`. `Migrate` converts entries from the former `hex_site_access` table (whose `groups` become `viewers`) and drops it in one transaction. Converted untyped values keep matching the ID, groups and roles; policies saved afterwards must use typed principals. The in-memory store is for development and tests.
+
+Claims and policy changes use `AccessStore.UpdateSiteAccess`, which serializes the read, authorization and write for each site across instances, including names without a policy yet. PostgreSQL uses a transaction-scoped advisory lock and row lock; memory uses a mutex. A competing initial claim cannot overwrite the winner, and revoked owners cannot mutate policies using stale authorization.
+
+### Upgrading existing policies and providers
+
+Older versions also matched `user:` values against email and display-name claims. Replace those values with stable IDs in owners, editors, viewers and rule audiences, including policies in hex.json. Use the sharing picker (which stores IDs), `hex whoami`, or your identity provider's directory to obtain the IDs. A platform admin can repair policies whose owners were email/name-based. There is no automatic email-to-ID migration or authorization fallback.
+
+Custom access stores must implement the atomic `UpdateSiteAccess` contract. A separate read followed by an unconditional write is not sufficient; all policy writers must participate in the same serialization mechanism.
 
 With the reference executable, access control activates with the `easyauth` resolver only alongside the `postgres` database provider; the `static` resolver accepts the in-memory store for local experimentation.
 
