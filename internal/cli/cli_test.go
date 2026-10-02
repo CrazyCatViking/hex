@@ -389,3 +389,48 @@ func TestDevSettingsAndPorts(t *testing.T) {
 		t.Fatal("shutdown deletes volumes")
 	}
 }
+
+func TestPublishingDeclaresActions(t *testing.T) {
+	directory := t.TempDir()
+	t.Setenv("HEX_CONFIG_DIR", filepath.Join(directory, "profiles"))
+	platform := startPlatform(t, func(config *hex.Config) {
+		config.Identity = hex.StaticIdentity{Identity: hex.Identity{ID: "alex"}}
+		config.Access = memory.NewAccessStore()
+		config.Database = memory.NewDatabase()
+	})
+	project := filepath.Join(directory, "project")
+	run(t, directory, "init", project, "--name", "demo", "--server", platform.URL)
+	createBuild(t, project)
+
+	config := Project{
+		Name:   "demo",
+		Server: platform.URL,
+		Actions: json.RawMessage(`[{"name":"log-call","description":"Log a customer call.","operation":"create","collection":"calls",
+			"input":{"type":"object","properties":{"customer":{"type":"string"}},"required":["customer"],"additionalProperties":false}}]`),
+	}
+	if err := writeJSONFile(filepath.Join(project, "hex.json"), config); err != nil {
+		t.Fatal(err)
+	}
+	run(t, project, "publish")
+	if list := run(t, project, "actions", "list", "--site", "demo"); !strings.Contains(list, "log-call") {
+		t.Fatalf("declared action missing: %s", list)
+	}
+	if err := os.WriteFile(filepath.Join(project, "call.json"), []byte(`{"customer":"Acme"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if result := run(t, project, "actions", "run", "--site", "demo", "log-call", "--input", "@call.json"); !strings.Contains(result, `"id"`) {
+		t.Fatalf("action did not run: %s", result)
+	}
+	if calls := run(t, project, "data", "list", "--site", "demo", "--collection", "calls"); !strings.Contains(calls, "Acme") {
+		t.Fatalf("action did not store the call: %s", calls)
+	}
+
+	config.Actions = json.RawMessage(`[{"name":"log-call","description":"Log.","operation":"upsert","collection":"calls","input":{"type":"object"}}]`)
+	if err := writeJSONFile(filepath.Join(project, "hex.json"), config); err != nil {
+		t.Fatal(err)
+	}
+	app, output := testApp(t, project)
+	if err := app.Execute(context.Background(), []string{"publish"}, "test"); err == nil || !strings.Contains(err.Error(), "operation") {
+		t.Fatalf("invalid action accepted: %v\n%s", err, output)
+	}
+}

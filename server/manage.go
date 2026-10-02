@@ -42,6 +42,15 @@ type sitePageView struct {
 	Sharing sharingView
 	Data    bool
 	Files   bool
+	Actions []actionSummary
+}
+
+// actionSummary describes one of a site's actions on its overview.
+type actionSummary struct {
+	Name        string
+	Description string
+	Effect      string
+	Who         string
 }
 
 type siteTab struct {
@@ -214,7 +223,44 @@ func (s *Server) manageSitePage(w http.ResponseWriter, r *http.Request) {
 	view.Facts = factsFrom(metadata, view.History)
 	view.Sharing = s.sharingView(r.Context(), site, access, exists)
 	view.People = view.Sharing.Entries
+	view.Actions = s.actionSummaries(r.Context(), site)
 	s.writePortalPage(w, "site", view)
+}
+
+// actionSummaries lists every action of the site, whoever may run it, so
+// owners see what their app exposes.
+func (s *Server) actionSummaries(ctx context.Context, site string) []actionSummary {
+	if !s.actionsEnabled() {
+		return nil
+	}
+	actions, err := s.siteActions(ctx, site)
+	if err != nil {
+		slog.Warn("unreadable site actions", "site", site, "error", err)
+		return nil
+	}
+	summaries := make([]actionSummary, 0, len(actions))
+	for _, action := range actions {
+		effect := action.effect
+		if effect == "" {
+			effect = "Provided by the platform"
+		}
+		who := "Editors"
+		switch action.audience.Level {
+		case LevelViewers:
+			who = "Everyone who can open it"
+		case LevelOwners:
+			who = "Owners"
+		case "":
+			if len(action.audience.Principals) > 0 {
+				who = "Selected people"
+			}
+		}
+		summaries = append(summaries, actionSummary{
+			Name: action.definition.Name, Description: action.definition.Description,
+			Effect: effect, Who: who,
+		})
+	}
+	return summaries
 }
 
 func factsFrom(metadata *SiteMetadata, history []historyEntry) siteFacts {

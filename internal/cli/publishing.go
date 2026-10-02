@@ -36,6 +36,7 @@ type publishRequest struct {
 	Files    []hex.SiteFile    `json:"files"`
 	Metadata *hex.SiteMetadata `json:"metadata,omitempty"`
 	Access   json.RawMessage   `json:"access,omitempty"`
+	Actions  json.RawMessage   `json:"actions,omitempty"`
 }
 
 type publishPlan struct {
@@ -183,7 +184,7 @@ func (a *App) publishFiles(ctx context.Context, project Project, name string, so
 		return result, err
 	}
 
-	request := publishRequest{Files: files, Metadata: metadata, Access: access}
+	request := publishRequest{Files: files, Metadata: metadata, Access: access, Actions: project.Actions}
 	sitePath := "/api/hex/sites/" + name + "/publish"
 
 	data, err := a.apiCall(ctx, project, http.MethodPost, sitePath, request)

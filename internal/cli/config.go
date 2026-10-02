@@ -96,6 +96,9 @@ type Project struct {
 	// Access is the site's access policy, applied by the platform when the
 	// site is published. The platform validates it.
 	Access json.RawMessage `json:"access,omitempty"`
+	// Actions are operations the app exposes to the CLI and agents, performed
+	// by the platform on the app's documents. The platform validates them.
+	Actions json.RawMessage `json:"actions,omitempty"`
 	// ClientID and TenantID come from the platform profile and select the
 	// CLI's own browser sign-in.
 	ClientID     string          `json:"-"`

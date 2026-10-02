@@ -20,14 +20,14 @@ Hidden files/directories and `node_modules` are excluded everywhere. Root publis
 
 ## Protocol
 
-1. **Start.** The CLI sends `POST /api/hex/sites/{site}/publish` with a manifest of every file (`{path, size, md5}`, the MD5 as base64), the site metadata from hex.json, and its optional `access` policy. The server:
+1. **Start.** The CLI sends `POST /api/hex/sites/{site}/publish` with a manifest of every file (`{path, size, md5}`, the MD5 as base64), the site metadata from hex.json, its optional `access` policy and its optional [declared actions](agents.md#declare-actions-in-an-app). The server:
    - authorizes the caller: owners may publish; a caller allowed to create sites claims an unowned name and becomes its owner (see [access control](access-control.md));
-   - validates the manifest and validates and saves the access policy before exposing any new content;
+   - validates the manifest and declared actions, and validates and saves the access policy before exposing any new content;
    - deletes current files that would block the new layout — a file where the manifest needs a directory, or files inside a directory that becomes a file;
    - compares the manifest with the recorded manifest of the current publication and the files actually present;
    - answers `{uploads, unchanged}`: an upload target for each new or changed file, with `index.html` last.
 2. **Upload.** Each target names a protocol. `hex` is a plain `PUT` of the file to a same-origin API path (`/api/hex/sites/{site}/publish/files/{path}`), authenticated like other API calls and used by publishers without direct uploads, such as the local filesystem. `azure-files` is a pre-signed Azure Files URL; the CLI creates the file at its size and writes it in ranges without sending any credential of its own. The CLI uploads four files in parallel and `index.html` after all other files.
-3. **Complete.** The CLI sends the same request to `POST /api/hex/sites/{site}/publish/complete`. The server reauthorizes the caller and applies any supplied policy before file changes, checks that every manifest file is present with the declared size (409 lists missing files otherwise), deletes files that are no longer in the manifest, and writes `.hex-manifest.json` and `.hex-site.json`. It returns the site URL, which the CLI prints on stdout.
+3. **Complete.** The CLI sends the same request to `POST /api/hex/sites/{site}/publish/complete`. The server reauthorizes the caller and applies any supplied policy before file changes, checks that every manifest file is present with the declared size (409 lists missing files otherwise), deletes files that are no longer in the manifest, and writes `.hex-manifest.json`, `.hex-site.json` and the declared actions (`.hex-actions.json`, removed when the publication declares none). It returns the site URL, which the CLI prints on stdout.
 
 `DELETE /api/hex/sites/{site}` removes all of a site's files. Its access policy is kept, so the name stays reserved for its owners. Uploaded app files and database documents are not affected by publishing or unpublishing.
 

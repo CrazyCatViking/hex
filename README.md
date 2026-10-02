@@ -100,7 +100,7 @@ hex actions describe --site my-app create-task
 hex actions run --site my-app create-task --input @task.json
 ```
 
-Reads respect the user's existing permissions. Changes go through registered actions whose JSON Schema contracts are validated by both the CLI and backend. A consuming server registers contracts and handlers together in `Config.Actions`; the [custom-server example](examples/custom-server/README.md) implements `create-task`. See [Agent access and app actions](docs/agents.md) for the full command API and registration model.
+Reads respect the user's existing permissions. Changes go through actions whose JSON Schema contracts are validated by both the CLI and backend. Apps declare simple create, update and delete actions in the `actions` section of their hex.json, which the platform performs on their own documents without server code; a consuming server can also register Go handlers in `Config.Actions`, as the [custom-server example](examples/custom-server/README.md) does for `create-task`. See [Agent access and app actions](docs/agents.md) for the full command API and registration model.
 
 ## Browser API
 

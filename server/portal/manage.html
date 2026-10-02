@@ -226,7 +226,30 @@
           </ul>
         </section>
       </div>
-      {{end}} {{if eq .Tab "sharing"}}
+      {{if .Actions}}
+      <section class="panel" aria-labelledby="actions-heading">
+        <h2 id="actions-heading">Actions</h2>
+        <p class="muted">
+          Tasks people and their AI assistants can do in this app from the Hex
+          command line, with their own permissions. The app's hex.json decides
+          which actions exist.
+        </p>
+        <ul class="action-list">
+          {{range .Actions}}
+          <li>
+            <div class="action-main">
+              <code>{{.Name}}</code>
+              <span>{{.Description}}</span>
+            </div>
+            <ul class="tag-list">
+              <li class="tag">{{.Effect}}</li>
+              <li class="tag">{{.Who}}</li>
+            </ul>
+          </li>
+          {{end}}
+        </ul>
+      </section>
+      {{end}} {{end}} {{if eq .Tab "sharing"}}
       <section class="panel" aria-labelledby="sharing-heading">
         <h2 id="sharing-heading">Sharing</h2>
         {{template "sharing" .Sharing}}

@@ -74,6 +74,9 @@ type registeredAction struct {
 	handler    func(context.Context, ActionContext, json.RawMessage) (any, error)
 	input      *jsonschema.Schema
 	output     *jsonschema.Schema
+	// effect describes a declared action's operation in plain words for
+	// the portal; registered actions leave it empty.
+	effect string
 }
 
 // ActionRegistry stores per-site operations. Register validates and compiles
@@ -125,12 +128,18 @@ func (r *ActionRegistry) Register(site string, action Action) error {
 }
 
 func (r *ActionRegistry) action(site, name string) *registeredAction {
+	if r == nil {
+		return nil
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.sites[site][name]
 }
 
 func (r *ActionRegistry) actions(site string) []*registeredAction {
+	if r == nil {
+		return nil
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	result := make([]*registeredAction, 0, len(r.sites[site]))
@@ -145,10 +154,39 @@ func actionAllowed(action *registeredAction, authorization siteAuthorization) bo
 	return audienceGrant(authorization.role, authorization.identity, action.audience, LevelEditors) == grantAll
 }
 
+// actionsEnabled reports whether sites can have actions: registered in Go
+// by the platform, or declared in a published app's hex.json.
+func (s *Server) actionsEnabled() bool {
+	return s.config.Actions != nil || (s.config.Database != nil && s.config.Publisher != nil)
+}
+
+// siteActions merges the platform's registered actions with the site's
+// declared ones, sorted by name. Publishing rejects declared names that
+// shadow registered ones; registered actions win if both exist anyway.
+func (s *Server) siteActions(ctx context.Context, site string) ([]*registeredAction, error) {
+	registered := s.config.Actions.actions(site)
+	declared, err := s.declaredActions(ctx, site)
+	if err != nil {
+		return nil, err
+	}
+	for _, action := range declared {
+		if s.config.Actions.action(site, action.definition.Name) == nil {
+			registered = append(registered, action)
+		}
+	}
+	slices.SortFunc(registered, func(a, b *registeredAction) int { return strings.Compare(a.definition.Name, b.definition.Name) })
+	return registered, nil
+}
+
 func (s *Server) listActions(w http.ResponseWriter, r *http.Request) {
 	authorization := requestAuthorization(r)
+	actions, err := s.siteActions(r.Context(), r.PathValue("site"))
+	if err != nil {
+		writeServerError(w, err)
+		return
+	}
 	definitions := make([]ActionDefinition, 0)
-	for _, action := range s.config.Actions.actions(r.PathValue("site")) {
+	for _, action := range actions {
 		if actionAllowed(action, authorization) {
 			definitions = append(definitions, action.definition)
 		}
@@ -162,11 +200,17 @@ func (s *Server) requestAction(w http.ResponseWriter, r *http.Request) *register
 		writeError(w, http.StatusBadRequest, "invalid action name")
 		return nil
 	}
-	action := s.config.Actions.action(r.PathValue("site"), name)
-	if action == nil {
+	actions, err := s.siteActions(r.Context(), r.PathValue("site"))
+	if err != nil {
+		writeServerError(w, err)
+		return nil
+	}
+	index := slices.IndexFunc(actions, func(action *registeredAction) bool { return action.definition.Name == name })
+	if index < 0 {
 		writeError(w, http.StatusNotFound, "action not found")
 		return nil
 	}
+	action := actions[index]
 	if !actionAllowed(action, requestAuthorization(r)) {
 		writeError(w, http.StatusForbidden, "performing this action is restricted")
 		return nil

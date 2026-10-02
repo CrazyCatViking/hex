@@ -72,6 +72,62 @@ Input is limited to 1 MiB; each schema is limited to 64 KiB. Schemas default to 
 
 Execution repeats authorization and input validation at the backend, so direct HTTP callers receive the same checks. Handler results must fulfill the output contract. Actions are not automatically retried: a handler may have made changes before a response is lost or output validation fails. Output validation does not roll back those changes; implement transactions or idempotency within an action when its workflow needs them.
 
+## Declare actions in an app
+
+An app exposes actions without any server code by listing them in the `actions` section of its hex.json. `hex publish` sends them with the publication and the platform validates them before any file changes; publishing without the section removes earlier actions. The platform performs each action itself as one fixed operation on the app's own documents, so no app code runs on the server.
+
+```json
+{
+  "name": "sales-log",
+  "actions": [
+    {
+      "name": "log-call",
+      "description": "Log a customer call. Use the customer's company name.",
+      "operation": "create",
+      "collection": "calls",
+      "input": {
+        "type": "object",
+        "properties": {
+          "customer": { "type": "string", "minLength": 1 },
+          "notes": { "type": "string", "maxLength": 2000 }
+        },
+        "required": ["customer"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "close-call",
+      "description": "Mark a logged call as handled.",
+      "operation": "update",
+      "collection": "calls",
+      "input": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "status": { "enum": ["open", "done"] }
+        },
+        "required": ["id", "status"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}
+```
+
+| Field         | Meaning                                                                                                                                                                                           |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`        | 1–64 letters, digits, `-` or `_`, unique within the app.                                                                                                                                          |
+| `description` | What the action does and when to use it, at most 500 characters. Agents read it to choose actions, so write it for them.                                                                          |
+| `operation`   | `create` stores the input object as a new document and returns its ID. `update` merges the input's top-level fields into an existing document; it never creates one. `delete` removes a document. |
+| `collection`  | The app collection the operation changes.                                                                                                                                                         |
+| `idField`     | For `update` and `delete`, the input property holding the document ID; `id` by default. The input schema must require it, and it is not stored as a field.                                        |
+| `input`       | A JSON Schema for the input, with `"type": "object"`. Use it to restrict fields and values; `additionalProperties: false` rejects anything else.                                                  |
+| `audience`    | Who may run it: `"viewers"`, `"editors"` (default), `"owners"` or a list of principals.                                                                                                           |
+
+Every declared action returns `{"id": "<document id>"}`; read the document with `hex data get`. Running an action needs its audience **and** write access to its collection under the site's [access policy](access-control.md): creator-only collections let people update and delete only their own documents, and documents record the caller as creator. A site declares at most 32 actions, and names cannot shadow actions the platform registers for the site. Declared actions need a platform with a database and publishing; `capabilities.actions` reports support.
+
+Declared actions cover recording and changing data. Logic such as calculations, calls to other systems or changes across several documents needs a registered action in the consuming server.
+
 ## Register operations in a consuming server
 
 An app backend registers its contract and handler together in `hex.ActionRegistry` and assigns the registry to `hex.Config.Actions` before calling `hex.New`. The zero-value registry is ready to use. `Register` returns an error for invalid schemas, invalid names, missing descriptions/handlers, or duplicate names within a site.
@@ -122,7 +178,7 @@ Handlers receive `ActionContext.Site`, `Identity` and `Role`. When accessing pro
 
 Return `hex.ErrForbidden` for denied operations, `hex.ErrNotFound` for missing resources, or `&hex.ActionError{Message: "..."}` for a user-correctable business-rule failure. Other errors are logged and produce a generic internal-server error.
 
-Static publication does not register handlers or execute a manifest. A consuming backend implements actions; the reference server has none unless extended. Discovery advertises `capabilities.actions` when a registry is configured.
+Publishing never uploads handler code. Registered actions come from the consuming backend; published apps can add only [declared actions](#declare-actions-in-an-app). Discovery advertises `capabilities.actions` when a registry is configured or the platform supports declared actions.
 
 ### HTTP contract
 

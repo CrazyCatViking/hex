@@ -63,6 +63,9 @@ type publishRequest struct {
 	Files    []SiteFile    `json:"files"`
 	Metadata *SiteMetadata `json:"metadata,omitempty"`
 	Access   *SiteAccess   `json:"access,omitempty"`
+	// Actions are the app's declared actions; omitting them removes
+	// earlier ones.
+	Actions []DeclaredAction `json:"actions,omitempty"`
 }
 
 type publishPlan struct {
@@ -181,6 +184,10 @@ func (s *Server) completePublish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.writeSiteRecords(r.Context(), site, request, identity); err != nil {
+		writeServerError(w, err)
+		return
+	}
+	if err := s.writeDeclaredActions(r.Context(), site, request.Actions); err != nil {
 		writeServerError(w, err)
 		return
 	}
@@ -310,6 +317,10 @@ func (s *Server) readPublishRequest(w http.ResponseWriter, r *http.Request) (pub
 		return request, false
 	}
 	if err := s.validateManifest(request.Files); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return request, false
+	}
+	if err := s.validateDeclaredActions(r.PathValue("site"), request.Actions); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return request, false
 	}
@@ -490,6 +501,7 @@ func (s *Server) removeObsoleteFiles(ctx context.Context, site string, files, cu
 	keep[siteMetadataFile] = true
 	keep[siteManifestFile] = true
 	keep[siteHistoryFile] = true
+	keep[siteActionsFile] = true
 
 	deleted := 0
 	for _, file := range current {

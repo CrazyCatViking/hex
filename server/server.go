@@ -117,7 +117,7 @@ func (s *Server) registerRoutes() {
 		s.mux.HandleFunc("GET /api/sites/{site}/db/{collection}/{id}", s.siteScoped(s.getDocument))
 		s.mux.HandleFunc("DELETE /api/sites/{site}/db/{collection}/{id}", s.siteScoped(s.deleteDocument))
 	}
-	if s.config.Actions != nil {
+	if s.actionsEnabled() {
 		s.mux.HandleFunc("GET /api/sites/{site}/actions", s.siteScoped(s.listActions))
 		s.mux.HandleFunc("GET /api/sites/{site}/actions/{action}", s.siteScoped(s.describeAction))
 		s.mux.HandleFunc("POST /api/sites/{site}/actions/{action}", s.siteScoped(s.runAction))
@@ -250,7 +250,7 @@ func (s *Server) capabilityDescription() map[string]any {
 		"accessControl":  s.config.Identity != nil && s.config.Access != nil,
 		"publishing":     s.config.Publisher != nil,
 		"artifacts":      s.artifactsEnabled(),
-		"actions":        s.config.Actions != nil,
+		"actions":        s.actionsEnabled(),
 		"maxUploadBytes": s.config.MaxUploadBytes,
 	}
 }
