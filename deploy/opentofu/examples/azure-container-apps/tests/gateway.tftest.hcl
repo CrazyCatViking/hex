@@ -67,10 +67,33 @@ run "gateway_security_contract" {
   assert {
     condition = (
       local.environment.HEX_ADDR == "127.0.0.1:8081" &&
+      !contains(keys(local.environment), "HEX_ANALYTICS_ADDR") &&
+      azapi_resource.app.body.properties.template.containers[0].env[1].value == "0" &&
       length(azapi_resource.mount) == 0 &&
       length(local.volumes) == 0
     )
     error_message = "The backend must be loopback-only and an API-only host must not mount site storage."
+  }
+}
+
+run "analytics_collection" {
+  command = plan
+
+  module {
+    source = "../../modules/azure/container-apps"
+  }
+
+  variables {
+    server_environment = { HEX_ANALYTICS_PROVIDER = "postgres" }
+  }
+
+  assert {
+    condition = (
+      local.environment.HEX_ANALYTICS_ADDR == "127.0.0.1:8082" &&
+      azapi_resource.app.body.properties.template.containers[0].env[1].name == "HEX_ANALYTICS_ENABLED" &&
+      azapi_resource.app.body.properties.template.containers[0].env[1].value == "1"
+    )
+    error_message = "NGINX traffic logging and the loopback collector must be enabled together."
   }
 }
 

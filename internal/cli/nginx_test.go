@@ -13,6 +13,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	hex "github.com/crazycatviking/hex/server"
+	"github.com/crazycatviking/hex/server/providers/local"
+	"github.com/crazycatviking/hex/server/providers/memory"
 )
 
 func TestNginxLocalRuntimePaths(t *testing.T) {
@@ -89,6 +93,94 @@ func TestNginxLocalRuntimePaths(t *testing.T) {
 	}
 	if response.StatusCode != http.StatusOK || string(data) != body {
 		t.Fatalf("buffered upload failed: status %d, received %d bytes", response.StatusCode, len(data))
+	}
+}
+
+func TestNginxCompletedRequestAnalytics(t *testing.T) {
+	if _, err := exec.LookPath("nginx"); err != nil {
+		t.Skip("NGINX unavailable")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	sites, err := local.New(filepath.Join(directory, "sites"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sites.Close()
+	for path, content := range map[string]string{"index.html": "<title>Analytics</title>", "app.js": "console.log('asset')"} {
+		if err := sites.WriteSiteFile(ctx, "demo", path, int64(len(content)), strings.NewReader(content)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	analytics := memory.NewAnalytics()
+	collector, err := hex.StartTrafficCollector(ctx, fmt.Sprintf("127.0.0.1:%d", port), analytics)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer collector.Close()
+	backend := httptest.NewServer(hex.New(hex.Config{
+		Sites: sites, Identity: hex.StaticIdentity{Identity: hex.Identity{ID: "verified-user"}},
+		Analytics: analytics, Files: memory.NewStore(),
+	}))
+	defer backend.Close()
+	app, err := New(strings.NewReader(""), io.Discard, os.Stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nginx, err := app.startNginx(ctx, devSettings{Port: port, APIPort: backend.Listener.Addr().(*net.TCPAddr).Port, DataDirectory: directory}, directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer nginx.stop()
+	base := fmt.Sprintf("http://127.0.0.1:%d", port)
+	if err := waitForHTTP(ctx, base+"/healthz", nginx); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/", "/app.js", "/missing.html", "/api/sites/demo/files"} {
+		request, err := http.NewRequestWithContext(ctx, "GET", base+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Host = "demo.localhost"
+		request.Header.Set("X-Hex-Analytics-User", "Zm9yZ2VkLXVzZXI")
+		if path == "/" || path == "/missing.html" {
+			request.Header.Set("Sec-Fetch-Dest", "document")
+		}
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if response.Header.Get("X-Hex-Analytics-User") != "" {
+			t.Fatal("internal analytics header exposed by nginx")
+		}
+		if err := response.Body.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	query := hex.AnalyticsQuery{From: time.Now().UTC().Truncate(24 * time.Hour), Until: time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, 1), Site: "demo"}
+	var report hex.AnalyticsReport
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		report, err = analytics.QueryAnalytics(ctx, query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if report.Traffic.Requests >= 4 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if report.Traffic.Requests != 4 || report.Traffic.PageViews != 1 || report.Traffic.Errors != 1 || report.Traffic.Visitors != 1 || len(report.Users) != 1 || report.Users[0].Key != "verified-user" {
+		t.Fatalf("completed logs are wrong: %+v; collector %+v", report, collector.Status())
 	}
 }
 

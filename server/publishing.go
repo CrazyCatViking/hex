@@ -197,6 +197,7 @@ func (s *Server) completePublish(w http.ResponseWriter, r *http.Request) {
 		result.URL = siteURL
 	}
 	slog.Info("publication completed", "site", site, "publisher", identityName(identity), "files", len(request.Files), "deleted", deleted)
+	s.recordPublication(r.Context(), site)
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -234,12 +235,14 @@ func (s *Server) unpublishSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.recordPublication(r.Context(), site)
 	if err := s.config.Publisher.DeleteSite(r.Context(), site); err != nil {
 		writeServerError(w, err)
 		return
 	}
 
 	slog.Info("site unpublished", "site", site, "publisher", identityName(identity))
+	s.recordAnalyticsEvents(r.Context(), []SiteEvent{analyticsEvent(site, "unpublished", time.Now().UTC(), "", personOf(identity))})
 	w.WriteHeader(http.StatusNoContent)
 }
 

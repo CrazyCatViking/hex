@@ -51,7 +51,7 @@ type seenPerson struct {
 // or sooner when their name or email changes. Failures are logged; they never
 // affect the request.
 func (s *Server) rememberPerson(ctx context.Context, identity *Identity) {
-	if s.config.People == nil || identity == nil || identity.ID == "" {
+	if (s.config.People == nil && s.config.Analytics == nil) || identity == nil || identity.ID == "" {
 		return
 	}
 	person := *personOf(identity)
@@ -72,7 +72,20 @@ func (s *Server) rememberPerson(ctx context.Context, identity *Identity) {
 		return
 	}
 
-	if err := s.config.People.RememberPerson(ctx, person); err != nil {
+	var err error
+	if s.config.People != nil {
+		err = s.config.People.RememberPerson(ctx, person)
+	}
+	if s.config.Analytics != nil {
+		if analyticsError := s.config.Analytics.ObservePerson(ctx, person, now.UTC()); analyticsError != nil {
+			s.analyticsFailures.Add(1)
+			slog.Error("observe analytics person", "error", analyticsError)
+			if err == nil {
+				err = analyticsError
+			}
+		}
+	}
+	if err != nil {
 		s.seen.mu.Lock()
 		if s.seen.entries[person.ID] == attempted {
 			delete(s.seen.entries, person.ID)

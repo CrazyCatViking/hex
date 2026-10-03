@@ -295,7 +295,9 @@ func (s *Server) staticAuthz(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	authorization, err := s.authorizeSite(r.Context(), s.requestIdentity(r), site)
+	identity := s.requestIdentity(r)
+	s.analyticsIdentity(w, identity)
+	authorization, err := s.authorizeSite(r.Context(), identity, site)
 	if err != nil {
 		writeServerError(w, err)
 		return

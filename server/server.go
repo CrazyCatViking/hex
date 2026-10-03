@@ -4,17 +4,22 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
+	"sync/atomic"
 )
 
 type Config struct {
-	Files       ObjectStore
-	Sites       SiteDirectory
-	SiteBaseURL string
-	Database    Database
-	Realtime    Realtime
-	Identity    IdentityResolver
-	Access      AccessStore
-	AdminGroups []string
+	Analytics AnalyticsStore
+	// TrafficCollector is optional operational status for the admin dashboard.
+	TrafficCollector *TrafficCollector
+	Files            ObjectStore
+	Sites            SiteDirectory
+	SiteBaseURL      string
+	Database         Database
+	Realtime         Realtime
+	Identity         IdentityResolver
+	Access           AccessStore
+	AdminGroups      []string
 	// Actions exposes contract-validated operations implemented by app backends.
 	Actions *ActionRegistry
 	// Publisher enables publishing through the API. PublisherGroups limits
@@ -34,9 +39,12 @@ type Config struct {
 }
 
 type Server struct {
-	config Config
-	mux    *http.ServeMux
-	seen   peopleSeen
+	config                Config
+	mux                   *http.ServeMux
+	seen                  peopleSeen
+	analyticsFailures     atomic.Uint64
+	analyticsBootstrap    sync.Mutex
+	analyticsBootstrapped bool
 }
 
 func New(config Config) *Server {
@@ -132,10 +140,14 @@ func (s *Server) registerRoutes() {
 	}
 
 	s.registerManageRoutes()
+	s.registerAnalyticsRoutes()
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if s.config.Analytics != nil && strings.HasPrefix(r.URL.Path, "/api/sites/") {
+		s.analyticsIdentity(w, s.requestIdentity(r))
+	}
 
 	if strings.HasPrefix(r.URL.Path, "/api/") {
 		w.Header().Set("Cache-Control", "no-store")
@@ -251,6 +263,7 @@ func (s *Server) capabilityDescription() map[string]any {
 		"publishing":     s.config.Publisher != nil,
 		"artifacts":      s.artifactsEnabled(),
 		"actions":        s.actionsEnabled(),
+		"analytics":      s.config.Analytics != nil,
 		"maxUploadBytes": s.config.MaxUploadBytes,
 	}
 }

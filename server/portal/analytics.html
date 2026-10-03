@@ -1,0 +1,468 @@
+{{define "admin"}}
+<!doctype html>
+<html lang="en">
+  <head>
+    {{template "head" (printf "%s · Admin" .Platform)}}
+  </head>
+  <body hx-headers='{"X-Hex-Request":"1"}'>
+    {{template "header" .Chrome}}
+    <main id="main" class="page">
+      <nav class="tabs" aria-label="Admin sections">
+        <a
+          href="/admin?from={{.From}}&amp;until={{.Until}}"
+          aria-current="{{if eq .Section `overview`}}page{{else}}false{{end}}"
+          >Overview</a
+        >
+        <a
+          href="/admin/sites?from={{.From}}&amp;until={{.Until}}"
+          aria-current="{{if eq .Section `sites`}}page{{else}}false{{end}}"
+          >Sites</a
+        >
+        <a
+          href="/admin/users?from={{.From}}&amp;until={{.Until}}"
+          aria-current="{{if eq .Section `users`}}page{{else}}false{{end}}"
+          >People</a
+        >
+      </nav>
+      <div id="admin-content">
+        <section class="page-heading">
+          <div>
+            <p class="eyebrow">Platform admin</p>
+            <h1>{{.Title}}</h1>
+            <p class="lead">
+              Publishing, adoption and traffic across your platform.
+            </p>
+          </div>
+        </section>
+        <form
+          class="toolbar analytics-filters"
+          action="{{.FilterURL}}"
+          method="get"
+          hx-get="{{.FilterURL}}"
+          hx-target="#admin-content"
+          hx-select="#admin-content"
+          hx-swap="outerHTML"
+          hx-push-url="true"
+        >
+          {{if .Site}}<input
+            type="hidden"
+            name="site"
+            value="{{.Site}}"
+          />{{end}} {{if .FilterUser}}<input
+            type="hidden"
+            name="user"
+            value="{{.FilterUser}}"
+          />{{end}}
+          <label class="field"
+            ><span class="field-label">From (UTC)</span
+            ><input type="date" name="from" value="{{.From}}" required
+          /></label>
+          <label class="field"
+            ><span class="field-label">Through (UTC)</span
+            ><input type="date" name="until" value="{{.Until}}" required
+          /></label>
+          {{if ne .Section "overview"}}<label class="field field-grow"
+            ><span class="field-label">Search</span
+            ><input
+              name="q"
+              value="{{.QueryText}}"
+              placeholder="Name, creator or owner…"
+          /></label>
+          <label class="field"
+            ><span class="field-label">Sort</span
+            ><select name="sort">
+              {{range .SortChoices}}
+              <option value="{{.Value}}" {{.Attr}}>{{.Label}}</option>
+              {{end}}
+            </select></label
+          >{{end}}
+          <button class="button" type="submit">Apply</button>
+          <a
+            class="button button-secondary"
+            href="/api/hex/admin/analytics.csv?from={{.From}}&amp;until={{.Until}}&amp;site={{.Site}}&amp;user={{.FilterUser}}"
+            >Export daily CSV</a
+          >
+        </form>
+        {{if .Global}}
+        <dl
+          class="stats analytics-stats"
+          aria-label="Current platform inventory"
+        >
+          <div>
+            <dt>Published sites</dt>
+            <dd>{{.Counts.Sites}}</dd>
+          </div>
+          <div>
+            <dt>Apps</dt>
+            <dd>{{.Counts.Apps}}</dd>
+          </div>
+          <div>
+            <dt>Files / folders</dt>
+            <dd>{{.Counts.Artifacts}}</dd>
+          </div>
+          <div>
+            <dt>Verified creators</dt>
+            <dd>{{.Counts.Creators}}</dd>
+          </div>
+          <div>
+            <dt>Known users</dt>
+            <dd>{{.Report.KnownUsers}}</dd>
+          </div>
+          <div>
+            <dt>Active · 7 days</dt>
+            <dd>{{.Report.Active7Days}}</dd>
+          </div>
+          <div>
+            <dt>Active · 30 days</dt>
+            <dd>{{.Report.Active30Days}}</dd>
+          </div>
+        </dl>
+        <p class="muted">
+          Inventory includes hidden apps and file/folder publications. Creator
+          counts cover currently published sites, using verified identity IDs.
+          {{if .Counts.UnknownCreators}}{{.Counts.UnknownCreators}} sites have
+          no recorded creator.{{end}} Known users are people Hex has observed,
+          not the company directory. Activity is refreshed at most hourly.
+        </p>
+        {{end}} {{if eq .Section "overview"}}{{template "analytics-summary"
+        .AnalyticsView}}{{template "analytics-trends" .AnalyticsView}}{{end}}
+        {{if and .UserDetail (ne .Section "overview")}}{{template
+        "analytics-summary" .AnalyticsView}}{{template "analytics-trends"
+        .AnalyticsView}}{{end}} {{if ne .Section "users"}}{{template
+        "admin-sites" .}}{{else}}{{if .UserDetail}}{{template "admin-sites"
+        .}}{{end}}{{end}} {{if not .SiteDetail}}{{if ne .Section
+        "sites"}}{{template "admin-users" .}}{{end}}{{end}} {{if .Pages}}
+        <nav class="toolbar" aria-label="Pagination">
+          <span>{{.TotalRows}} results · page {{.Page}} of {{.Pages}}</span>{{if
+          .Previous}}<a class="button button-secondary" href="{{.Previous}}"
+            >Previous</a
+          >{{end}}{{if .Next}}<a
+            class="button button-secondary"
+            href="{{.Next}}"
+            >Next</a
+          >{{end}}
+        </nav>
+        {{end}} {{if or (eq .Section "overview") .UserDetail}}
+        <section class="panel">
+          <h2>Publishing activity</h2>
+          <p class="muted">
+            Latest 50 events in this date range. Historical records survive
+            unpublishing.
+          </p>
+          <div class="table-scroll">
+            <table class="analytics-table">
+              <thead>
+                <tr>
+                  <th scope="col">When (UTC)</th>
+                  <th scope="col">Site</th>
+                  <th scope="col">Event</th>
+                  <th scope="col">Person</th>
+                </tr>
+              </thead>
+              <tbody>
+                {{range .Report.Events}}
+                <tr>
+                  <td>{{.At.Format "2006-01-02 15:04"}}</td>
+                  <td>
+                    <a
+                      href="/admin/sites/{{.Site}}?from={{$.From}}&amp;until={{$.Until}}"
+                      >{{if .Title}}{{.Title}}{{else}}{{.Site}}{{end}}</a
+                    >
+                  </td>
+                  <td>{{.Kind}}</td>
+                  <td>
+                    {{with .Actor}}{{if
+                    .Name}}{{.Name}}{{else}}{{.ID}}{{end}}{{else}}Unknown{{end}}
+                  </td>
+                </tr>
+                {{else}}
+                <tr>
+                  <td colspan="4">
+                    No publishing activity recorded in this range.
+                  </td>
+                </tr>
+                {{end}}
+              </tbody>
+            </table>
+          </div>
+        </section>
+        {{end}}
+        <details class="panel">
+          <summary>Analytics collection status</summary>
+          <p>
+            Last collected request: {{if .Report.LastCollected.IsZero}}none
+            yet{{else}}{{.Report.LastCollected.UTC.Format
+            "2006-01-02T15:04:05"}} UTC{{end}}. User/event write failures since
+            this server started: {{.Failures}}.
+          </p>
+          {{with .Collector}}
+          <p>
+            Collector: {{if .Running}}running{{else}}stopped{{end}}. Received
+            {{.Received}}, recorded {{.Recorded}}, rejected {{.Rejected}},
+            queue/shutdown drops {{.Dropped}}, write failures
+            {{.WriteFailures}}.
+          </p>
+          {{if .LastError}}
+          <p class="banner banner-error">{{.LastError}}</p>
+          {{end}}{{else}}
+          <p class="muted">
+            No local collector configured. Another collector can feed this
+            analytics store.
+          </p>
+          {{end}}
+          <p class="muted">
+            Traffic collection is best effort over loopback syslog. Collector
+            counters cover this process; requests lost before receipt cannot be
+            counted. Historical publishing import is limited to metadata and the
+            history still available on existing sites.
+          </p>
+        </details>
+      </div>
+    </main>
+    {{template "footer" .Chrome}}
+  </body>
+</html>
+{{end}} {{define "analytics-summary"}}
+<section class="panel">
+  <h2>In the selected period</h2>
+  <dl class="stats analytics-stats" aria-label="Activity and traffic">
+    <div>
+      <dt>Sites created</dt>
+      <dd>{{.Report.Created}}</dd>
+    </div>
+    <div>
+      <dt>Publications</dt>
+      <dd>{{.Report.Publications}}</dd>
+    </div>
+    <div>
+      <dt>Unpublished</dt>
+      <dd>{{.Report.Unpublished}}</dd>
+    </div>
+    {{if not .Site}}
+    <div>
+      <dt>New users</dt>
+      <dd>{{.Report.NewUsers}}</dd>
+    </div>
+    {{end}}
+    <div>
+      <dt>Page views</dt>
+      <dd>{{.Report.Traffic.PageViews}}</dd>
+    </div>
+    <div>
+      <dt>Unique visitors</dt>
+      <dd>{{.Report.Traffic.Visitors}}</dd>
+    </div>
+    <div>
+      <dt>Visits</dt>
+      <dd>{{.Report.Traffic.Visits}}</dd>
+    </div>
+    <div>
+      <dt>Requests</dt>
+      <dd>{{.Report.Traffic.Requests}}</dd>
+    </div>
+    <div>
+      <dt>HTTP errors</dt>
+      <dd>{{.Report.Traffic.Errors}}</dd>
+    </div>
+    <div>
+      <dt>Bandwidth</dt>
+      <dd>{{.Bytes}}</dd>
+    </div>
+    <div>
+      <dt>Mean request time</dt>
+      <dd>{{.Report.Traffic.AverageMillis}} ms</dd>
+    </div>
+  </dl>
+  <p class="muted">
+    Page views are successful GET document loads reaching nginx, including 304
+    responses where identifiable. Assets and APIs are requests, not page views.
+    Visitors are distinct authenticated users across the entire range. Visits
+    group a user's page loads per site with a 30-minute inactivity timeout.
+    Browser-only navigation is not measured.
+  </p>
+</section>
+{{end}} {{define "analytics-trends"}}
+<section class="panel">
+  <h2>Daily activity</h2>
+  <figure class="analytics-chart">
+    <svg
+      viewBox="0 0 {{.ChartWidth}} 100"
+      role="img"
+      aria-label="Daily page views from {{.From}} through {{.Until}}"
+      preserveAspectRatio="none"
+    >
+      {{range .Bars}}
+      <rect x="{{.X}}" y="{{.Y}}" width="8" height="{{.Height}}">
+        <title>{{.Date}}: {{.Views}} page views</title>
+      </rect>
+      {{end}}
+    </svg>
+    <figcaption class="muted">
+      Page views · {{.From}} – {{.Until}} (UTC). Exact daily values below.
+    </figcaption>
+  </figure>
+  <details>
+    <summary>Daily statistics</summary>
+    <div class="table-scroll">
+      <table class="analytics-table">
+        <thead>
+          <tr>
+            <th scope="col">Date (UTC)</th>
+            <th scope="col">Page views</th>
+            <th scope="col">Visitors</th>
+            <th scope="col">Visits</th>
+            <th scope="col">Created</th>
+            <th scope="col">Published</th>
+            <th scope="col">Unpublished</th>
+            <th scope="col">New users</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Report.Days}}
+          <tr>
+            <th scope="row">{{.Date}}</th>
+            <td>{{.PageViews}}</td>
+            <td>{{.Visitors}}</td>
+            <td>{{.Visits}}</td>
+            <td>{{.Created}}</td>
+            <td>{{.Publications}}</td>
+            <td>{{.Unpublished}}</td>
+            <td>{{.NewUsers}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </details>
+</section>
+{{end}} {{define "admin-sites"}}
+<section class="panel">
+  <div class="panel-heading">
+    <h2>{{if .UserDetail}}Sites created, owned or used{{else}}Sites{{end}}</h2>
+    {{if eq .Section "overview"}}<a
+      href="/admin/sites?from={{.From}}&amp;until={{.Until}}"
+      >View all sites</a
+    >{{end}}
+  </div>
+  <div class="table-scroll">
+    <table class="analytics-table">
+      <thead>
+        <tr>
+          <th scope="col">Site</th>
+          <th scope="col">Creator</th>
+          <th scope="col">Current owners</th>
+          <th scope="col">Created</th>
+          <th scope="col">Latest publication</th>
+          <th scope="col">Page views</th>
+          <th scope="col">Visitors</th>
+          <th scope="col">Last visited</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Sites}}
+        <tr>
+          <th scope="row">
+            <a
+              href="/admin/sites/{{.Name}}?from={{$.From}}&amp;until={{$.Until}}"
+              >{{.Title}}</a
+            ><small class="muted"
+              >{{.Name}} · {{if .Published}}{{.Kind}} ·
+              <a href="/manage/{{.Name}}">Manage</a>{{else}}Not currently
+              published{{end}}</small
+            >
+          </th>
+          <td>
+            {{if .CreatorID}}<a
+              href="/admin/users?user={{.CreatorID}}&amp;from={{$.From}}&amp;until={{$.Until}}"
+              >{{if .CreatedBy}}{{.CreatedBy}}{{else}}{{.CreatorID}}{{end}}</a
+            >{{else}}Unknown{{end}}
+          </td>
+          <td>{{if .Owners}}{{.Owners}}{{else}}Unknown{{end}}</td>
+          <td>{{if .Created}}{{.Created}}{{else}}Unknown{{end}}</td>
+          <td>{{if .Updated}}{{.Updated}}{{else}}—{{end}}</td>
+          <td>{{.PageViews}}</td>
+          <td>{{.Visitors}}</td>
+          <td>{{.LastVisit}}</td>
+        </tr>
+        {{else}}
+        <tr>
+          <td colspan="8">No sites match these filters.</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</section>
+{{end}} {{define "admin-users"}}
+<section class="panel">
+  <div class="panel-heading">
+    <h2>People</h2>
+    {{if eq .Section "overview"}}<a
+      href="/admin/users?from={{.From}}&amp;until={{.Until}}"
+      >View all people</a
+    >{{end}}
+  </div>
+  <div class="table-scroll">
+    <table class="analytics-table">
+      <thead>
+        <tr>
+          <th scope="col">Person</th>
+          <th scope="col">Current sites created</th>
+          <th scope="col">Current sites owned</th>
+          <th scope="col">First seen</th>
+          <th scope="col">Last active</th>
+          <th scope="col">Page views</th>
+          <th scope="col">Visits</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Users}}
+        <tr>
+          <th scope="row">
+            <a href="{{.DetailURL}}">{{.Label}}</a>{{if .Email}}<small
+              class="muted"
+              >{{.Email}}</small
+            >{{end}}
+          </th>
+          <td>{{.Created}}</td>
+          <td>{{.Owned}}</td>
+          <td>{{.First}}</td>
+          <td>{{.Last}}</td>
+          <td>{{.PageViews}}</td>
+          <td>{{.Visits}}</td>
+        </tr>
+        {{else}}
+        <tr>
+          <td colspan="7">No people match these filters.</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  <p class="muted">
+    Ownership counts direct user ownership; group membership is not expanded.
+    First-seen dates remain unknown for people imported from the previous
+    directory.
+  </p>
+</section>
+{{end}} {{define "site-analytics"}}
+<div id="site-analytics">
+  <form
+    class="toolbar analytics-filters"
+    action="/manage/{{.Site}}"
+    method="get"
+    hx-get="/api/hex/manage/sites/{{.Site}}/analytics"
+    hx-target="#site-analytics"
+    hx-swap="outerHTML"
+  >
+    <input type="hidden" name="tab" value="analytics" /><label class="field"
+      ><span class="field-label">From (UTC)</span
+      ><input type="date" name="from" value="{{.From}}" required /></label
+    ><label class="field"
+      ><span class="field-label">Through (UTC)</span
+      ><input type="date" name="until" value="{{.Until}}" required /></label
+    ><button class="button" type="submit">Apply</button>
+  </form>
+  {{template "analytics-summary" .}}{{template "analytics-trends" .}}
+</div>
+{{end}}

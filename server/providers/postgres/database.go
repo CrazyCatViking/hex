@@ -76,6 +76,9 @@ func (d *Database) Migrate(ctx context.Context) error {
 		return fmt.Errorf("create people table: %w", err)
 	}
 
+	if err := d.migrateAnalytics(ctx); err != nil {
+		return err
+	}
 	return d.migrateSitePolicies(ctx)
 }
 

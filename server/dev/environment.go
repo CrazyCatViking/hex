@@ -84,13 +84,14 @@ func (e *Environment) Close() error {
 }
 
 type settings struct {
-	address  string
-	dataDir  string
-	sites    string
-	files    string
-	database string
-	realtime string
-	identity string
+	address   string
+	dataDir   string
+	sites     string
+	files     string
+	database  string
+	realtime  string
+	identity  string
+	analytics string
 }
 
 func readSettings() (settings, error) {
@@ -103,6 +104,11 @@ func readSettings() (settings, error) {
 		realtime: value("HEX_REALTIME_PROVIDER", "memory"),
 		identity: value("HEX_IDENTITY_PROVIDER", "static"),
 	}
+	analyticsDefault := "memory"
+	if settings.database == "postgres" {
+		analyticsDefault = "postgres"
+	}
+	settings.analytics = value("HEX_ANALYTICS_PROVIDER", analyticsDefault)
 	selections := []struct {
 		name    string
 		value   string
@@ -113,6 +119,7 @@ func readSettings() (settings, error) {
 		{"HEX_DATABASE_PROVIDER", settings.database, []string{"none", "memory", "postgres"}},
 		{"HEX_REALTIME_PROVIDER", settings.realtime, []string{"none", "memory"}},
 		{"HEX_IDENTITY_PROVIDER", settings.identity, []string{"none", "static"}},
+		{"HEX_ANALYTICS_PROVIDER", settings.analytics, []string{"none", "memory", "postgres"}},
 	}
 	for _, selection := range selections {
 		if !slices.Contains(selection.allowed, selection.value) {
@@ -124,6 +131,9 @@ func readSettings() (settings, error) {
 	}
 	if settings.database == "postgres" && os.Getenv("DATABASE_URL") == "" {
 		return settings, errors.New("local PostgreSQL requires DATABASE_URL")
+	}
+	if settings.analytics == "postgres" && value("HEX_ANALYTICS_DATABASE_URL", os.Getenv("DATABASE_URL")) == "" {
+		return settings, errors.New("local analytics requires HEX_ANALYTICS_DATABASE_URL or DATABASE_URL")
 	}
 
 	return settings, nil
@@ -193,6 +203,35 @@ func (e *Environment) openProviders(ctx context.Context, settings settings) erro
 		e.Config.Realtime = memory.NewRealtime()
 	}
 
+	switch settings.analytics {
+	case "memory":
+		e.Config.Analytics = memory.NewAnalytics()
+	case "postgres":
+		connection := value("HEX_ANALYTICS_DATABASE_URL", os.Getenv("DATABASE_URL"))
+		if database, ok := e.Config.Database.(*postgres.Database); ok && connection == os.Getenv("DATABASE_URL") {
+			e.Config.Analytics = database
+		} else {
+			startup, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+			database, err := postgres.New(startup, connection)
+			if err != nil {
+				return fmt.Errorf("open local analytics: %w", err)
+			}
+			e.closers = append(e.closers, func() error { database.Close(); return nil })
+			if err := database.Migrate(startup); err != nil {
+				return err
+			}
+			e.Config.Analytics = database
+		}
+	}
+	if address := os.Getenv("HEX_ANALYTICS_ADDR"); address != "" {
+		collector, err := hex.StartTrafficCollector(ctx, address, e.Config.Analytics)
+		if err != nil {
+			return err
+		}
+		e.Config.TrafficCollector = collector
+		e.closers = append(e.closers, collector.Close)
+	}
 	e.configureIdentity(settings)
 	return nil
 }
@@ -216,6 +255,9 @@ func (e *Environment) configureIdentity(settings settings) {
 	e.Config.AdminGroups = splitList(value("HEX_ADMIN_GROUPS", identity.ID))
 
 	if database, ok := e.Config.Database.(*postgres.Database); ok {
+		e.Config.Access = database
+		e.Config.People = database
+	} else if database, ok := e.Config.Analytics.(*postgres.Database); ok {
 		e.Config.Access = database
 		e.Config.People = database
 	} else {

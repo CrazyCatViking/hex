@@ -83,7 +83,7 @@ Use `hex update` to install the latest verified CLI binary while preserving plat
 
 Visit the platform's main domain, such as **https://hex.smartdok.dev/**. Its Go-rendered portal greets signed-in people with what has been shared with them, the sites they own, and the apps published for everyone; owners share and manage their sites from **Your sites**. The **Build & publish** page offers an installer for the visitor's OS. Download it in the signed-in browser and run the displayed command: it installs the latest CLI and saves the correct platform profile automatically. Employees do not need to run `hex setup` or edit configuration.
 
-Set `"discoverable": false` in an app's hex.json and republish to hide its listing and exclude it from statistics. Its URL continues to work. See [portal and installers](docs/portal.md) for hosting, configuration, and release prerequisites. Locally, the landing page is at **http://localhost:8080/**.
+Set `"discoverable": false` in an app's hex.json and republish to hide its listing and exclude it from catalogue statistics. Platform-admin inventory still includes it. Its URL continues to work. See [portal and installers](docs/portal.md) for hosting, configuration, and release prerequisites. Locally, the landing page is at **http://localhost:8080/**.
 
 Agents such as Claude Code can use `hex setup <url> --json` and, when user sign-in is required, `hex setup --file <downloaded-file> --json`. Setup saves a non-secret default profile, including the platform's configured auth type, OIDC issuer, client ID and scopes. API commands, including publishing, sign in through the browser the first time and reuse the saved session; `hex login` and `hex logout` manage it, and `HEX_TOKEN` overrides it. See [Setup and authentication handoff](docs/setup.md).
 
@@ -201,6 +201,7 @@ The interfaces are defined in `server/storage.go`:
 - `Database`: site-scoped JSON documents with keyset pagination and server-recorded creators. The PostgreSQL provider works with Azure Database for PostgreSQL or another PostgreSQL installation.
 - `Realtime`: subscriptions and JSON broadcasts, allowing a future distributed broker implementation without changing the browser API.
 - `IdentityResolver` and `AccessStore` (in `server/identity.go` and `server/access.go`): optional gateway-forwarded caller identity and per-site access policies. See [Identity and site access control](docs/access-control.md).
+- `AnalyticsStore` (in `server/analytics.go`): optional platform-owned user activity, publishing lifecycle and daily nginx traffic aggregates. Platform admins use `/admin`; site owners get an Analytics tab. See [platform analytics](docs/analytics.md) for independent PostgreSQL storage and traffic collection.
 
 See [the architecture and API contract](docs/architecture.md) for provider semantics and [the hosting contract](docs/hosting.md) for platform independence and reference-server configuration.
 

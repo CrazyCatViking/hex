@@ -1,4 +1,5 @@
 export interface Capabilities {
+  analytics?: boolean;
   version: number;
   files: boolean;
   database: boolean;

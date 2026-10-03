@@ -10,6 +10,7 @@ Each Hex server includes a portal at the main domain, for example **https://hex.
 | Your sites | `/manage` | Every site the person owns, filterable instantly by text and by kind (apps and files), with open, copy-link and share actions. Platform admins see every site. |
 | Site | `/manage/<site>` | Tabs for **Overview** (who created and last published it, and its audience), **Sharing**, **Data**, **History** and **Settings** (taking the site down). |
 | Build & publish | `/start` | The installer for the detected OS and three steps: install, share a file or folder, and build an app with a coding agent. |
+| Admin | `/admin`, `/admin/sites`, `/admin/users` | Platform-wide inventory, user activity, publishing history and nginx traffic, with date ranges and site/user drill-downs. Requires analytics and platform-admin access. |
 
 The account menu in the header shows the person's name, email, their configured groups and whether they are a platform admin, and links to sign out through `/.auth/logout`.
 
@@ -58,6 +59,11 @@ With an identity provider and access control, signed-in users get **Your sites**
 - sharing in the style of familiar document tools: a searchable picker for people and groups, a role per entry (**Owner**, **Can edit**, **Can view**), and a **General access** choice between *Only people added*, *Everyone can view* and *Everyone can edit*. The page warns before saving when general access makes listed roles redundant, and keeps at least one owner. Path, collection, file and channel rules stay available as JSON under **Advanced rules**;
 - a data browser: collections and their documents (with the verified creator of each), the JSON of a document, uploaded files, and deleting documents and files;
 - unpublishing from **Settings**, confirmed by typing the site's name.
+- an **Analytics** tab with site-level traffic and daily trends when analytics is configured.
+
+See [platform analytics](analytics.md) for durable storage, traffic collection,
+metric definitions and admin permissions. Catalogue statistics remain scoped to
+visible discoverable apps; admin inventory includes every published site.
 
 Only a site's owners and platform admins can open its page; every change goes through `/api/hex/manage/…` with the API's same-origin and `X-Hex-Request` checks. Pages are rendered by the server with HTMX under the same content security policy as the landing page.
 

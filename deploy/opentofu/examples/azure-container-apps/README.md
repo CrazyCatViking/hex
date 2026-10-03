@@ -26,6 +26,11 @@ The environment is wired with explicit `HEX_*_PROVIDER` selections. Disabling a 
 
 Example profiles are in `profiles/`. The local developer launcher continues enabling development capabilities by default; this cloud example intentionally starts smaller.
 
+Managed/external PostgreSQL also enables durable [platform analytics](../../../../docs/analytics.md)
+and the loopback nginx traffic collector. Configure `admin_group_ids` to access
+`/admin`; site owners get an Analytics tab. The site-only profile has analytics
+disabled until storage is configured. Rebuild/deploy both server and nginx images.
+
 ## Prerequisites
 
 - OpenTofu 1.11+ and Azure CLI, or an Azure workload identity for CI.

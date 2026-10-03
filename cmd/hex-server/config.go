@@ -25,6 +25,7 @@ type providerSelection struct {
 	database  string
 	realtime  string
 	identity  string
+	analytics string
 }
 
 func readProviderSelection(getenv func(string) string) (providerSelection, error) {
@@ -54,6 +55,11 @@ func readProviderSelection(getenv func(string) string) (providerSelection, error
 		realtime:  environmentValue(getenv, "HEX_REALTIME_PROVIDER", "memory"),
 		identity:  environmentValue(getenv, "HEX_IDENTITY_PROVIDER", "none"),
 	}
+	analyticsDefault := selection.database
+	if analyticsDefault != "postgres" && analyticsDefault != "none" {
+		analyticsDefault = "memory"
+	}
+	selection.analytics = environmentValue(getenv, "HEX_ANALYTICS_PROVIDER", analyticsDefault)
 	settings := []struct {
 		name    string
 		value   string
@@ -65,6 +71,7 @@ func readProviderSelection(getenv func(string) string) (providerSelection, error
 		{"HEX_DATABASE_PROVIDER", selection.database, []string{"none", "memory", "postgres"}},
 		{"HEX_REALTIME_PROVIDER", selection.realtime, []string{"none", "memory"}},
 		{"HEX_IDENTITY_PROVIDER", selection.identity, []string{"none", "easyauth", "static"}},
+		{"HEX_ANALYTICS_PROVIDER", selection.analytics, []string{"none", "memory", "postgres"}},
 	}
 
 	for _, setting := range settings {
@@ -84,6 +91,9 @@ func readProviderSelection(getenv func(string) string) (providerSelection, error
 	}
 	if selection.database == "postgres" && getenv("DATABASE_URL") == "" {
 		return selection, fmt.Errorf("DATABASE_URL is required for the postgres database provider")
+	}
+	if selection.analytics == "postgres" && environmentValue(getenv, "HEX_ANALYTICS_DATABASE_URL", getenv("DATABASE_URL")) == "" {
+		return selection, fmt.Errorf("HEX_ANALYTICS_DATABASE_URL or DATABASE_URL is required for postgres analytics")
 	}
 
 	return selection, nil
@@ -183,6 +193,35 @@ func configure(ctx context.Context, getenv func(string) string) (hex.Config, fun
 	if selection.realtime == "memory" {
 		config.Realtime = memory.NewRealtime()
 	}
+	switch selection.analytics {
+	case "memory":
+		config.Analytics = memory.NewAnalytics()
+		slog.Warn("using ephemeral in-memory analytics")
+	case "postgres":
+		connection := environmentValue(getenv, "HEX_ANALYTICS_DATABASE_URL", getenv("DATABASE_URL"))
+		if database, ok := config.Database.(*postgres.Database); ok && connection == getenv("DATABASE_URL") {
+			config.Analytics = database
+		} else {
+			database, err := openPostgres(ctx, connection)
+			if err != nil {
+				return config, nil, fmt.Errorf("configure analytics database: %w", err)
+			}
+			closers = append(closers, database.Close)
+			config.Analytics = database
+		}
+	}
+	if address := getenv("HEX_ANALYTICS_ADDR"); address != "" {
+		collector, err := hex.StartTrafficCollector(ctx, address, config.Analytics)
+		if err != nil {
+			return config, nil, err
+		}
+		config.TrafficCollector = collector
+		closers = append(closers, func() {
+			if err := collector.Close(); err != nil {
+				slog.Error("close traffic collector", "error", err)
+			}
+		})
+	}
 
 	configureIdentity(&config, selection, getenv)
 	config.Groups = hex.ParseGroups(getenv("HEX_GROUPS"))
@@ -208,7 +247,7 @@ func configure(ctx context.Context, getenv func(string) string) (hex.Config, fun
 
 // configureIdentity wires the identity resolver, admin groups and the access
 // store. Access policies need durable storage, so site access control only
-// activates alongside the PostgreSQL database provider; the ephemeral static
+// activates alongside a PostgreSQL document or analytics provider. The static
 // setup accepts the in-memory store for local experimentation.
 func configureIdentity(config *hex.Config, selection providerSelection, getenv func(string) string) {
 	switch selection.identity {
@@ -227,12 +266,18 @@ func configureIdentity(config *hex.Config, selection providerSelection, getenv f
 		}}
 	}
 	config.AdminGroups = splitList(getenv("HEX_ADMIN_GROUPS"))
+	// Keep existing policies in their original database when analytics has a
+	// separate connection. Moving analytics must not move access control.
+	if database, ok := config.Database.(*postgres.Database); ok {
+		config.Access, config.People = database, database
+		return
+	}
+	if database, ok := config.Analytics.(*postgres.Database); ok {
+		config.Access, config.People = database, database
+		return
+	}
 
-	switch database := config.Database.(type) {
-	case *postgres.Database:
-		config.Access = database
-		config.People = database
-
+	switch config.Database.(type) {
 	case *memory.Database:
 		if selection.identity == "static" {
 			config.Access = memory.NewAccessStore()

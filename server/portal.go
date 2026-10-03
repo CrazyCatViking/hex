@@ -29,10 +29,11 @@ const (
 // Chrome is what every portal page shows around its content: the platform,
 // the active section and the signed-in viewer.
 type Chrome struct {
-	Platform string
-	Active   string
-	Viewer   *viewerView
-	Manage   bool
+	Platform  string
+	Active    string
+	Viewer    *viewerView
+	Manage    bool
+	Analytics bool
 }
 
 type viewerView struct {
@@ -122,7 +123,7 @@ type startView struct {
 }
 
 func (s *Server) chromeFor(identity *Identity, active string) Chrome {
-	view := Chrome{Platform: s.platformName(), Active: active, Manage: s.manageEnabled() && identity != nil}
+	view := Chrome{Platform: s.platformName(), Active: active, Manage: s.manageEnabled() && identity != nil, Analytics: s.config.Analytics != nil}
 	if identity == nil {
 		return view
 	}

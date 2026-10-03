@@ -207,6 +207,11 @@ replace github.com/crazycatviking/hex => ${JSON.stringify(root)}
       env: cliEnvironment,
     });
     assert.equal(fetchedSite.stdout, "consumer website");
+    if (process.argv.includes("--analytics-browser")) {
+      const { verifyAnalyticsPortal } =
+        await import("./test-analytics-portal.mjs");
+      await verifyAnalyticsPortal(port);
+    }
 
     await client.files.upload("persist.bin", new Uint8Array([0, 255, 10]));
     const uploadedFile = await client.files.download("persist.bin");

@@ -44,6 +44,7 @@ export async function startNginx({
   port = 8080,
   backendPort = 8081,
   siteDomain = "localhost",
+  analyticsPort = null,
 }) {
   if (!/^[a-z0-9.-]+$/.test(siteDomain)) {
     throw new Error("Invalid site domain");
@@ -65,6 +66,11 @@ export async function startNginx({
   ].join("\n");
   const configuration = template
     .replaceAll("${HEX_SITE_DOMAIN_PATTERN}", siteDomain.replaceAll(".", "\\."))
+    .replaceAll("${HEX_ANALYTICS_ENABLED}", analyticsPort === null ? "0" : "1")
+    .replace(
+      "syslog:server=127.0.0.1:8082",
+      `syslog:server=127.0.0.1:${analyticsPort ?? 8082}`,
+    )
     .replace("user nginx;", "")
     .replace("include /etc/nginx/mime.types;", `include ${quote(mimeTypes)};`)
     .replace("listen 8080;", `listen 127.0.0.1:${port};`)
@@ -76,7 +82,6 @@ export async function startNginx({
     .replace(
       "http {",
       `http {
-    access_log off;
     client_body_temp_path client-body;
     proxy_temp_path proxy;
     fastcgi_temp_path fastcgi;

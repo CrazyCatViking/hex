@@ -248,6 +248,9 @@ func serverEnvironment(settings devSettings) []string {
 		"HEX_FILES_PROVIDER":           "memory",
 		"HEX_DATABASE_PROVIDER":        "memory",
 		"HEX_REALTIME_PROVIDER":        "memory",
+		"HEX_ANALYTICS_PROVIDER":       "",
+		"HEX_ANALYTICS_DATABASE_URL":   "",
+		"HEX_ANALYTICS_ADDR":           "",
 	}
 	for key, value := range defaults {
 		environment[key] = value
@@ -259,6 +262,9 @@ func serverEnvironment(settings devSettings) []string {
 		environment[key] = value
 	}
 	environment["HEX_ADDR"] = fmt.Sprintf("127.0.0.1:%d", settings.APIPort)
+	if environment["HEX_ANALYTICS_PROVIDER"] != "none" {
+		environment["HEX_ANALYTICS_ADDR"] = fmt.Sprintf("127.0.0.1:%d", settings.Port)
+	}
 	environment["HEX_DEV_DATA_DIR"] = settings.DataDirectory
 	environment["HEX_SITES_DIR"] = filepath.Join(settings.DataDirectory, "sites")
 	environment["HEX_FILES_DIR"] = filepath.Join(settings.DataDirectory, "files")

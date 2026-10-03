@@ -55,7 +55,8 @@ locals {
   environment = merge(
     { HEX_PUBLIC_URL = local.gateway_url, HEX_SITE_BASE_URL = local.gateway_url },
     var.server_environment,
-    { HEX_ADDR = "127.0.0.1:8081" }
+    { HEX_ADDR = "127.0.0.1:8081" },
+    lookup(var.server_environment, "HEX_ANALYTICS_PROVIDER", "none") != "none" ? { HEX_ANALYTICS_ADDR = "127.0.0.1:8082" } : {}
   )
 
   secrets = concat(
@@ -130,6 +131,9 @@ resource "azapi_resource" "app" {
             env = [{
               name  = "HEX_SITE_DOMAIN"
               value = var.site_domain
+              }, {
+              name  = "HEX_ANALYTICS_ENABLED"
+              value = lookup(var.server_environment, "HEX_ANALYTICS_PROVIDER", "none") != "none" ? "1" : "0"
             }]
             resources = {
               cpu    = 0.25

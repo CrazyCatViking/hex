@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 
 	hex "github.com/crazycatviking/hex/server"
+	"github.com/crazycatviking/hex/server/providers/postgres"
 )
 
 func TestDisabledProvidersDoNotFallback(t *testing.T) {
@@ -59,6 +61,16 @@ func TestDisabledProvidersDoNotFallback(t *testing.T) {
 	}
 }
 
+func TestSeparateAnalyticsDoesNotMoveAccessPolicies(t *testing.T) {
+	documents := &postgres.Database{}
+	analytics := &postgres.Database{}
+	config := hex.Config{Database: documents, Analytics: analytics}
+	configureIdentity(&config, providerSelection{identity: "easyauth"}, func(string) string { return "" })
+	if config.Access != documents || config.People != documents {
+		t.Fatal("a separate analytics connection must not move existing policies or the people directory")
+	}
+}
+
 func TestExplicitProviderConfigurationFailsEarly(t *testing.T) {
 	cases := []struct {
 		variable string
@@ -67,6 +79,8 @@ func TestExplicitProviderConfigurationFailsEarly(t *testing.T) {
 		{"HEX_FILES_PROVIDER", "azureblob"},
 		{"HEX_DATABASE_PROVIDER", "postgres"},
 		{"HEX_REALTIME_PROVIDER", "redis"},
+		{"HEX_ANALYTICS_PROVIDER", "postgres"},
+		{"HEX_ANALYTICS_PROVIDER", "unknown"},
 	}
 
 	for _, testCase := range cases {
@@ -82,6 +96,47 @@ func TestExplicitProviderConfigurationFailsEarly(t *testing.T) {
 				t.Fatal("expected configuration error")
 			}
 		})
+	}
+}
+
+func TestAnalyticsProviderAndCollectorSelection(t *testing.T) {
+	for _, provider := range []string{"none", "memory"} {
+		t.Run(provider, func(t *testing.T) {
+			values := map[string]string{
+				"HEX_SITES_PROVIDER": "none", "HEX_DATABASE_PROVIDER": "none", "HEX_ANALYTICS_PROVIDER": provider,
+				"HEX_FILES_PROVIDER": "none", "HEX_REALTIME_PROVIDER": "none",
+			}
+			if provider == "memory" {
+				values["HEX_ANALYTICS_ADDR"] = "127.0.0.1:0"
+			}
+			config, cleanup, err := configure(context.Background(), func(key string) string { return values[key] })
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer cleanup()
+			if (config.Analytics != nil) != (provider == "memory") || (config.TrafficCollector != nil) != (provider == "memory") {
+				t.Fatal("analytics selection ignored")
+			}
+		})
+	}
+}
+
+func TestDurableAnalyticsWithoutAppDatabase(t *testing.T) {
+	connection := os.Getenv("HEX_TEST_POSTGRES_URL")
+	if connection == "" {
+		t.Skip("set HEX_TEST_POSTGRES_URL")
+	}
+	values := map[string]string{
+		"HEX_SITES_PROVIDER": "none", "HEX_FILES_PROVIDER": "none", "HEX_DATABASE_PROVIDER": "none", "HEX_REALTIME_PROVIDER": "none",
+		"HEX_ANALYTICS_PROVIDER": "postgres", "HEX_ANALYTICS_DATABASE_URL": connection, "HEX_IDENTITY_PROVIDER": "static",
+	}
+	config, cleanup, err := configure(context.Background(), func(key string) string { return values[key] })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	if config.Database != nil || config.Analytics == nil || config.Access == nil || config.People == nil {
+		t.Fatal("analytics must enable durable platform storage independently of app documents")
 	}
 }
 

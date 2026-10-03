@@ -33,16 +33,17 @@ type manageListView struct {
 
 type sitePageView struct {
 	Chrome
-	Site    siteCard
-	Tab     string
-	Tabs    []siteTab
-	Facts   siteFacts
-	People  []shareEntry
-	History []historyEntry
-	Sharing sharingView
-	Data    bool
-	Files   bool
-	Actions []actionSummary
+	Site      siteCard
+	Tab       string
+	Tabs      []siteTab
+	Facts     siteFacts
+	People    []shareEntry
+	History   []historyEntry
+	Sharing   sharingView
+	Data      bool
+	Files     bool
+	Actions   []actionSummary
+	Analytics *AnalyticsView
 }
 
 // actionSummary describes one of a site's actions on its overview.
@@ -198,14 +199,18 @@ func (s *Server) manageSitePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	tabs := slices.Clone(siteTabs)
+	if s.config.Analytics != nil {
+		tabs = append(tabs, siteTab{"analytics", "Analytics"})
+	}
 	view := sitePageView{
 		Chrome: s.chromeFor(identity, "manage"),
 		Tab:    r.URL.Query().Get("tab"),
-		Tabs:   siteTabs,
+		Tabs:   tabs,
 		Data:   s.config.Database != nil,
 		Files:  s.config.Files != nil,
 	}
-	if !slices.ContainsFunc(siteTabs, func(tab siteTab) bool { return tab.ID == view.Tab }) {
+	if !slices.ContainsFunc(tabs, func(tab siteTab) bool { return tab.ID == view.Tab }) {
 		view.Tab = "overview"
 	}
 
@@ -224,6 +229,24 @@ func (s *Server) manageSitePage(w http.ResponseWriter, r *http.Request) {
 	view.Sharing = s.sharingView(r.Context(), site, access, exists)
 	view.People = view.Sharing.Entries
 	view.Actions = s.actionSummaries(r.Context(), site)
+	if view.Tab == "analytics" {
+		values := r.URL.Query()
+		values.Set("site", site)
+		values.Del("user")
+		query, err := analyticsQuery(values, time.Now())
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		report, err := s.config.Analytics.QueryAnalytics(r.Context(), query)
+		if err != nil {
+			writeServerError(w, err)
+			return
+		}
+		report.Users, report.People = nil, nil
+		analytics := newAnalyticsView(report)
+		view.Analytics = &analytics
+	}
 	s.writePortalPage(w, "site", view)
 }
 
@@ -356,11 +379,13 @@ func (s *Server) manageUnpublish(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "type the site name to confirm")
 		return
 	}
+	s.recordPublication(r.Context(), site)
 	if err := s.config.Publisher.DeleteSite(r.Context(), site); err != nil {
 		writeServerError(w, err)
 		return
 	}
 	slog.Info("site unpublished in the portal", "site", site, "by", identityName(identity))
+	s.recordAnalyticsEvents(r.Context(), []SiteEvent{analyticsEvent(site, "unpublished", time.Now().UTC(), "", personOf(identity))})
 	w.Header().Set("HX-Redirect", "/manage")
 	w.WriteHeader(http.StatusNoContent)
 }

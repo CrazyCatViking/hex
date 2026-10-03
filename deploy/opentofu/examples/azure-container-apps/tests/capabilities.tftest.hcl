@@ -74,6 +74,7 @@ run "sites_only" {
       local.server_environment.HEX_SITES_PROVIDER == "filesystem" &&
       local.server_environment.HEX_FILES_PROVIDER == "none" &&
       local.server_environment.HEX_DATABASE_PROVIDER == "none" &&
+      local.server_environment.HEX_ANALYTICS_PROVIDER == "none" &&
       local.server_environment.HEX_REALTIME_PROVIDER == "none"
     )
     error_message = "Disabled capabilities must be explicitly disabled in the reference server."
@@ -170,6 +171,7 @@ run "full_platform" {
     condition = (
       local.server_environment.HEX_FILES_PROVIDER == "azureblob" &&
       local.server_environment.HEX_DATABASE_PROVIDER == "postgres" &&
+      local.server_environment.HEX_ANALYTICS_PROVIDER == "postgres" &&
       local.server_environment.HEX_REALTIME_PROVIDER == "memory"
     )
     error_message = "Selected capability providers must be wired into the server."

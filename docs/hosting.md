@@ -29,6 +29,7 @@ For local testing of a consuming server, call the optional [Go local configurati
 | `HEX_DATABASE_PROVIDER` | `none`, `memory`, `postgres` | `postgres` when `DATABASE_URL` is set, otherwise `memory` |
 | `HEX_REALTIME_PROVIDER` | `none`, `memory` | `memory` |
 | `HEX_IDENTITY_PROVIDER` | `none`, `easyauth`, `static` | `none` |
+| `HEX_ANALYTICS_PROVIDER` | `none`, `memory`, `postgres` | Same selection as the app database, independently overridable |
 
 The inferred defaults preserve local development convenience. Infrastructure examples must select providers explicitly. `none` takes precedence over any leftover connection variables. Explicit `azureblob` without its endpoint, `azurefiles` without `AZURE_FILES_SHARE_URL`, the `filesystem` publisher without the filesystem sites provider, and explicit `postgres` without a URL are startup errors, not requests to fall back to temporary storage.
 
@@ -52,10 +53,12 @@ Other reference executable settings:
 | `AZURE_BLOB_CONTAINER` | Pre-existing container, default `uploads`. |
 | `AZURE_CLIENT_ID` | Optional Azure managed-identity selection used by DefaultAzureCredential. |
 | `DATABASE_URL` | PostgreSQL connection string. Use TLS verification for remote services. |
+| `HEX_ANALYTICS_DATABASE_URL` | Optional independent PostgreSQL connection for analytics; otherwise uses `DATABASE_URL`. |
+| `HEX_ANALYTICS_ADDR` | Optional loopback UDP syslog collector address, normally `127.0.0.1:8082`. Enable matching nginx logging with `HEX_ANALYTICS_ENABLED=1`. See [analytics](analytics.md). |
 | `HEX_ADMIN_GROUPS` | Comma-separated group, role or user IDs that own every site and administer every access policy. |
 | `HEX_IDENTITY_ID`, `HEX_IDENTITY_NAME`, `HEX_IDENTITY_GROUPS` | The fixed identity for the `static` resolver; defaults `local-dev`, `Local Developer`, none. |
 
-Site access policies need durable storage: with `easyauth`, access control activates only alongside the `postgres` database provider (a startup warning notes when it is disabled). The `static` resolver accepts the in-memory store for local experimentation. See [Identity and site access control](access-control.md).
+Site access policies need durable storage: with `easyauth`, access control activates alongside a PostgreSQL document or analytics provider (a startup warning notes when it is disabled). The `static` resolver accepts the in-memory store for local experimentation. See [Identity and site access control](access-control.md).
 
 For a provider not supported by this executable, write a small executable that imports `server/`, constructs the providers and calls `hex.New`. The cloud SDK is then a dependency of that provider/composition, not the HTTP framework. The browser client and the publishing protocol remain unchanged.
 

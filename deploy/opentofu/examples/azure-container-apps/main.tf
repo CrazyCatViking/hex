@@ -119,6 +119,7 @@ locals {
       HEX_PUBLISHER_PROVIDER = "none"
       HEX_FILES_PROVIDER     = "none"
       HEX_DATABASE_PROVIDER  = var.capabilities.database == "none" ? "none" : "postgres"
+      HEX_ANALYTICS_PROVIDER = var.capabilities.database == "none" ? "none" : "postgres"
       HEX_REALTIME_PROVIDER  = var.capabilities.realtime ? "memory" : "none"
       HEX_IDENTITY_PROVIDER  = "easyauth"
       AZURE_CLIENT_ID        = azapi_resource.identity.output.properties.clientId

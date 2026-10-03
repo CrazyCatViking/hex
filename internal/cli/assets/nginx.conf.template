@@ -11,6 +11,33 @@ http {
     default_type application/octet-stream;
     server_tokens off;
 
+    # Completed main requests only; no cookies, tokens, IPs or query strings.
+    log_format hex_traffic escape=json
+        '{"version":1,"id":"$request_id","time":"$msec",'
+        '"site":"$hex_site","user":"$hex_analytics_user",'
+        '"method":"$request_method","status":"$status",'
+        '"bytes":"$body_bytes_sent","duration":"$request_time",'
+        '"destination":"$http_sec_fetch_dest","contentType":"$sent_http_content_type",'
+        '"api":"$hex_api_request"}';
+
+    map $request_uri $hex_api_request {
+        default 0;
+        ~^/api/ 1;
+    }
+
+    map $hex_api_request $hex_analytics_user {
+        default $hex_static_user;
+        1 $upstream_http_x_hex_analytics_user;
+    }
+
+    map "${HEX_ANALYTICS_ENABLED}:$hex_site" $hex_log_traffic {
+        default 1;
+        ~^0: 0;
+        "1:" 0;
+    }
+
+    access_log syslog:server=127.0.0.1:8082,tag=hex_traffic,nohostname hex_traffic if=$hex_log_traffic;
+
     map $host $hex_site {
         default "";
         "~^(?<hex_site_name>[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)\.${HEX_SITE_DOMAIN_PATTERN}$" $hex_site_name;
@@ -63,6 +90,7 @@ http {
             # capture it here; subrequests share the main request's variables.
             set $hex_path $uri;
             auth_request /.hex/authz;
+            auth_request_set $hex_static_user $upstream_http_x_hex_analytics_user;
             root /mnt/sites/public/sites/$hex_site;
             index index.html;
             autoindex off;
@@ -82,6 +110,7 @@ http {
             proxy_pass http://127.0.0.1:8081;
             proxy_http_version 1.1;
             proxy_set_header Host $http_host;
+            proxy_hide_header X-Hex-Analytics-User;
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection $connection_upgrade;
             proxy_read_timeout 3600s;

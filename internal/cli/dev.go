@@ -152,12 +152,13 @@ func (a *App) startNginx(ctx context.Context, settings devSettings, directory st
 	replacements := strings.NewReplacer(
 		"user nginx;", "",
 		"${HEX_SITE_DOMAIN_PATTERN}", "localhost",
+		"${HEX_ANALYTICS_ENABLED}", analyticsEnabled(settings),
+		"syslog:server=127.0.0.1:8082", fmt.Sprintf("syslog:server=127.0.0.1:%d", settings.Port),
 		"include /etc/nginx/mime.types;", "include "+mimePath+";",
 		"listen 8080;", fmt.Sprintf("listen 127.0.0.1:%d;", settings.Port),
 		"http://127.0.0.1:8081", fmt.Sprintf("http://127.0.0.1:%d", settings.APIPort),
 		"root /mnt/sites/public/sites/$hex_site;", "root "+siteRoot+";",
 		"http {", `http {
-    access_log off;
     client_body_temp_path client-body;
     proxy_temp_path proxy;
     fastcgi_temp_path fastcgi;
@@ -177,4 +178,11 @@ func (a *App) startNginx(ctx context.Context, settings devSettings, directory st
 		return nil, err
 	}
 	return a.startProcess(binary, a.Dir, nil, args...)
+}
+
+func analyticsEnabled(settings devSettings) string {
+	if settings.Environment["HEX_ANALYTICS_PROVIDER"] == "none" {
+		return "0"
+	}
+	return "1"
 }
