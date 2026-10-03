@@ -91,7 +91,14 @@
   {{if eq .Kind "File"}}<svg viewBox="0 0 24 24">
     <path d="M6 2h8l6 6v14H6z" />
     <path class="fold" d="M14 2v6h6" /></svg
-  >{{else}}{{.Initial}}{{end}}
+  >{{else}}<span class="site-icon-initial">{{.Initial}}</span>{{if
+  .IconURL}}<img
+    src="{{.IconURL}}"
+    alt=""
+    loading="lazy"
+    decoding="async"
+    data-site-icon
+  />{{end}}{{end}}
 </span>
 {{end}} {{define "access-badge"}}
 <span class="badge badge-{{.AccessTone}}">

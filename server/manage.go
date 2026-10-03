@@ -222,7 +222,7 @@ func (s *Server) manageSitePage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	siteURL, _ := s.siteURL(site)
-	view.Site = cardFromMetadata(site, siteURL, metadata, time.Now())
+	view.Site = s.cardForSite(site, siteURL, metadata, time.Now())
 	view.Site.Access, view.Site.AccessTone = audience(access, exists)
 	view.History = s.historyEntries(r.Context(), site)
 	view.Facts = factsFrom(metadata, view.History)

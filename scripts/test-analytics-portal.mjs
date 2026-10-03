@@ -9,6 +9,12 @@ export async function verifyAnalyticsPortal(port) {
     page.on("pageerror", (error) => errors.push(error.message));
     const base = `http://localhost:${port}`;
     await page.goto(`http://demo.localhost:${port}/`);
+    await page.goto(base);
+    await page.waitForFunction(
+      () =>
+        document.querySelector(".site-card img[data-site-icon]")?.naturalWidth >
+        0,
+    );
     await page.goto(`${base}/admin`);
     assert.equal(await page.locator("h1").textContent(), "Platform overview");
     assert.equal(
@@ -20,6 +26,14 @@ export async function verifyAnalyticsPortal(port) {
       "1",
     );
     assert.ok((await page.locator(".analytics-chart rect").count()) > 0);
+    const appIcon = await page.request.get(`${base}/api/hex/sites/demo/icon`);
+    assert.equal(appIcon.status(), 200);
+    assert.match(await appIcon.text(), /demo-app-icon/);
+    await page.waitForFunction(() =>
+      [...document.querySelectorAll("img[data-site-icon]")].some(
+        (image) => image.complete && image.naturalWidth > 0,
+      ),
+    );
     await page.getByRole("link", { name: "Sites", exact: true }).click();
     await page.locator('input[name="q"]').fill("does-not-exist");
     const filtered = page.waitForResponse(
@@ -61,6 +75,11 @@ export async function verifyAnalyticsPortal(port) {
     );
     await page.goto(`${base}/manage/demo?tab=analytics`);
     assert.equal(await page.locator("#site-analytics").count(), 1);
+    await page.waitForFunction(
+      () =>
+        document.querySelector(".site-header img[data-site-icon]")
+          ?.naturalWidth > 0,
+    );
     await page
       .locator('input[name="from"]')
       .fill(yesterday.toISOString().slice(0, 10));
@@ -94,6 +113,16 @@ export async function verifyAnalyticsPortal(port) {
       );
     }
     assert.deepEqual(errors, []);
+    await page.route("**/api/hex/sites/demo/icon", (route) => route.abort());
+    await page.goto(`${base}/manage/demo`);
+    await page.waitForFunction(
+      () => !document.querySelector(".site-header img[data-site-icon]"),
+    );
+    assert.equal(
+      await page.locator(".site-header .site-icon-initial").isVisible(),
+      true,
+    );
+    await page.unroute("**/api/hex/sites/demo/icon");
     const noJS = await browser.newContext({ javaScriptEnabled: false });
     const staticPage = await noJS.newPage();
     await staticPage.goto(`${base}/admin/sites?q=does-not-exist`);
@@ -103,6 +132,11 @@ export async function verifyAnalyticsPortal(port) {
     );
     await staticPage.goto(`${base}/manage/demo?tab=analytics`);
     assert.equal(await staticPage.locator("#site-analytics").count(), 1);
+    await staticPage.waitForFunction(
+      () =>
+        document.querySelector(".site-header img[data-site-icon]")
+          ?.naturalWidth > 0,
+    );
     console.log(
       "Analytics browser passed: dashboard, HTMX filters/date ranges, site analytics, mobile layout and no-JavaScript browsing.",
     );

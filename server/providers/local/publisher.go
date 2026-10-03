@@ -71,6 +71,21 @@ func (s *Store) ReadSiteFile(ctx context.Context, site, name string) (io.ReadClo
 	if err != nil {
 		return nil, err
 	}
+	// Published previews must obey the static gateway's no-symlinks rule.
+	current := ""
+	for _, segment := range strings.Split(key, "/") {
+		current = path.Join(current, segment)
+		info, err := s.root.Lstat(current)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, hex.ErrNotFound
+		}
+		if err != nil {
+			return nil, fmt.Errorf("inspect published file %q: %w", current, err)
+		}
+		if info.Mode()&fs.ModeSymlink != 0 {
+			return nil, hex.ErrNotFound
+		}
+	}
 	return s.Open(ctx, key)
 }
 

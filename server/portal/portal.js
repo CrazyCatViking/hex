@@ -1,5 +1,21 @@
 const element = (id) => document.getElementById(id);
 
+// Keep initials visible when an icon request fails, including in HTMX content.
+document.addEventListener(
+  "error",
+  (event) => {
+    if (event.target.matches?.("img[data-site-icon]")) {
+      event.target.remove();
+    }
+  },
+  true,
+);
+for (const image of document.querySelectorAll("img[data-site-icon]")) {
+  if (image.complete && image.naturalWidth === 0) {
+    image.remove();
+  }
+}
+
 // Brief confirmation messages, such as after copying a link.
 let toastTimer;
 function toast(message) {

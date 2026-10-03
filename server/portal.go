@@ -48,6 +48,7 @@ type viewerView struct {
 
 // siteCard is how sites and artifacts appear across the portal.
 type siteCard struct {
+	IconURL     string    `json:"iconURL,omitempty"`
 	Name        string    `json:"name"`
 	URL         string    `json:"url"`
 	Title       string    `json:"title"`
@@ -233,7 +234,7 @@ func (s *Server) catalogView(ctx context.Context, viewer *Identity, query url.Va
 	search := strings.ToLower(strings.TrimSpace(view.Search))
 	now := time.Now()
 	for _, site := range sites {
-		card := cardFromMetadata(site.Name, site.URL, site.Metadata, now)
+		card := s.cardForSite(site.Name, site.URL, site.Metadata, now)
 		if card.Description == "" {
 			card.Description = "A tool built by your team."
 		}
@@ -306,7 +307,7 @@ func (s *Server) personalSites(ctx context.Context, identity *Identity, all bool
 			}
 		}
 		siteURL, _ := s.siteURL(name)
-		card := cardFromMetadata(name, siteURL, metadata, now)
+		card := s.cardForSite(name, siteURL, metadata, now)
 		card.Access, card.AccessTone = audience(access, exists)
 		card.Owned = owned || s.isAdmin(identity)
 

@@ -20,6 +20,20 @@ The Go framework renders the portal pages and catalog fragments with `html/templ
 
 NGINX forwards main-domain requests to Go and serves published app files directly from storage on subdomains. The existing hosting authentication protects the landing page, catalog, and installer downloads. Preserve the external `Host` header when configuring another reverse proxy.
 
+App cards, management pages and admin site lists show the app's published favicon.
+The portal discovers local `rel="icon"` / `rel="shortcut icon"` links in the root
+`index.html`, then Apple touch icons or conventional `favicon.svg`, `favicon.ico`,
+`favicon.png` and `apple-touch-icon.png` files. Relative links, a local `<base>` and
+same-site absolute URLs work; external/data URLs are not fetched. This works for
+existing publications without republishing. PNG, ICO, SVG, JPEG, GIF and WebP
+previews are limited to 256 KiB and preserve site/path access permissions.
+
+Icons use a small authenticated preview endpoint on the portal domain,
+`/api/hex/sites/<site>/icon`, so they work with the portal session and same-origin
+content policy. Sites without a usable icon keep their initial-letter fallback;
+file/folder publications keep the file icon. Icon previews also work without
+JavaScript. Published websites continue to be served by nginx.
+
 For SmartDok, configure:
 
 ```text

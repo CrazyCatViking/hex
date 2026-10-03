@@ -362,10 +362,14 @@
         {{range .Sites}}
         <tr>
           <th scope="row">
-            <a
-              href="/admin/sites/{{.Name}}?from={{$.From}}&amp;until={{$.Until}}"
-              >{{.Title}}</a
-            ><small class="muted"
+            <div class="admin-site-heading">
+              {{if .Published}}{{template "site-icon" .}}{{end}}
+              <a
+                href="/admin/sites/{{.Name}}?from={{$.From}}&amp;until={{$.Until}}"
+                >{{.Title}}</a
+              >
+            </div>
+            <small class="muted"
               >{{.Name}} · {{if .Published}}{{.Kind}} ·
               <a href="/manage/{{.Name}}">Manage</a>{{else}}Not currently
               published{{end}}</small

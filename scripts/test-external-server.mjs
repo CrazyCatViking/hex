@@ -194,6 +194,10 @@ replace github.com/crazycatviking/hex => ${JSON.stringify(root)}
     });
     await mkdir(join(app, "dist"));
     await writeFile(join(app, "dist/index.html"), "consumer website");
+    await writeFile(
+      join(app, "dist/favicon.svg"),
+      '<svg id="demo-app-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" fill="#1f8a68"/></svg>',
+    );
     await exec(cli, ["publish"], {
       cwd: app,
       env: cliEnvironment,

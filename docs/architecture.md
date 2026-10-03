@@ -24,7 +24,7 @@ NGINX container
 
 NGINX and Go run as two containers in the same Container App replica. Only port 8080 is exposed by ingress; Go binds to loopback. The full composition is shown above; the example defaults to site hosting only. Optional capability modules provision private storage/database resources only when selected. External PostgreSQL can be supplied instead of provisioning a server. Public storage access is disabled.
 
-Azure Container Apps mounts Azure Files, not Blob Storage. Like Quick, NGINX reads published static app files directly from a mounted filesystem. Go handles application APIs, authorization, publishing, read-only site discovery, and the built-in main-domain landing page and installers. Go never serves published app files. NGINX readiness uses its own `/healthz` response rather than the API.
+Azure Container Apps mounts Azure Files, not Blob Storage. Like Quick, NGINX reads published static app files directly from a mounted filesystem. Go handles application APIs, authorization, publishing, read-only site discovery, and the built-in main-domain landing page and installers. Published websites stay on NGINX; Go serves only bounded, authorized favicon previews on the portal origin. NGINX readiness uses its own `/healthz` response rather than the API.
 
 Publishing is authorized by the API and uploads go directly to storage: `hex publish → POST /api/hex/sites/{site}/publish → per-file upload targets → Azure Files → POST .../publish/complete`. The server checks site ownership, signs one short-lived user delegation SAS per changed file with its managed identity, and records the publication when all files have arrived. The mounted share stays read-only. See [Publishing](publishing.md).
 
@@ -65,6 +65,7 @@ As browser request hygiene, state-changing API requests require `X-Hex-Request: 
 | GET | `/api/hex/overview` | Platform name, visible sites, statistics, and installer availability |
 | GET | `/api/hex/install/{os}` | Platform-configured installer attachment for `macos`, `linux`, or `windows` |
 | GET | `/api/hex/me` | The caller's resolved identity; 401 for anonymous callers, no route without a resolver |
+| GET | `/api/hex/sites/{site}/icon` | Authorized favicon preview for portal listings, with site/path permissions and an initial-letter fallback |
 | GET | `/api/hex/authz` | NGINX `auth_request` endpoint for static assets; 204 or 403 for the `X-Hex-Site` and `X-Hex-Path` header values |
 | GET/PUT/DELETE | `/api/hex/sites/{site}/access` | Owner- and admin-managed site access policy; no routes without identity and access configuration |
 | GET | `/api/hex/sites/{site}/permissions` | The caller's role and rule grants on the site; advisory |
@@ -90,7 +91,7 @@ As browser request hygiene, state-changing API requests require `X-Hex-Request: 
 | DELETE | `/api/sites/{site}/db/{collection}/{id}` | Delete (204) |
 | GET | `/api/sites/{site}/realtime/{channel}` | WebSocket upgrade |
 
-Publishing routes exist only when a `SitePublisher` is configured. Registered API handlers return errors as `{ "error": "..." }`. Unknown API routes and methods use standard Go HTTP routing responses. Disabled capability APIs have no routes; the platform landing page remains available. Published website responses, redirects, MIME types, conditional requests and range requests are handled by NGINX. Go serves only its built-in platform UI and assets, not published website paths. The client handles both JSON and non-JSON errors.
+Publishing routes exist only when a `SitePublisher` is configured. Registered API handlers return errors as `{ "error": "..." }`. Unknown API routes and methods use standard Go HTTP routing responses. Disabled capability APIs have no routes; the platform landing page remains available. Published website responses, redirects, MIME types, conditional requests and range requests are handled by NGINX. Go serves its built-in platform UI/assets and authorized favicon previews, not published website paths. The client handles both JSON and non-JSON errors.
 
 Published site names are DNS labels: 1–63 lowercase letters, digits or hyphens, starting and ending with a letter or digit. Other API identifiers remain 1–64 ASCII letters, digits, underscores or hyphens, starting with a letter or digit. Application file keys and published file paths are relative paths without dot-prefixed segments, backslashes or NULs.
 

@@ -196,7 +196,7 @@ func (s *Server) adminInventory(ctx context.Context) ([]adminSiteRow, adminInven
 		if err != nil {
 			return nil, counts, err
 		}
-		row := adminSiteRow{siteCard: cardFromMetadata(name, siteURL, metadata, now), Published: true}
+		row := adminSiteRow{siteCard: s.cardForSite(name, siteURL, metadata, now), Published: true}
 		if metadata != nil {
 			row.CreatedAt = metadata.CreatedAt
 			row.Created = analyticsDate(metadata.CreatedAt)

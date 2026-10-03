@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"testing/iotest"
+
+	hex "github.com/crazycatviking/hex/server"
 )
 
 func TestWriteSiteFileReplacement(t *testing.T) {
@@ -77,6 +79,38 @@ func TestWriteSiteFileReplacement(t *testing.T) {
 				t.Fatalf("unexpected files after replacement: %v", entries)
 			}
 		})
+	}
+}
+
+func TestReadPublishedFileRejectsSymlinks(t *testing.T) {
+	root := t.TempDir()
+	store, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeResource(t, store)
+	ctx := context.Background()
+	if err := store.WriteSiteFile(ctx, "private", "icons/logo.svg", 6, strings.NewReader("secret")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.WriteSiteFile(ctx, "public", "index.html", 3, strings.NewReader("app")); err != nil {
+		t.Fatal(err)
+	}
+	private := filepath.Join(root, "public", "sites", "private", "icons")
+	public := filepath.Join(root, "public", "sites", "public")
+	for link, target := range map[string]string{"favicon.svg": filepath.Join(private, "logo.svg"), "assets": private} {
+		if err := os.Symlink(target, filepath.Join(public, link)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, file := range []string{"favicon.svg", "assets/logo.svg"} {
+		reader, err := store.ReadSiteFile(ctx, "public", file)
+		if reader != nil {
+			closeResource(t, reader)
+		}
+		if !errors.Is(err, hex.ErrNotFound) {
+			t.Fatalf("read through published symlink %s: %v", file, err)
+		}
 	}
 }
 
