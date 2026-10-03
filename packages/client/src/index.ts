@@ -1,4 +1,6 @@
 export interface Capabilities {
+  integrations?: boolean;
+  mcp?: boolean;
   analytics?: boolean;
   version: number;
   files: boolean;

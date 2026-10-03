@@ -17,6 +17,7 @@ This is the [github.com/crazycatviking/hex](https://github.com/crazycatviking/he
 | `internal/cli/` | CLI implementation and embedded skill and development assets |
 | `deploy/` | Container images, NGINX configuration and composable OpenTofu deployment examples |
 | `examples/custom-server/` | Example consuming executable with its own API endpoint |
+| `examples/integrations-server/` | Curated tool bundles and CLI/MCP access using fixture adapters |
 
 ## Develop a platform in your own repository
 
@@ -202,6 +203,7 @@ The interfaces are defined in `server/storage.go`:
 - `Realtime`: subscriptions and JSON broadcasts, allowing a future distributed broker implementation without changing the browser API.
 - `IdentityResolver` and `AccessStore` (in `server/identity.go` and `server/access.go`): optional gateway-forwarded caller identity and per-site access policies. See [Identity and site access control](docs/access-control.md).
 - `AnalyticsStore` (in `server/analytics.go`): optional platform-owned user activity, publishing lifecycle and daily nginx traffic aggregates. Platform admins use `/admin`; site owners get an Analytics tab. See [platform analytics](docs/analytics.md) for independent PostgreSQL storage and traffic collection.
+- `IntegrationRegistry`, `IntegrationRuntime` and `IntegrationStateStore`: optional curated company tools, independent caller/resource grants, shared extraction budgets and audit storage. The CLI and MCP expose small bundles over the same enforcement path. See [company integrations and MCP](docs/integrations.md).
 
 See [the architecture and API contract](docs/architecture.md) for provider semantics and [the hosting contract](docs/hosting.md) for platform independence and reference-server configuration.
 
@@ -255,4 +257,4 @@ The end-to-end test requires NGINX. It starts Go and NGINX, publishes through th
 - Documents are JSON objects, at most 1 MiB. `set` replaces the entire document. Lists are ordered by ID, with up to 100 results per page. There is no query language or automatic database-change feed.
 - Application file uploads through the API default to 32 MiB and are buffered in memory. Site publishing has its own limits (by default 256 MiB per file and 2 GiB per site). File and site listings are currently unpaginated.
 - Publishing replaces one site's changed files in place, uploads `index.html` last and deletes obsolete files on completion. It is not a transactional whole-site replacement. Concurrent publishers are not coordinated. Republish after an interrupted publication.
-- No custom integrations, code generation or AI proxy is included in this version.
+- The integration/MCP framework includes fixture adapters; live vendor connectors, write/approval workflows, code generation and an AI proxy are not bundled.

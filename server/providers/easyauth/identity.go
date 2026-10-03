@@ -75,6 +75,10 @@ func (Resolver) ResolveIdentity(r *http.Request) (*hex.Identity, error) {
 		switch {
 		case claim.Type == "groups":
 			identity.Groups = append(identity.Groups, claim.Value)
+		case claim.Type == "scp" || claim.Type == "scope" || claim.Type == "http://schemas.microsoft.com/identity/claims/scope":
+			identity.Scopes = append(identity.Scopes, strings.Fields(claim.Value)...)
+		case claim.Type == "aud":
+			identity.Audiences = append(identity.Audiences, claim.Value)
 		case claim.Type == "roles" || (principal.RolesType != "" && claim.Type == principal.RolesType):
 			identity.Roles = append(identity.Roles, claim.Value)
 		case identity.ID == "" && claimMatches(claim.Type, objectIDClaims):

@@ -62,6 +62,10 @@ func (a *App) apiCall(ctx context.Context, project Project, method, path string,
 }
 
 func (a *App) apiSend(ctx context.Context, project Project, method, path string, payload io.Reader, size int64, contentType string) (json.RawMessage, error) {
+	return a.apiSendUsingClient(ctx, project, method, path, payload, size, contentType, nil)
+}
+
+func (a *App) apiSendUsingClient(ctx context.Context, project Project, method, path string, payload io.Reader, size int64, contentType string, httpClient *http.Client) (json.RawMessage, error) {
 	server, err := origin(project.Server, true)
 	if err != nil {
 		return nil, err
@@ -85,6 +89,9 @@ func (a *App) apiSend(ctx context.Context, project Project, method, path string,
 	}
 
 	client := a.HTTP
+	if httpClient != nil {
+		client = httpClient
+	}
 	if payload != nil && contentType != "application/json" {
 		// Uploads can take longer than the default request timeout.
 		streaming := *a.HTTP

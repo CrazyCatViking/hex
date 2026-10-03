@@ -2,6 +2,11 @@
 
 Local agents can use the CLI's saved sign-in to read protected content and perform operations explicitly exposed by an app backend. All commands support `--platform <profile>` and use the normal project/default profile otherwise. Run `hex login` in a terminal when a saved sign-in is unavailable; agents need neither browser cookies nor tokens in their input.
 
+For company-wide systems, use [curated integrations and MCP](integrations.md):
+`hex integrations list`, `hex tools list/run --bundle <bundle>`, and
+`hex mcp serve --platform company --bundle engineering`. These use independent
+integration grants and shared extraction budgets, not a site's owner/editor rules.
+
 ## Read protected content
 
 ```sh
