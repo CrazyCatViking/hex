@@ -41,4 +41,4 @@ The prepack script compiles the TypeScript client. Install the resulting tarball
 npm install /path/to/hex/dist/npm/crazycatviking-hex-0.1.0.tgz
 ```
 
-Maintainers use `just version-client 0.2.0` to update the package and lockfile, then `just publish-client` to build, test, and publish to npm. See [release recipes](../../docs/releases.md). The package includes compiled JavaScript and TypeScript declarations and has no runtime dependencies.
+Maintainers use `just publish-client 0.10.0` from a clean, committed checkout to update the version, install dependencies, build, test, verify the packed package, commit and push the version changes, and publish to npm. Omit the version with `just publish-client` to release the next minor version. Prerelease versions automatically use the `next` npm tag. See [release recipes](../../docs/releases.md). The package includes compiled JavaScript and TypeScript declarations and has no runtime dependencies.

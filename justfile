@@ -38,9 +38,13 @@ pack-client directory="dist/npm": check-client
 test-client-package:
     node scripts/test-client-package.mjs
 
-# Publish the current package version; use a tag such as next for prereleases.
-publish-client tag="latest": check-client
-    npm publish --workspace @crazycatviking/hex --access public --tag '{{ tag }}'
+# Verify, commit, push, and publish the client; defaults to the next minor version.
+publish-client version="":
+    node scripts/release.mjs client '{{ version }}'
+
+# Verify release orchestration without publishing to npm or GitHub.
+test-releases:
+    node --test scripts/release.test.mjs
 
 # Compile all four supported CLI release binaries and their checksums.
 build-cli version: (_validate-version version)
@@ -51,8 +55,12 @@ build-cli version: (_validate-version version)
     CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags '-s -w -X main.version={{ version }}' -o 'dist/cli/{{ version }}/hex-linux-amd64' ./cmd/hex
     just _cli-checksums '{{ version }}'
 
-# Upload binaries to a GitHub release for an existing, pushed cli-v<version> tag.
-publish-cli version: (build-cli version)
+# Verify, build, tag, push, and publish the CLI; defaults to the next minor version.
+publish-cli version="":
+    node scripts/release.mjs cli '{{ version }}'
+
+# Upload already-built binaries for an existing, pushed cli-v<version> tag.
+upload-cli version: (_validate-version version)
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ '{{ version }}' == *-* ]]; then
