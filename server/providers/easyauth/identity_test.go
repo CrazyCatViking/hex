@@ -28,6 +28,8 @@ func TestResolveIdentityFromClientPrincipal(t *testing.T) {
 			{"typ": "groups", "val": "11111111-aaaa-4bbb-8ccc-222222222222"},
 			{"typ": "groups", "val": "sales"},
 			{"typ": "roles", "val": "Hex.Admin"},
+			{"typ": "aud", "val": "hex-api"},
+			{"typ": "http://schemas.microsoft.com/identity/claims/scope", "val": "tools.read engineering.read"},
 			{"typ": "name", "val": "Displayed Name"},
 		},
 	}))
@@ -44,6 +46,9 @@ func TestResolveIdentityFromClientPrincipal(t *testing.T) {
 	}
 	if len(identity.Roles) != 1 || identity.Roles[0] != "Hex.Admin" {
 		t.Fatalf("unexpected roles: %v", identity.Roles)
+	}
+	if len(identity.Audiences) != 1 || identity.Audiences[0] != "hex-api" || len(identity.Scopes) != 2 || identity.Scopes[1] != "engineering.read" {
+		t.Fatalf("missing trusted audience/scope claims: %+v", identity)
 	}
 }
 

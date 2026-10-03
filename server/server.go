@@ -9,7 +9,9 @@ import (
 )
 
 type Config struct {
-	Analytics AnalyticsStore
+	Integrations   *IntegrationRuntime
+	IntegrationMCP *IntegrationMCPConfig
+	Analytics      AnalyticsStore
 	// TrafficCollector is optional operational status for the admin dashboard.
 	TrafficCollector *TrafficCollector
 	Files            ObjectStore
@@ -144,6 +146,7 @@ func (s *Server) registerRoutes() {
 
 	s.registerManageRoutes()
 	s.registerAnalyticsRoutes()
+	s.registerIntegrationRoutes()
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -267,6 +270,8 @@ func (s *Server) capabilityDescription() map[string]any {
 		"artifacts":      s.artifactsEnabled(),
 		"actions":        s.actionsEnabled(),
 		"analytics":      s.config.Analytics != nil,
+		"integrations":   s.config.Integrations != nil && s.config.Identity != nil,
+		"mcp":            s.config.Integrations != nil && s.config.IntegrationMCP != nil && s.config.Identity != nil,
 		"maxUploadBytes": s.config.MaxUploadBytes,
 	}
 }

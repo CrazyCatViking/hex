@@ -97,6 +97,27 @@ run "analytics_collection" {
   }
 }
 
+run "mcp_metadata_discovery" {
+  command = plan
+
+  module {
+    source = "../../modules/azure/container-apps"
+  }
+
+  variables {
+    mcp_authorization_discovery = true
+  }
+
+  assert {
+    condition = (
+      length(azapi_resource.authentication.body.properties.globalValidation.excludedPaths) == 1 &&
+      azapi_resource.authentication.body.properties.globalValidation.excludedPaths[0] == "/.well-known/oauth-protected-resource" &&
+      azapi_resource.authentication.body.properties.platform.enabled
+    )
+    error_message = "Only non-secret MCP resource metadata may bypass hosting sign-in; the MCP endpoint remains protected."
+  }
+}
+
 run "site_mounts" {
   command = plan
 

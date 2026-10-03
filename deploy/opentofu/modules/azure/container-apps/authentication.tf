@@ -11,7 +11,7 @@ resource "azapi_resource" "authentication" {
       globalValidation = {
         unauthenticatedClientAction = "RedirectToLoginPage"
         redirectToProvider          = "azureactivedirectory"
-        excludedPaths               = []
+        excludedPaths               = var.mcp_authorization_discovery ? ["/.well-known/oauth-protected-resource"] : []
       }
 
       identityProviders = {

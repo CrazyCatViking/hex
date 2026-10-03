@@ -11,12 +11,14 @@ import (
 // from the hosting layer. The framework never validates identity-provider
 // tokens itself; a resolver translates what the trusted gateway forwarded.
 type Identity struct {
-	Provider string   `json:"provider,omitempty"`
-	ID       string   `json:"id"`
-	Name     string   `json:"name,omitempty"`
-	Email    string   `json:"email,omitempty"`
-	Groups   []string `json:"groups,omitempty"`
-	Roles    []string `json:"roles,omitempty"`
+	Scopes    []string `json:"scopes,omitempty"`
+	Audiences []string `json:"audiences,omitempty"`
+	Provider  string   `json:"provider,omitempty"`
+	ID        string   `json:"id"`
+	Name      string   `json:"name,omitempty"`
+	Email     string   `json:"email,omitempty"`
+	Groups    []string `json:"groups,omitempty"`
+	Roles     []string `json:"roles,omitempty"`
 }
 
 // IdentityResolver extracts the caller's identity from a request. A nil
@@ -37,6 +39,8 @@ func (s StaticIdentity) ResolveIdentity(*http.Request) (*Identity, error) {
 	identity := s.Identity
 	identity.Groups = slices.Clone(identity.Groups)
 	identity.Roles = slices.Clone(identity.Roles)
+	identity.Scopes = slices.Clone(identity.Scopes)
+	identity.Audiences = slices.Clone(identity.Audiences)
 	return &identity, nil
 }
 

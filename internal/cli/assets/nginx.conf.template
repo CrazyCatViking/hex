@@ -63,6 +63,13 @@ http {
             return 200 "ok\n";
         }
 
+        # Optional remote MCP discovery is non-secret. All /mcp/ requests still
+        # pass through the deployment's normal authentication boundary.
+        location = /.well-known/oauth-protected-resource {
+            proxy_pass http://127.0.0.1:8081;
+            proxy_set_header Host $http_host;
+        }
+
         location ~ /\. {
             return 404;
         }

@@ -44,6 +44,12 @@ variable "server_environment" {
   default = {}
 }
 
+variable "mcp_authorization_discovery" {
+  description = "Expose only non-secret MCP OAuth resource metadata without sign-in; the MCP endpoint remains authenticated."
+  type        = bool
+  default     = false
+}
+
 variable "server_secrets" {
   type      = map(string)
   default   = {}
