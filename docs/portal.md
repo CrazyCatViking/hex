@@ -6,8 +6,8 @@ Each Hex server includes a portal at the main domain, for example **https://hex.
 
 | Page | Path | Contents |
 | --- | --- | --- |
-| Home | `/` | A greeting for the signed-in person, a search across all apps, **Shared with you** (sites that name the person or one of their groups), **Your sites** (what they own), and **Apps for everyone** (the discoverable catalog with search, sort and statistics). Without an identity provider only the catalog is shown. |
-| Your sites | `/manage` | Every site the person owns, filterable instantly by text and by kind (apps and files), with open, copy-link and share actions. Platform admins see every site. |
+| Home | `/` | A greeting for the signed-in person, a search across all apps, **Shared with you**, **Your sites**, and **Apps for everyone**. Cards show all-time page views when analytics is enabled; the catalogue can sort by popularity, visitors or recent visits and filter by activity. Without an identity provider only the catalog is shown. |
+| Your sites | `/manage` | Every site the person owns, filterable by text, kind and traffic, with popularity sorting, page-view/visitor counts and open, copy-link, share and analytics actions. Platform admins see every site. |
 | Site | `/manage/<site>` | Tabs for **Overview** (who created and last published it, and its audience), **Sharing**, **Data**, **History** and **Settings** (taking the site down). |
 | Build & publish | `/start` | The installer for the detected OS and three steps: install, share a file or folder, and build an app with a coding agent. |
 | Admin | `/admin`, `/admin/sites`, `/admin/users` | Platform-wide inventory, user activity, publishing history and nginx traffic, with date ranges and site/user drill-downs. Requires analytics and platform-admin access. |
@@ -73,7 +73,7 @@ With an identity provider and access control, signed-in users get **Your sites**
 - sharing in the style of familiar document tools: a searchable picker for people and groups, a role per entry (**Owner**, **Can edit**, **Can view**), and a **General access** choice between *Only people added*, *Everyone can view* and *Everyone can edit*. The page warns before saving when general access makes listed roles redundant, and keeps at least one owner. Path, collection, file and channel rules stay available as JSON under **Advanced rules**;
 - a data browser: collections and their documents (with the verified creator of each), the JSON of a document, uploaded files, and deleting documents and files;
 - unpublishing from **Settings**, confirmed by typing the site's name.
-- an **Analytics** tab with site-level traffic and daily trends when analytics is configured.
+- an **Analytics** tab with all-time totals, date-filtered trends, and named visitors with per-person page views, visits and last visited, plus search, sorting and pagination when analytics is configured.
 
 See [platform analytics](analytics.md) for durable storage, traffic collection,
 metric definitions and admin permissions. Catalogue statistics remain scoped to

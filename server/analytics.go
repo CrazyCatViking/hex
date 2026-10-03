@@ -23,6 +23,12 @@ type AnalyticsStore interface {
 	QueryAnalytics(context.Context, AnalyticsQuery) (AnalyticsReport, error)
 }
 
+// SiteTrafficReader supplies all recorded traffic for specific sites, without
+// returning visitor identities. Portals call it only for authorized listings.
+type SiteTrafficReader interface {
+	SiteTraffic(context.Context, []string) ([]AnalyticsRow, error)
+}
+
 type AnalyticsPerson struct {
 	Person
 	FirstSeen time.Time `json:"firstSeen,omitzero"`
@@ -84,8 +90,32 @@ type TrafficBucket struct {
 }
 
 type AnalyticsRow struct {
-	Key string `json:"key"`
+	Key    string  `json:"key"`
+	Person *Person `json:"person,omitempty"`
 	TrafficTotals
+}
+
+// SummarizeSiteTraffic unions visitors across daily buckets for each site.
+func SummarizeSiteTraffic(buckets []TrafficBucket) []AnalyticsRow {
+	sites := make(map[string]*AnalyticsRow)
+	visitors := make(map[string]map[string]bool)
+	for _, bucket := range buckets {
+		if sites[bucket.Site] == nil {
+			sites[bucket.Site] = &AnalyticsRow{Key: bucket.Site}
+			visitors[bucket.Site] = make(map[string]bool)
+		}
+		addTraffic(&sites[bucket.Site].TrafficTotals, bucket.TrafficTotals)
+		if bucket.PageViews > 0 && bucket.UserID != "" {
+			visitors[bucket.Site][bucket.UserID] = true
+		}
+	}
+	rows := make([]AnalyticsRow, 0, len(sites))
+	for site, row := range sites {
+		row.Visitors = len(visitors[site])
+		rows = append(rows, *row)
+	}
+	slices.SortFunc(rows, func(a, b AnalyticsRow) int { return strings.Compare(a.Key, b.Key) })
+	return rows
 }
 
 type AnalyticsDay struct {

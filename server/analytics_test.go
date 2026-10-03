@@ -182,7 +182,7 @@ func TestTrafficCollectorRetriesDeduplicatesAndCloses(t *testing.T) {
 	}
 }
 
-func TestAnalyticsTrafficDistinctVisitorsSessionsAndOwnerPrivacy(t *testing.T) {
+func TestAnalyticsTrafficDistinctVisitorsSessionsAndOwnerScope(t *testing.T) {
 	server, _, store := analyticsFixture(t)
 	alex := principalHeaders("alex")
 	admin := principalHeaders("admin", "admins")
@@ -222,8 +222,8 @@ func TestAnalyticsTrafficDistinctVisitorsSessionsAndOwnerPrivacy(t *testing.T) {
 	}
 	path := fmt.Sprintf("/api/hex/manage/sites/demo/analytics?from=%s&until=%s&user=visitor-a&site=other", day.Format(time.DateOnly), day.AddDate(0, 0, 1).Format(time.DateOnly))
 	body := requestAs(t, server, alex, "GET", path, nil, 200).Body.String()
-	if strings.Contains(body, "visitor-a") || strings.Contains(body, "visitor-b") || strings.Contains(body, "/manage/other") {
-		t.Fatalf("owner analytics leaked visitors or another site: %s", body)
+	if !strings.Contains(body, "visitor-a") || !strings.Contains(body, "visitor-b") || strings.Contains(body, "/manage/other") {
+		t.Fatalf("owner analytics must show visitors for their site only: %s", body)
 	}
 	requestAs(t, server, principalHeaders("visitor-a"), "GET", path, nil, 403)
 	requestAs(t, server, alex, "GET", "/manage/demo?tab=analytics", nil, 200)

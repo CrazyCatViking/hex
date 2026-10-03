@@ -23,7 +23,8 @@
       </section>
 
       <form class="toolbar" action="/manage" method="get" role="search">
-        {{if .All}}<input type="hidden" name="all" value="1" />{{end}}
+        {{if .All}}<input type="hidden" name="all" value="1" />{{end}} {{if
+        .Filter}}<input type="hidden" name="kind" value="{{.Filter}}" />{{end}}
         <label class="field field-grow"
           ><span class="field-label">Search your sites</span
           ><input
@@ -35,19 +36,36 @@
             autocomplete="off"
             data-filter-target="#manage-list"
         /></label>
+        <label class="field"
+          ><span class="field-label">Sort by</span
+          ><select name="sort">
+            {{range .SortChoices}}
+            <option value="{{.Value}}" {{.Attr}}>{{.Label}}</option>
+            {{end}}
+          </select></label
+        >
+        {{if .TrafficEnabled}}<label class="field"
+          ><span class="field-label">Activity</span
+          ><select name="traffic">
+            {{range .TrafficChoices}}
+            <option value="{{.Value}}" {{.Attr}}>{{.Label}}</option>
+            {{end}}
+          </select></label
+        >{{end}}
+        <button class="button button-secondary" type="submit">Apply</button>
         <nav class="segmented" aria-label="Filter by kind">
           <a
-            href="/manage?{{if .All}}all=1&amp;{{end}}q={{.Query}}"
+            href="/manage?{{if .All}}all=1&amp;{{end}}q={{.Query}}&amp;sort={{.Sort}}&amp;traffic={{.TrafficFilter}}"
             aria-current="{{if eq .Filter ``}}page{{else}}false{{end}}"
             >All <span>{{.Counts.All}}</span></a
           >
           <a
-            href="/manage?{{if .All}}all=1&amp;{{end}}kind=apps&amp;q={{.Query}}"
+            href="/manage?{{if .All}}all=1&amp;{{end}}kind=apps&amp;q={{.Query}}&amp;sort={{.Sort}}&amp;traffic={{.TrafficFilter}}"
             aria-current="{{if eq .Filter `apps`}}page{{else}}false{{end}}"
             >Apps <span>{{.Counts.Apps}}</span></a
           >
           <a
-            href="/manage?{{if .All}}all=1&amp;{{end}}kind=files&amp;q={{.Query}}"
+            href="/manage?{{if .All}}all=1&amp;{{end}}kind=files&amp;q={{.Query}}&amp;sort={{.Sort}}&amp;traffic={{.TrafficFilter}}"
             aria-current="{{if eq .Filter `files`}}page{{else}}false{{end}}"
             >Files <span>{{.Counts.Files}}</span></a
           >
@@ -55,7 +73,7 @@
         {{if .Viewer.Admin}}
         <a
           class="link-button"
-          href="{{if .All}}/manage{{else}}/manage?all=1{{end}}"
+          href="/manage?{{if not .All}}all=1&amp;{{end}}q={{.Query}}&amp;kind={{.Filter}}&amp;sort={{.Sort}}&amp;traffic={{.TrafficFilter}}"
         >
           {{if .All}}Show only yours{{else}}Show all sites (admin){{end}}
         </a>
@@ -78,6 +96,11 @@
               <time datetime="{{.UpdatedISO}}">{{.Updated}}</time>{{if
               .PublishedBy}} by {{.PublishedBy}}{{end}}{{end}}
             </span>
+            {{with .Traffic}}<span class="site-row-traffic muted"
+              >{{.PageViews}} {{if eq .PageViews 1}}page view{{else}}page
+              views{{end}} · {{.Visitors}} {{if eq .Visitors
+              1}}visitor{{else}}visitors{{end}} · all time</span
+            >{{end}}
           </div>
           {{template "access-badge" .}}
           <div class="row-actions">
@@ -94,6 +117,11 @@
             <a class="button button-small" href="/manage/{{.Name}}?tab=sharing"
               >Share</a
             >
+            {{if .Traffic}}<a
+              class="link-button"
+              href="/manage/{{.Name}}?tab=analytics"
+              >Analytics</a
+            >{{end}}
           </div>
         </li>
         {{end}}
@@ -109,12 +137,13 @@
         </svg>
         <div>
           <strong
-            >{{if or .Query .Filter}}Nothing matches.{{else if .All}}No sites
-            are published yet.{{else}}You don't own any sites
-            yet.{{end}}</strong
+            >{{if or .Query .Filter (ne .TrafficFilter "all")}}Nothing
+            matches.{{else if .All}}No sites are published yet.{{else}}You don't
+            own any sites yet.{{end}}</strong
           >
           <p class="muted">
-            {{if or .Query .Filter}}<a href="/manage">Clear the filters</a
+            {{if or .Query .Filter (ne .TrafficFilter "all")}}<a href="/manage"
+              >Clear the filters</a
             >.{{else}}Share a file with <code>hex publish ./report.pdf</code>,
             or publish an app. <a href="/start">See how</a>.{{end}}
           </p>

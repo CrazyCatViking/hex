@@ -133,6 +133,14 @@
           <button id="refresh" class="button button-secondary" type="submit">
             Refresh
           </button>
+          {{if .Catalog.TrafficEnabled}}<label class="field"
+            ><span class="field-label">Activity</span
+            ><select id="traffic" name="traffic">
+              {{range .Catalog.TrafficChoices}}
+              <option value="{{.Value}}" {{.Attr}}>{{.Label}}</option>
+              {{end}}
+            </select></label
+          >{{end}}
         </form>
         {{template "catalog" .Catalog}}
       </section>

@@ -465,8 +465,106 @@
     ><label class="field"
       ><span class="field-label">Through (UTC)</span
       ><input type="date" name="until" value="{{.Until}}" required /></label
-    ><button class="button" type="submit">Apply</button>
+    >{{if .ShowVisitors}}<label class="field field-grow"
+      ><span class="field-label">Find visitors</span
+      ><input
+        type="search"
+        name="visitor-q"
+        value="{{.VisitorSearch}}"
+        placeholder="Name or email…" /></label
+    ><label class="field"
+      ><span class="field-label">Sort visitors</span
+      ><select name="visitor-sort">
+        {{range .VisitorSortChoices}}
+        <option value="{{.Value}}" {{.Attr}}>{{.Label}}</option>
+        {{end}}
+      </select></label
+    >{{end}}<button class="button" type="submit">Apply</button>
   </form>
-  {{template "analytics-summary" .}}{{template "analytics-trends" .}}
+  {{with .Lifetime}}
+  <section class="panel">
+    <h2>All recorded traffic</h2>
+    <dl class="stats analytics-stats" aria-label="All-time site traffic">
+      <div>
+        <dt>Page views</dt>
+        <dd>{{.PageViews}}</dd>
+      </div>
+      <div>
+        <dt>Visits</dt>
+        <dd>{{.Visits}}</dd>
+      </div>
+      <div>
+        <dt>Unique visitors</dt>
+        <dd>{{.Visitors}}</dd>
+      </div>
+    </dl>
+    <p class="muted">
+      Totals since traffic collection began. The date range below applies to the
+      activity chart and visitor list.
+    </p>
+  </section>
+  {{end}} {{template "analytics-summary" .}}{{template "analytics-trends" .}}
+  {{if .ShowVisitors}}
+  <section class="panel" aria-labelledby="visitors-heading">
+    <h2 id="visitors-heading">Who visited</h2>
+    <p class="muted">
+      Authenticated people who loaded a page on this site in the selected
+      period. Page views and visits are for this site only; asset/API-only
+      requests are excluded.
+    </p>
+    <div class="table-scroll">
+      <table class="analytics-table site-visitors">
+        <thead>
+          <tr>
+            <th scope="col">Person</th>
+            <th scope="col">Page views</th>
+            <th scope="col">Visits</th>
+            <th scope="col">Last visited (UTC)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .SiteVisitors}}
+          <tr>
+            <th scope="row">
+              {{.Name}}{{if .Email}}<small class="muted">{{.Email}}</small
+              >{{end}}
+            </th>
+            <td>{{.PageViews}}</td>
+            <td>{{.Visits}}</td>
+            <td><time datetime="{{.LastISO}}">{{.Last}}</time></td>
+          </tr>
+          {{else}}
+          <tr>
+            <td colspan="4">
+              {{if .VisitorSearch}}No visitors match this search.{{else}}No
+              authenticated page visitors recorded in this period.{{end}}
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    <nav class="toolbar" aria-label="Visitor pagination">
+      <span
+        >{{.VisitorTotal}} {{if eq .VisitorTotal 1}}person{{else}}people{{end}}
+        · page {{.VisitorPage}} of {{.VisitorPages}}</span
+      >{{if .VisitorPrevious}}<a
+        class="button button-secondary"
+        href="{{.VisitorPrevious}}"
+        >Previous visitors</a
+      >{{end}}{{if .VisitorNext}}<a
+        class="button button-secondary"
+        href="{{.VisitorNext}}"
+        >Next visitors</a
+      >{{end}}
+    </nav>
+    {{if .AnonymousPageViews}}
+    <p class="muted">
+      {{.AnonymousPageViews}} page views had no authenticated identity and
+      cannot be attributed to a person.
+    </p>
+    {{end}}
+  </section>
+  {{end}}
 </div>
 {{end}}

@@ -46,13 +46,25 @@ type adminUserRow struct {
 }
 
 type AnalyticsView struct {
-	Report     AnalyticsReport
-	From       string
-	Until      string
-	Site       string
-	Bars       []analyticsBar
-	Bytes      string
-	ChartWidth int
+	Report             AnalyticsReport
+	From               string
+	Until              string
+	Site               string
+	Bars               []analyticsBar
+	Bytes              string
+	ChartWidth         int
+	Lifetime           *TrafficTotals
+	ShowVisitors       bool
+	SiteVisitors       []siteVisitorRow
+	AnonymousPageViews int64
+	VisitorSearch      string
+	VisitorSort        string
+	VisitorSortChoices []choice
+	VisitorPage        int
+	VisitorPages       int
+	VisitorTotal       int
+	VisitorPrevious    string
+	VisitorNext        string
 }
 
 type analyticsBar struct {
@@ -543,22 +555,12 @@ func (s *Server) siteAnalytics(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	values := r.URL.Query()
-	values.Set("site", site)
-	values.Del("user")
-	query, err := analyticsQuery(values, time.Now())
+	view, err := s.loadSiteAnalytics(r.Context(), site, r.URL.Query())
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeSiteAnalyticsError(w, err)
 		return
 	}
-	report, err := s.config.Analytics.QueryAnalytics(r.Context(), query)
-	if err != nil {
-		writeServerError(w, err)
-		return
-	}
-	// Site owners receive totals and trends, never the visitor breakdown.
-	report.Users, report.People = nil, nil
-	s.renderFragment(w, "site-analytics", newAnalyticsView(report))
+	s.renderFragment(w, "site-analytics", view)
 }
 
 func (s *Server) adminAnalyticsCSV(w http.ResponseWriter, r *http.Request) {

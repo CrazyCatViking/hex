@@ -168,5 +168,32 @@ func (a *Analytics) QueryAnalytics(ctx context.Context, query hex.AnalyticsQuery
 			last = at
 		}
 	}
-	return hex.SummarizeAnalytics(query, people, events, buckets, last), nil
+	report := hex.SummarizeAnalytics(query, people, events, buckets, last)
+	for index := range report.Users {
+		row := &report.Users[index]
+		if person, ok := a.people[row.Key]; ok && row.PageViews > 0 {
+			label := person.Person
+			row.Person = &label
+		}
+	}
+	return report, nil
+}
+
+func (a *Analytics) SiteTraffic(ctx context.Context, sites []string) ([]hex.AnalyticsRow, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	wanted := make(map[string]bool, len(sites))
+	for _, site := range sites {
+		wanted[site] = true
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	buckets := []hex.TrafficBucket{}
+	for _, bucket := range a.buckets {
+		if wanted[bucket.Site] {
+			buckets = append(buckets, bucket)
+		}
+	}
+	return hex.SummarizeSiteTraffic(buckets), nil
 }

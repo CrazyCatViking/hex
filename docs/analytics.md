@@ -3,8 +3,8 @@
 Hex includes an admin dashboard at `/admin`, site and people inventories at
 `/admin/sites` and `/admin/users`, and an **Analytics** tab on each site's
 management page. Admin pages require the configured platform-admin identity on
-the platform host. Site owners can see their site's aggregate traffic; visitor
-identities and cross-site reports are available only to platform admins.
+the platform host. Site owners/publishers can see their site's traffic and named
+page visitors. Platform admins can view cross-site and per-user reports.
 
 ## What is measured
 
@@ -29,7 +29,36 @@ The JSON endpoint `/api/hex/admin/analytics` accepts `from`, `until`, `site` and
 `user`. It requires platform-admin access and is unavailable from app origins.
 `/api/hex/admin/analytics.csv` exports the same filtered daily statistics as CSV.
 `/api/hex/manage/sites/<site>/analytics` renders an owner-authorized HTML fragment
-with aggregate traffic and daily trends, without visitor breakdowns.
+with traffic, daily trends and a site-scoped visitor breakdown.
+
+## Browsing and publisher reports
+
+Browsing cards and **Your sites** show all recorded page views, including a zero
+count for sites with no page loads yet. Catalogue and management lists can sort
+by **Most popular (page views)**, **Most visitors**, **Recently visited**, latest
+publication or name, and filter by **Has page views** / **No page views yet**.
+Counts and popularity use traffic since collection began, rather than an implicit
+rolling window. Only aggregates for sites the viewer can already browse are
+loaded; visitor identities are not exposed on public cards.
+
+The site's **Analytics** tab has an all-time summary and a date-filtered **Who
+visited** table. Owners (the people allowed to publish the site) and platform
+admins can see names/emails, page views, visits and the last page visit, search
+visitors, change ordering and page through results. The table lists only users
+with actual page views on that site in the selected period, excluding API/asset-only
+activity. Names come from remembered authenticated identities; unknown names fall
+back to the verified identity ID. Anonymous views are counted separately without
+inventing visitor identities. General viewers/editors cannot access visitor reports.
+
+Both management pages and their HTMX fragments enforce the same owner/admin
+permission checks, and ignore query parameters attempting to select another site
+or user. Publisher reports contain no cross-site totals or platform sign-in history.
+
+Built-in stores implement the optional `SiteTrafficReader` for efficient bulk
+all-time totals. Existing custom `AnalyticsStore` implementations continue to
+work; implement this interface to enable card counts and popularity controls.
+An unavailable aggregate query omits the optional counters while leaving the
+directory usable.
 
 ## Storage and configuration
 

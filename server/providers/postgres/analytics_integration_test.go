@@ -82,6 +82,22 @@ func TestPostgresAnalyticsDurabilityAndConcurrentReceipts(t *testing.T) {
 	if report.Traffic.Requests != 3 || report.Traffic.PageViews != 3 || report.Traffic.Visitors != 1 || report.Traffic.Visits != 2 || report.Traffic.Bytes != 50 || report.Created != 1 {
 		t.Fatalf("duplicate traffic or bad sessionization: %+v", report)
 	}
+	if len(report.Users) != 1 || report.Users[0].Person == nil || report.Users[0].Person.Name != person.Name || report.Users[0].Person.Email != person.Email || len(report.People) != 0 {
+		t.Fatalf("site visitor labels must not require a global people report: %+v", report)
+	}
+	if _, err := database.pool.Exec(ctx, `INSERT INTO hex_analytics_traffic
+		(day,site,user_id,requests,page_views,visits,errors,bytes,duration_ms,last_visited,last_received)
+		VALUES ($1::timestamptz::date,$2,$3,5,5,1,0,10,0,$1::timestamptz,$1::timestamptz)`, day.AddDate(0, 0, -500), site, user); err != nil {
+		t.Fatal(err)
+	}
+	lifetime, err := database.SiteTraffic(ctx, []string{site})
+	if err != nil || len(lifetime) != 1 || lifetime[0].PageViews != 8 || lifetime[0].Visitors != 1 || lifetime[0].Person != nil {
+		t.Fatalf("lifetime query must include older days and deduplicate visitors: %+v %v", lifetime, err)
+	}
+	noSites, err := database.SiteTraffic(ctx, nil)
+	if err != nil || len(noSites) != 0 {
+		t.Fatal("empty site filter must not return global totals")
+	}
 	reopened, err := New(ctx, connection)
 	if err != nil {
 		t.Fatal(err)

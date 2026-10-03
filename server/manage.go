@@ -24,11 +24,16 @@ const managePageSize = 25
 
 type manageListView struct {
 	Chrome
-	Sites  []siteCard
-	Filter string
-	Query  string
-	All    bool
-	Counts struct{ All, Apps, Files int }
+	Sites          []siteCard
+	Filter         string
+	Query          string
+	All            bool
+	Counts         struct{ All, Apps, Files int }
+	Sort           string
+	SortChoices    []choice
+	TrafficEnabled bool
+	TrafficFilter  string
+	TrafficChoices []choice
 }
 
 type sitePageView struct {
@@ -125,6 +130,17 @@ func (s *Server) managePage(w http.ResponseWriter, r *http.Request) {
 	view.All = view.Viewer.Admin && query.Get("all") == "1"
 	view.Filter = query.Get("kind")
 	view.Query = strings.TrimSpace(query.Get("q"))
+	view.Sort = query.Get("sort")
+	if view.Sort == "" {
+		view.Sort = "recent"
+	}
+	view.SortChoices = s.cardSortChoices(view.Sort)
+	view.TrafficEnabled = s.cardTrafficEnabled()
+	view.TrafficFilter = query.Get("traffic")
+	if view.TrafficFilter == "" {
+		view.TrafficFilter = "all"
+	}
+	view.TrafficChoices = cardTrafficChoices(view.TrafficFilter)
 
 	mine, _, err := s.personalSites(r.Context(), identity, view.All)
 	if err != nil {
@@ -138,11 +154,12 @@ func (s *Server) managePage(w http.ResponseWriter, r *http.Request) {
 		} else {
 			view.Counts.Apps++
 		}
-		if !matchesFilter(card, view.Filter, view.Query) {
+		if !matchesFilter(card, view.Filter, view.Query) || view.TrafficEnabled && !matchesTraffic(card, view.TrafficFilter) {
 			continue
 		}
 		view.Sites = append(view.Sites, card)
 	}
+	sortSiteCards(view.Sites, view.Sort)
 	s.writePortalPage(w, "manage", view)
 }
 
@@ -230,21 +247,11 @@ func (s *Server) manageSitePage(w http.ResponseWriter, r *http.Request) {
 	view.People = view.Sharing.Entries
 	view.Actions = s.actionSummaries(r.Context(), site)
 	if view.Tab == "analytics" {
-		values := r.URL.Query()
-		values.Set("site", site)
-		values.Del("user")
-		query, err := analyticsQuery(values, time.Now())
+		analytics, err := s.loadSiteAnalytics(r.Context(), site, r.URL.Query())
 		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
+			writeSiteAnalyticsError(w, err)
 			return
 		}
-		report, err := s.config.Analytics.QueryAnalytics(r.Context(), query)
-		if err != nil {
-			writeServerError(w, err)
-			return
-		}
-		report.Users, report.People = nil, nil
-		analytics := newAnalyticsView(report)
 		view.Analytics = &analytics
 	}
 	s.writePortalPage(w, "site", view)

@@ -9,7 +9,46 @@ export async function verifyAnalyticsPortal(port) {
     page.on("pageerror", (error) => errors.push(error.message));
     const base = `http://localhost:${port}`;
     await page.goto(`http://demo.localhost:${port}/`);
+    // Collection is asynchronous; wait for that navigation before testing cards.
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const report = await (
+        await page.request.get(`${base}/api/hex/admin/analytics?site=demo`)
+      ).json();
+      if (report.traffic.pageViews > 0) break;
+      await page.waitForTimeout(50);
+    }
     await page.goto(base);
+    assert.match(
+      await page.locator("#catalog .site-card-traffic").textContent(),
+      /[1-9]\d* page views?[\s\S]*all time/,
+    );
+    const popular = page.waitForResponse(
+      (response) =>
+        response.url().includes("/api/hex/catalog?") &&
+        response.url().includes("sort=popular"),
+    );
+    await page.locator("#sort").selectOption("popular");
+    await popular;
+    const noViews = page.waitForResponse(
+      (response) =>
+        response.url().includes("/api/hex/catalog?") &&
+        response.url().includes("traffic=unvisited"),
+    );
+    await page.locator("#traffic").selectOption("unvisited");
+    await noViews;
+    await page.waitForFunction(
+      () => document.querySelectorAll("#catalog .site-card").length === 0,
+    );
+    const visited = page.waitForResponse(
+      (response) =>
+        response.url().includes("/api/hex/catalog?") &&
+        response.url().includes("traffic=visited"),
+    );
+    await page.locator("#traffic").selectOption("visited");
+    await visited;
+    await page.waitForFunction(
+      () => document.querySelectorAll("#catalog .site-card").length === 1,
+    );
     await page.waitForFunction(
       () =>
         document.querySelector(".site-card img[data-site-icon]")?.naturalWidth >
@@ -75,6 +114,16 @@ export async function verifyAnalyticsPortal(port) {
     );
     await page.goto(`${base}/manage/demo?tab=analytics`);
     assert.equal(await page.locator("#site-analytics").count(), 1);
+    assert.match(
+      await page.locator(".site-visitors").textContent(),
+      /Local Developer/,
+    );
+    assert.ok(
+      (await page
+        .locator('[aria-label="All-time site traffic"] dd')
+        .first()
+        .textContent()) !== "0",
+    );
     await page.waitForFunction(
       () =>
         document.querySelector(".site-header img[data-site-icon]")
@@ -96,9 +145,20 @@ export async function verifyAnalyticsPortal(port) {
         document.querySelectorAll("#site-analytics .analytics-chart rect")
           .length === 2,
     );
+    const visitorSearch = page.waitForResponse(
+      (response) =>
+        response.url().includes("/api/hex/manage/sites/demo/analytics?") &&
+        response.url().includes("visitor-q="),
+    );
+    await page.locator('input[name="visitor-q"]').fill("no-such-visitor");
+    await page.getByRole("button", { name: "Apply", exact: true }).click();
+    await visitorSearch;
+    await page.getByText("No visitors match this search.").waitFor();
     await page.setViewportSize({ width: 390, height: 844 });
     for (const path of [
       "/admin",
+      "/",
+      "/manage",
       "/admin/sites",
       "/admin/users",
       "/manage/demo?tab=analytics",
@@ -132,6 +192,13 @@ export async function verifyAnalyticsPortal(port) {
     );
     await staticPage.goto(`${base}/manage/demo?tab=analytics`);
     assert.equal(await staticPage.locator("#site-analytics").count(), 1);
+    assert.match(
+      await staticPage.locator(".site-visitors").textContent(),
+      /Local Developer/,
+    );
+    await staticPage.goto(`${base}/?sort=popular&traffic=visited`);
+    assert.equal(await staticPage.locator("#catalog .site-card").count(), 1);
+    await staticPage.goto(`${base}/manage/demo?tab=analytics`);
     await staticPage.waitForFunction(
       () =>
         document.querySelector(".site-header img[data-site-icon]")

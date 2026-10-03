@@ -776,6 +776,27 @@ textarea:focus {
   position: relative;
   z-index: 1;
 }
+.site-card-traffic {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.site-card-traffic svg {
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+.traffic-scope {
+  font-size: 12px;
+}
+.site-row-traffic {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
 .stats {
   display: flex;
   gap: 32px;

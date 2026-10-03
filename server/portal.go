@@ -48,22 +48,23 @@ type viewerView struct {
 
 // siteCard is how sites and artifacts appear across the portal.
 type siteCard struct {
-	IconURL     string    `json:"iconURL,omitempty"`
-	Name        string    `json:"name"`
-	URL         string    `json:"url"`
-	Title       string    `json:"title"`
-	Description string    `json:"description,omitempty"`
-	Kind        string    `json:"kind"`
-	Access      string    `json:"audience"`
-	AccessTone  string    `json:"-"`
-	CreatedBy   string    `json:"createdBy,omitempty"`
-	PublishedBy string    `json:"publishedBy,omitempty"`
-	Timestamp   time.Time `json:"publishedAt,omitzero"`
-	Updated     string    `json:"-"`
-	UpdatedISO  string    `json:"-"`
-	Initial     string    `json:"-"`
-	Tone        string    `json:"-"`
-	Owned       bool      `json:"-"`
+	Traffic     *TrafficTotals `json:"traffic,omitempty"`
+	IconURL     string         `json:"iconURL,omitempty"`
+	Name        string         `json:"name"`
+	URL         string         `json:"url"`
+	Title       string         `json:"title"`
+	Description string         `json:"description,omitempty"`
+	Kind        string         `json:"kind"`
+	Access      string         `json:"audience"`
+	AccessTone  string         `json:"-"`
+	CreatedBy   string         `json:"createdBy,omitempty"`
+	PublishedBy string         `json:"publishedBy,omitempty"`
+	Timestamp   time.Time      `json:"publishedAt,omitzero"`
+	Updated     string         `json:"-"`
+	UpdatedISO  string         `json:"-"`
+	Initial     string         `json:"-"`
+	Tone        string         `json:"-"`
+	Owned       bool           `json:"-"`
 }
 
 type siteStatistics struct {
@@ -73,11 +74,15 @@ type siteStatistics struct {
 }
 
 type catalogView struct {
-	Sites       []siteCard
-	Statistics  siteStatistics
-	Search      string
-	Sort        string
-	SortChoices []choice
+	Sites          []siteCard
+	Statistics     siteStatistics
+	Search         string
+	Sort           string
+	SortChoices    []choice
+	TrafficEnabled bool
+	TrafficFilter  string
+	TrafficChoices []choice
+	Filtered       bool
 }
 
 // choice is an option in a select. Attr carries "selected" so templates need
@@ -226,11 +231,21 @@ func (s *Server) catalogView(ctx context.Context, viewer *Identity, query url.Va
 		return catalogView{}, err
 	}
 	view := catalogView{
-		Statistics: summarizeSites(sites, time.Now()),
-		Search:     query.Get("search"),
-		Sort:       query.Get("sort"),
+		Statistics:     summarizeSites(sites, time.Now()),
+		Search:         query.Get("search"),
+		Sort:           query.Get("sort"),
+		TrafficEnabled: s.cardTrafficEnabled(),
+		TrafficFilter:  query.Get("traffic"),
 	}
-	view.SortChoices = choices(view.Sort, [2]string{"recent", "Recently updated"}, [2]string{"name", "Name A–Z"})
+	if view.Sort == "" {
+		view.Sort = "recent"
+	}
+	if view.TrafficFilter == "" {
+		view.TrafficFilter = "all"
+	}
+	view.SortChoices = s.cardSortChoices(view.Sort)
+	view.TrafficChoices = cardTrafficChoices(view.TrafficFilter)
+	view.Filtered = strings.TrimSpace(view.Search) != "" || view.TrafficEnabled && view.TrafficFilter != "all"
 	search := strings.ToLower(strings.TrimSpace(view.Search))
 	now := time.Now()
 	for _, site := range sites {
@@ -243,12 +258,11 @@ func (s *Server) catalogView(ctx context.Context, viewer *Identity, query url.Va
 			view.Sites = append(view.Sites, card)
 		}
 	}
-	slices.SortFunc(view.Sites, func(left, right siteCard) int {
-		if view.Sort != "name" && !left.Timestamp.Equal(right.Timestamp) {
-			return right.Timestamp.Compare(left.Timestamp)
-		}
-		return strings.Compare(strings.ToLower(left.Title), strings.ToLower(right.Title))
-	})
+	s.fillCardTraffic(ctx, view.Sites)
+	if view.TrafficEnabled {
+		view.Sites = slices.DeleteFunc(view.Sites, func(card siteCard) bool { return !matchesTraffic(card, view.TrafficFilter) })
+	}
+	sortSiteCards(view.Sites, view.Sort)
 	return view, nil
 }
 
@@ -318,9 +332,9 @@ func (s *Server) personalSites(ctx context.Context, identity *Identity, all bool
 		}
 	}
 
-	newestFirst := func(left, right siteCard) int { return right.Timestamp.Compare(left.Timestamp) }
-	slices.SortFunc(mine, newestFirst)
-	slices.SortFunc(shared, newestFirst)
+	s.fillCardTraffic(ctx, mine, shared)
+	sortSiteCards(mine, "recent")
+	sortSiteCards(shared, "recent")
 	return mine, shared, nil
 }
 

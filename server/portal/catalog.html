@@ -15,19 +15,19 @@
     </div>
   </dl>
   <p id="site-status" class="visually-hidden" role="status" aria-live="polite">
-    {{len .Sites}} apps{{if .Search}} matching your search{{end}}
+    {{len .Sites}} apps{{if .Filtered}} matching your filters{{end}}
   </p>
   <div id="site-list" class="card-grid">
     {{range .Sites}}{{template "site-card" .}}{{else}}
     <div class="empty-state">
       <div>
         <strong
-          >{{if .Search}}No apps match your search.{{else}}No apps are listed
+          >{{if .Filtered}}No apps match your filters.{{else}}No apps are listed
           yet.{{end}}</strong
         >
         <p class="muted">
-          {{if .Search}}Try another word, or clear the search.{{else}}Build the
-          first one, or make an existing app discoverable.{{end}}
+          {{if .Filtered}}Try another word, or clear the filters.{{else}}Build
+          the first one, or make an existing app discoverable.{{end}}
         </p>
       </div>
     </div>
@@ -56,9 +56,25 @@
       >{{.Updated}}</time
     >{{end}}
   </div>
-  {{if .Owned}}
+  {{with .Traffic}}
+  <p
+    class="site-card-traffic"
+    title="All recorded page views since traffic collection began"
+  >
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" />
+      <circle cx="12" cy="12" r="3" /></svg
+    ><span
+      >{{.PageViews}} {{if eq .PageViews 1}}page view{{else}}page views{{end}}
+      <span class="traffic-scope">· all time</span></span
+    >
+  </p>
+  {{end}} {{if .Owned}}
   <div class="site-card-actions">
     <a class="link-button" href="/manage/{{.Name}}">Manage</a>
+    {{if .Traffic}}<a class="link-button" href="/manage/{{.Name}}?tab=analytics"
+      >Analytics</a
+    >{{end}}
     <button class="link-button" type="button" data-copy="{{.URL}}">
       Copy link
     </button>

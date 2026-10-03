@@ -215,7 +215,75 @@ func (d *Database) QueryAnalytics(ctx context.Context, query hex.AnalyticsQuery)
 	if last != nil {
 		lastCollected = *last
 	}
-	return hex.SummarizeAnalytics(query, people, events, buckets, lastCollected), nil
+	report := hex.SummarizeAnalytics(query, people, events, buckets, lastCollected)
+	if err := d.labelAnalyticsVisitors(ctx, &report); err != nil {
+		return hex.AnalyticsReport{}, err
+	}
+	return report, nil
+}
+
+func (d *Database) labelAnalyticsVisitors(ctx context.Context, report *hex.AnalyticsReport) error {
+	ids := []string{}
+	for _, visitor := range report.Users {
+		if visitor.PageViews > 0 {
+			ids = append(ids, visitor.Key)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := d.pool.Query(ctx, `SELECT id,name,email FROM hex_analytics_people WHERE id=ANY($1)`, ids)
+	if err != nil {
+		return fmt.Errorf("look up analytics visitors: %w", err)
+	}
+	defer rows.Close()
+	people := make(map[string]hex.Person)
+	for rows.Next() {
+		var person hex.Person
+		if err := rows.Scan(&person.ID, &person.Name, &person.Email); err != nil {
+			return err
+		}
+		people[person.ID] = person
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for index := range report.Users {
+		row := &report.Users[index]
+		if person, ok := people[row.Key]; ok {
+			row.Person = &person
+		}
+	}
+	return nil
+}
+
+func (d *Database) SiteTraffic(ctx context.Context, sites []string) ([]hex.AnalyticsRow, error) {
+	if len(sites) == 0 {
+		return []hex.AnalyticsRow{}, nil
+	}
+	const statement = `SELECT site, sum(requests)::bigint, sum(page_views)::bigint,
+		sum(visits)::bigint, count(DISTINCT user_id) FILTER (WHERE page_views > 0 AND user_id <> ''),
+		sum(errors)::bigint, sum(bytes)::bigint, sum(duration_ms)::bigint, max(last_visited)
+		FROM hex_analytics_traffic WHERE site=ANY($1) GROUP BY site ORDER BY site`
+	rows, err := d.pool.Query(ctx, statement, sites)
+	if err != nil {
+		return nil, fmt.Errorf("read site traffic totals: %w", err)
+	}
+	defer rows.Close()
+	result := []hex.AnalyticsRow{}
+	for rows.Next() {
+		var row hex.AnalyticsRow
+		var last *time.Time
+		if err := rows.Scan(&row.Key, &row.Requests, &row.PageViews, &row.Visits, &row.Visitors,
+			&row.Errors, &row.Bytes, &row.DurationMillis, &last); err != nil {
+			return nil, err
+		}
+		if last != nil {
+			row.LastVisited = *last
+		}
+		result = append(result, row)
+	}
+	return result, rows.Err()
 }
 
 func (d *Database) analyticsEvents(ctx context.Context, query hex.AnalyticsQuery) ([]hex.SiteEvent, error) {
