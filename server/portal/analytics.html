@@ -7,390 +7,534 @@
   <body hx-headers='{"X-Hex-Request":"1"}'>
     {{template "header" .Chrome}}
     <main id="main" class="page">
-      <nav class="tabs" aria-label="Admin sections">
-        <a
-          href="/admin?from={{.From}}&amp;until={{.Until}}"
-          aria-current="{{if eq .Section `overview`}}page{{else}}false{{end}}"
-          >Overview</a
-        >
-        <a
-          href="/admin/sites?from={{.From}}&amp;until={{.Until}}"
-          aria-current="{{if eq .Section `sites`}}page{{else}}false{{end}}"
-          >Sites</a
-        >
-        <a
-          href="/admin/users?from={{.From}}&amp;until={{.Until}}"
-          aria-current="{{if eq .Section `users`}}page{{else}}false{{end}}"
-          >People</a
-        >
-      </nav>
       <div id="admin-content">
-        <section class="page-heading">
+        {{if .SiteDetail}}
+        <nav class="breadcrumbs" aria-label="Breadcrumb">
+          <a href="{{index .SectionLinks `sites`}}">Sites</a>
+          <span aria-hidden="true">/</span>
+          <span>{{.Title}}</span>
+        </nav>
+        <header class="analytics-header">
+          <div class="analytics-identity">
+            {{with .SiteRow}}{{template "site-icon" .}}{{end}}
+            <div>
+              <p class="eyebrow">Site analytics</p>
+              <h1>{{.Title}}</h1>
+              {{with .SiteRow}}
+              <p class="muted">
+                {{if .Published}}{{.Kind}} · created by {{if
+                .CreatedBy}}{{.CreatedBy}}{{else}}someone unknown{{end}}{{if
+                .Created}} on {{.Created}}{{end}}{{else}}No longer
+                published{{end}}
+              </p>
+              {{end}}
+            </div>
+          </div>
+          {{with .SiteRow}}{{if .Published}}
+          <div class="actions">
+            <a class="button button-secondary" href="/manage/{{.Name}}"
+              >Manage</a
+            >
+            <a class="button" href="{{.URL}}">Open</a>
+          </div>
+          {{end}}{{end}}
+        </header>
+        {{else if .UserDetail}}
+        <nav class="breadcrumbs" aria-label="Breadcrumb">
+          <a href="{{index .SectionLinks `users`}}">People</a>
+          <span aria-hidden="true">/</span>
+          <span>{{.Title}}</span>
+        </nav>
+        <header class="analytics-header">
+          <div class="analytics-identity">
+            {{with .UserRow}}<span
+              class="avatar avatar-xl {{.Tone}}"
+              aria-hidden="true"
+              >{{.Initials}}</span
+            >{{end}}
+            <div>
+              <p class="eyebrow">Person</p>
+              <h1>{{.Title}}</h1>
+              {{with .UserRow}}
+              <p class="muted">
+                {{if .Email}}{{.Email}} · {{end}}first seen {{.First}} · last
+                active {{.Last}}
+              </p>
+              {{end}}
+            </div>
+          </div>
+        </header>
+        {{else}}
+        <header class="analytics-header">
           <div>
             <p class="eyebrow">Platform admin</p>
-            <h1>{{.Title}}</h1>
+            <h1>
+              {{if eq .Section "sites"}}Sites{{else if eq .Section
+              "users"}}People{{else}}Platform overview{{end}}
+            </h1>
             <p class="lead">
-              Publishing, adoption and traffic across your platform.
+              {{if eq .Section "sites"}}Every published site, how much it is
+              used and who looks after it.{{else if eq .Section
+              "users"}}Everyone who has signed in to {{.Platform}}, and what
+              they build and use.{{else}}How {{.Platform}} is used across the
+              company: who visits, what they open and what gets
+              published.{{end}}
             </p>
           </div>
-        </section>
-        <form
-          class="toolbar analytics-filters"
-          action="{{.FilterURL}}"
-          method="get"
-          hx-get="{{.FilterURL}}"
-          hx-target="#admin-content"
-          hx-select="#admin-content"
-          hx-swap="outerHTML"
-          hx-push-url="true"
-        >
-          {{if .Site}}<input
-            type="hidden"
-            name="site"
-            value="{{.Site}}"
-          />{{end}} {{if .FilterUser}}<input
-            type="hidden"
-            name="user"
-            value="{{.FilterUser}}"
-          />{{end}}
-          <label class="field"
-            ><span class="field-label">From (UTC)</span
-            ><input type="date" name="from" value="{{.From}}" required
-          /></label>
-          <label class="field"
-            ><span class="field-label">Through (UTC)</span
-            ><input type="date" name="until" value="{{.Until}}" required
-          /></label>
-          {{if ne .Section "overview"}}<label class="field field-grow"
-            ><span class="field-label">Search</span
-            ><input
-              name="q"
-              value="{{.QueryText}}"
-              placeholder="Name, creator or owner…"
-          /></label>
-          <label class="field"
-            ><span class="field-label">Sort</span
-            ><select name="sort">
-              {{range .SortChoices}}
-              <option value="{{.Value}}" {{.Attr}}>{{.Label}}</option>
-              {{end}}
-            </select></label
-          >{{end}}
-          <button class="button" type="submit">Apply</button>
+        </header>
+        <nav class="tabs" aria-label="Admin sections">
           <a
-            class="button button-secondary"
-            href="/api/hex/admin/analytics.csv?from={{.From}}&amp;until={{.Until}}&amp;site={{.Site}}&amp;user={{.FilterUser}}"
-            >Export daily CSV</a
+            href="{{index .SectionLinks `overview`}}"
+            aria-current="{{if eq .Section `overview`}}page{{else}}false{{end}}"
+            >Overview</a
           >
-        </form>
-        {{if .Global}}
-        <dl
-          class="stats analytics-stats"
-          aria-label="Current platform inventory"
-        >
-          <div>
-            <dt>Published sites</dt>
-            <dd>{{.Counts.Sites}}</dd>
-          </div>
-          <div>
-            <dt>Apps</dt>
-            <dd>{{.Counts.Apps}}</dd>
-          </div>
-          <div>
-            <dt>Files / folders</dt>
-            <dd>{{.Counts.Artifacts}}</dd>
-          </div>
-          <div>
-            <dt>Verified creators</dt>
-            <dd>{{.Counts.Creators}}</dd>
-          </div>
-          <div>
-            <dt>Known users</dt>
-            <dd>{{.Report.KnownUsers}}</dd>
-          </div>
-          <div>
-            <dt>Active · 7 days</dt>
-            <dd>{{.Report.Active7Days}}</dd>
-          </div>
-          <div>
-            <dt>Active · 30 days</dt>
-            <dd>{{.Report.Active30Days}}</dd>
-          </div>
-        </dl>
-        <p class="muted">
-          Inventory includes hidden apps and file/folder publications. Creator
-          counts cover currently published sites, using verified identity IDs.
-          {{if .Counts.UnknownCreators}}{{.Counts.UnknownCreators}} sites have
-          no recorded creator.{{end}} Known users are people Hex has observed,
-          not the company directory. Activity is refreshed at most hourly.
-        </p>
-        {{end}} {{if eq .Section "overview"}}{{template "analytics-summary"
-        .AnalyticsView}}{{template "analytics-trends" .AnalyticsView}}{{end}}
-        {{if and .UserDetail (ne .Section "overview")}}{{template
-        "analytics-summary" .AnalyticsView}}{{template "analytics-trends"
-        .AnalyticsView}}{{end}} {{if ne .Section "users"}}{{template
-        "admin-sites" .}}{{else}}{{if .UserDetail}}{{template "admin-sites"
-        .}}{{end}}{{end}} {{if not .SiteDetail}}{{if ne .Section
-        "sites"}}{{template "admin-users" .}}{{end}}{{end}} {{if .Pages}}
-        <nav class="toolbar" aria-label="Pagination">
-          <span>{{.TotalRows}} results · page {{.Page}} of {{.Pages}}</span>{{if
-          .Previous}}<a class="button button-secondary" href="{{.Previous}}"
-            >Previous</a
-          >{{end}}{{if .Next}}<a
-            class="button button-secondary"
-            href="{{.Next}}"
-            >Next</a
-          >{{end}}
+          <a
+            href="{{index .SectionLinks `sites`}}"
+            aria-current="{{if eq .Section `sites`}}page{{else}}false{{end}}"
+            >Sites</a
+          >
+          <a
+            href="{{index .SectionLinks `users`}}"
+            aria-current="{{if eq .Section `users`}}page{{else}}false{{end}}"
+            >People</a
+          >
         </nav>
-        {{end}} {{if or (eq .Section "overview") .UserDetail}}
-        <section class="panel">
-          <h2>Publishing activity</h2>
-          <p class="muted">
-            Latest 50 events in this date range. Historical records survive
-            unpublishing.
-          </p>
-          <div class="table-scroll">
-            <table class="analytics-table">
-              <thead>
-                <tr>
-                  <th scope="col">When (UTC)</th>
-                  <th scope="col">Site</th>
-                  <th scope="col">Event</th>
-                  <th scope="col">Person</th>
-                </tr>
-              </thead>
-              <tbody>
-                {{range .Report.Events}}
-                <tr>
-                  <td>{{.At.Format "2006-01-02 15:04"}}</td>
-                  <td>
-                    <a
-                      href="/admin/sites/{{.Site}}?from={{$.From}}&amp;until={{$.Until}}"
-                      >{{if .Title}}{{.Title}}{{else}}{{.Site}}{{end}}</a
-                    >
-                  </td>
-                  <td>{{.Kind}}</td>
-                  <td>
-                    {{with .Actor}}{{if
-                    .Name}}{{.Name}}{{else}}{{.ID}}{{end}}{{else}}Unknown{{end}}
-                  </td>
-                </tr>
-                {{else}}
-                <tr>
-                  <td colspan="4">
-                    No publishing activity recorded in this range.
-                  </td>
-                </tr>
-                {{end}}
-              </tbody>
-            </table>
-          </div>
-        </section>
         {{end}}
-        <details class="panel">
-          <summary>Analytics collection status</summary>
-          <p>
-            Last collected request: {{if .Report.LastCollected.IsZero}}none
-            yet{{else}}{{.Report.LastCollected.UTC.Format
-            "2006-01-02T15:04:05"}} UTC{{end}}. User/event write failures since
-            this server started: {{.Failures}}.
-          </p>
-          {{with .Collector}}
-          <p>
-            Collector: {{if .Running}}running{{else}}stopped{{end}}. Received
-            {{.Received}}, recorded {{.Recorded}}, rejected {{.Rejected}},
-            queue/shutdown drops {{.Dropped}}, write failures
-            {{.WriteFailures}}.
-          </p>
-          {{if .LastError}}
-          <p class="banner banner-error">{{.LastError}}</p>
-          {{end}}{{else}}
-          <p class="muted">
-            No local collector configured. Another collector can feed this
-            analytics store.
-          </p>
+
+        <div class="analytics-toolbar">
+          {{template "period-presets" .AnalyticsView}}
+          <details class="period-custom" {{.CustomAttr}}>
+            <summary>
+              {{if .CustomPeriod}}{{.Period}}{{else}}Custom dates{{end}}
+            </summary>
+            <form
+              class="period-form"
+              action="{{.FilterURL}}"
+              method="get"
+              hx-get="{{.FilterURL}}"
+              hx-target="#admin-content"
+              hx-select="#admin-content"
+              hx-swap="outerHTML"
+              hx-push-url="true"
+            >
+              {{if .FilterUser}}<input
+                type="hidden"
+                name="user"
+                value="{{.FilterUser}}"
+              />{{end}}
+              <label class="field"
+                ><span class="field-label">From</span
+                ><input type="date" name="from" value="{{.From}}" required
+              /></label>
+              <label class="field"
+                ><span class="field-label">To</span
+                ><input type="date" name="until" value="{{.Until}}" required
+              /></label>
+              <button class="button button-small" type="submit">Show</button>
+            </form>
+          </details>
+          <a
+            class="link-button"
+            href="/api/hex/admin/analytics.csv?from={{.From}}&amp;until={{.Until}}&amp;site={{.Site}}&amp;user={{.FilterUser}}"
+            download
+            >Download CSV</a
+          >
+        </div>
+
+        {{if and .Adoption (eq .Section "overview")}}
+        <section aria-labelledby="adoption-heading">
+          <h2 id="adoption-heading" class="section-label">Adoption today</h2>
+          {{template "metric-cards" .Adoption}}
+        </section>
+        {{end}} {{if or (eq .Section "overview") .SiteDetail .UserDetail}}
+        <section aria-labelledby="period-heading">
+          <h2 id="period-heading" class="section-label">{{.Period}}</h2>
+          {{template "metric-cards" .Metrics}}
+        </section>
+        <section class="panel">
+          <div class="panel-heading">
+            <h2>Traffic</h2>
+            {{with .Chart.Peak}}
+            <p class="muted">Busiest: {{.}}</p>
+            {{end}}
+          </div>
+          {{template "trend-chart" .AnalyticsView}}
+        </section>
+        {{end}} {{if and (eq .Section "overview") (not .SiteDetail) (not
+        .UserDetail)}}
+        <div class="panel-grid">
+          <section class="panel" aria-labelledby="top-sites-heading">
+            <div class="panel-heading">
+              <h2 id="top-sites-heading">Most viewed sites</h2>
+              <a class="link-button" href="{{index .SectionLinks `sites`}}"
+                >All sites</a
+              >
+            </div>
+            {{template "ranked-list" .TopSites}}
+          </section>
+          <section class="panel" aria-labelledby="top-people-heading">
+            <div class="panel-heading">
+              <h2 id="top-people-heading">Most active people</h2>
+              <a class="link-button" href="{{index .SectionLinks `users`}}"
+                >All people</a
+              >
+            </div>
+            {{template "ranked-list" .TopPeople}}
+          </section>
+        </div>
+        {{end}} {{if or (eq .Section "sites") .UserDetail}}{{template
+        "admin-sites" .}}{{end}} {{if and (eq .Section "users") (not
+        .UserDetail)}}{{template "admin-users" .}}{{end}} {{if .Pages}}{{if gt
+        .Pages 1}}
+        <nav class="pagination" aria-label="Pagination">
+          <span class="muted"
+            >Page {{.Page}} of {{.Pages}} · {{.TotalRows}} in total</span
+          >
+          <span class="actions"
+            >{{if .Previous}}<a
+              class="button button-secondary button-small"
+              href="{{.Previous}}"
+              >Previous</a
+            >{{end}}{{if .Next}}<a
+              class="button button-secondary button-small"
+              href="{{.Next}}"
+              >Next</a
+            >{{end}}</span
+          >
+        </nav>
+        {{end}}{{end}} {{if or (eq .Section "overview") .SiteDetail
+        .UserDetail}}
+        <section class="panel" aria-labelledby="activity-heading">
+          <h2 id="activity-heading">Publishing activity</h2>
+          {{if .Activity}}
+          <ul class="activity">
+            {{range .Activity}}{{template "activity-item" .}}{{end}}
+          </ul>
+          {{if .MoreActivity}}
+          <details class="more">
+            <summary>Show {{len .MoreActivity}} more</summary>
+            <ul class="activity">
+              {{range .MoreActivity}}{{template "activity-item" .}}{{end}}
+            </ul>
+          </details>
+          {{end}} {{else}}
+          <p class="muted">Nothing was created or updated in this period.</p>
           {{end}}
-          <p class="muted">
-            Traffic collection is best effort over loopback syslog. Collector
-            counters cover this process; requests lost before receipt cannot be
-            counted. Historical publishing import is limited to metadata and the
-            history still available on existing sites.
-          </p>
+        </section>
+        {{end}} {{if .Global}}
+        <details class="collection-status">
+          <summary>
+            <span
+              class="status-dot status-{{.Status.Tone}}"
+              aria-hidden="true"
+            ></span
+            >{{.Status.Label}}
+          </summary>
+          <div class="collection-details">
+            {{with .Collector}}
+            <p>
+              Since this server started: {{.Received}} received · {{.Recorded}}
+              recorded · {{.Rejected}} rejected · {{.Dropped}} dropped ·
+              {{.WriteFailures}} write failures.
+            </p>
+            {{if .LastError}}
+            <p class="banner banner-error">{{.LastError}}</p>
+            {{end}}{{else}}
+            <p>
+              This server has no local collector; another collector can feed the
+              analytics store.
+            </p>
+            {{end}}
+            <p>Other analytics write failures: {{.Failures}}.</p>
+            {{template "how-we-count"}}
+          </div>
         </details>
+        {{end}}
       </div>
     </main>
     {{template "footer" .Chrome}}
   </body>
 </html>
-{{end}} {{define "analytics-summary"}}
-<section class="panel">
-  <h2>In the selected period</h2>
-  <dl class="stats analytics-stats" aria-label="Activity and traffic">
-    <div>
-      <dt>Sites created</dt>
-      <dd>{{.Report.Created}}</dd>
-    </div>
-    <div>
-      <dt>Publications</dt>
-      <dd>{{.Report.Publications}}</dd>
-    </div>
-    <div>
-      <dt>Unpublished</dt>
-      <dd>{{.Report.Unpublished}}</dd>
-    </div>
-    {{if not .Site}}
-    <div>
-      <dt>New users</dt>
-      <dd>{{.Report.NewUsers}}</dd>
-    </div>
+{{end}} {{define "period-presets"}}
+<nav class="segmented" aria-label="Period">
+  {{range .Periods}}<a
+    href="{{.URL}}"
+    hx-get="{{.RequestURL}}"
+    hx-target="{{.Target}}"
+    hx-select="{{.Target}}"
+    hx-swap="outerHTML"
+    hx-push-url="{{.PushURL}}"
+    aria-current="{{if .Current}}page{{else}}false{{end}}"
+    >{{.Label}}</a
+  >{{end}}
+</nav>
+{{end}} {{define "metric-cards"}}
+<dl class="metrics">
+  {{range .}}
+  <div class="metric">
+    <dt>{{.Label}}</dt>
+    <dd class="metric-value">{{.Value}}</dd>
+    {{if .Change}}
+    <dd class="metric-change change-{{.ChangeTone}}">
+      <strong>{{.Change}}</strong> {{.ChangeLabel}}
+    </dd>
+    {{end}} {{if .Hint}}
+    <dd class="metric-hint">{{.Hint}}</dd>
     {{end}}
-    <div>
-      <dt>Page views</dt>
-      <dd>{{.Report.Traffic.PageViews}}</dd>
-    </div>
-    <div>
-      <dt>Unique visitors</dt>
-      <dd>{{.Report.Traffic.Visitors}}</dd>
-    </div>
-    <div>
-      <dt>Visits</dt>
-      <dd>{{.Report.Traffic.Visits}}</dd>
-    </div>
-    <div>
-      <dt>Requests</dt>
-      <dd>{{.Report.Traffic.Requests}}</dd>
-    </div>
-    <div>
-      <dt>HTTP errors</dt>
-      <dd>{{.Report.Traffic.Errors}}</dd>
-    </div>
-    <div>
-      <dt>Bandwidth</dt>
-      <dd>{{.Bytes}}</dd>
-    </div>
-    <div>
-      <dt>Mean request time</dt>
-      <dd>{{.Report.Traffic.AverageMillis}} ms</dd>
-    </div>
-  </dl>
-  <p class="muted">
-    Page views are successful GET document loads reaching nginx, including 304
-    responses where identifiable. Assets and APIs are requests, not page views.
-    Visitors are distinct authenticated users across the entire range. Visits
-    group a user's page loads per site with a 30-minute inactivity timeout.
-    Browser-only navigation is not measured.
-  </p>
-</section>
-{{end}} {{define "analytics-trends"}}
-<section class="panel">
-  <h2>Daily activity</h2>
-  <figure class="analytics-chart">
-    <svg
-      viewBox="0 0 {{.ChartWidth}} 100"
-      role="img"
-      aria-label="Daily page views from {{.From}} through {{.Until}}"
-      preserveAspectRatio="none"
-    >
-      {{range .Bars}}
-      <rect x="{{.X}}" y="{{.Y}}" width="8" height="{{.Height}}">
-        <title>{{.Date}}: {{.Views}} page views</title>
-      </rect>
-      {{end}}
-    </svg>
-    <figcaption class="muted">
-      Page views · {{.From}} – {{.Until}} (UTC). Exact daily values below.
-    </figcaption>
-  </figure>
-  <details>
-    <summary>Daily statistics</summary>
-    <div class="table-scroll">
-      <table class="analytics-table">
-        <thead>
-          <tr>
-            <th scope="col">Date (UTC)</th>
-            <th scope="col">Page views</th>
-            <th scope="col">Visitors</th>
-            <th scope="col">Visits</th>
-            <th scope="col">Created</th>
-            <th scope="col">Published</th>
-            <th scope="col">Unpublished</th>
-            <th scope="col">New users</th>
-          </tr>
-        </thead>
-        <tbody>
-          {{range .Report.Days}}
-          <tr>
-            <th scope="row">{{.Date}}</th>
-            <td>{{.PageViews}}</td>
-            <td>{{.Visitors}}</td>
-            <td>{{.Visits}}</td>
-            <td>{{.Created}}</td>
-            <td>{{.Publications}}</td>
-            <td>{{.Unpublished}}</td>
-            <td>{{.NewUsers}}</td>
-          </tr>
-          {{end}}
-        </tbody>
-      </table>
-    </div>
-  </details>
-</section>
-{{end}} {{define "admin-sites"}}
-<section class="panel">
-  <div class="panel-heading">
-    <h2>{{if .UserDetail}}Sites created, owned or used{{else}}Sites{{end}}</h2>
-    {{if eq .Section "overview"}}<a
-      href="/admin/sites?from={{.From}}&amp;until={{.Until}}"
-      >View all sites</a
-    >{{end}}
   </div>
+  {{end}}
+</dl>
+{{end}} {{define "trend-chart"}}
+<figure class="trend analytics-chart">
+  <ul class="trend-legend" aria-hidden="true">
+    <li><span class="legend-bar"></span>Page views</li>
+    <li><span class="legend-line"></span>People</li>
+  </ul>
+  {{if .Chart.Empty}}
+  <p class="trend-empty">No page views in this period yet.</p>
+  {{end}}
+  <div class="trend-body">
+    <div class="trend-y" aria-hidden="true">
+      {{range .Chart.YLabels}}<span>{{.}}</span>{{end}}
+    </div>
+    <div class="trend-plot" data-trend>
+      <svg
+        viewBox="0 0 {{.Chart.Width}} 100"
+        preserveAspectRatio="none"
+        role="img"
+        aria-label="{{.Chart.Summary}}"
+      >
+        {{range .Chart.Days}}{{if .Weekend}}
+        <rect class="trend-weekend" x="{{.X}}" y="0" width="10" height="100" />
+        {{end}}{{end}} {{range .Chart.Grid}}
+        <line
+          class="trend-grid"
+          x1="0"
+          x2="{{$.Chart.Width}}"
+          y1="{{.Y}}"
+          y2="{{.Y}}"
+          vector-effect="non-scaling-stroke"
+        />
+        {{end}} {{range .Chart.Days}}
+        <g
+          class="trend-day"
+          data-label="{{.Label}}"
+          data-views="{{.Views}}"
+          data-visitors="{{.Visitors}}"
+        >
+          <rect class="trend-hit" x="{{.X}}" y="0" width="10" height="100" />
+          <rect
+            class="trend-bar"
+            x="{{.BarX}}"
+            y="{{.BarY}}"
+            width="{{.BarWidth}}"
+            height="{{.BarHeight}}"
+          />
+          <title>{{.Label}}: {{.Views}} page views, {{.Visitors}} people</title>
+        </g>
+        {{end}}
+        <path
+          class="trend-line"
+          d="{{.Chart.VisitorLine}}"
+          vector-effect="non-scaling-stroke"
+        />
+      </svg>
+      <div class="trend-tooltip" role="presentation" hidden></div>
+    </div>
+    <div class="trend-x" aria-hidden="true">
+      {{range .Chart.XLabels}}<span>{{.}}</span>{{end}}
+    </div>
+  </div>
+
+  <figcaption class="visually-hidden">{{.Chart.Summary}}</figcaption>
+</figure>
+<details class="more">
+  <summary>Show daily numbers</summary>
   <div class="table-scroll">
     <table class="analytics-table">
       <thead>
         <tr>
+          <th scope="col">Day</th>
+          <th scope="col" class="numeric">Page views</th>
+          <th scope="col" class="numeric">People</th>
+          <th scope="col" class="numeric">Visits</th>
+          <th scope="col" class="numeric">Updates</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Report.Days}}
+        <tr>
+          <th scope="row">{{.Date}}</th>
+          <td class="numeric">{{.PageViews}}</td>
+          <td class="numeric">{{.Visitors}}</td>
+          <td class="numeric">{{.Visits}}</td>
+          <td class="numeric">{{.Publications}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</details>
+{{end}} {{define "ranked-list"}} {{if .}}
+<ol class="ranked">
+  {{range .}}
+  <li>
+    {{with .Card}}{{template "site-icon" .}}{{else}}<span
+      class="avatar {{.Tone}}"
+      aria-hidden="true"
+      >{{.Initials}}</span
+    >{{end}}
+    <div class="ranked-main">
+      <div class="ranked-line">
+        <a href="{{.URL}}">{{.Title}}</a>
+        <span class="ranked-value">{{.Value}}</span>
+      </div>
+      {{template "bar" .Percent}} {{with .Detail}}<span class="muted"
+        >{{.}}</span
+      >{{end}}
+    </div>
+  </li>
+  {{end}}
+</ol>
+{{else}}
+<p class="muted">No page views in this period yet.</p>
+{{end}} {{end}} {{define "bar"}}
+<svg
+  class="meter"
+  viewBox="0 0 100 4"
+  preserveAspectRatio="none"
+  aria-hidden="true"
+>
+  <rect class="meter-track" width="100" height="4" rx="2" />
+  <rect class="meter-fill" width="{{.}}" height="4" rx="2" />
+</svg>
+{{end}} {{define "activity-item"}}
+<li>
+  <span class="avatar avatar-sm {{.Tone}}" aria-hidden="true"
+    >{{.Initials}}</span
+  >
+  <p>
+    <strong>{{.Who}}</strong> {{.Verb}}
+    <a href="{{.SiteURL}}">{{.Site}}</a>
+  </p>
+  <time datetime="{{.WhenISO}}">{{.When}}</time>
+</li>
+{{end}} {{define "how-we-count"}}
+<div class="how-we-count">
+  <h3>How we count</h3>
+  <ul>
+    <li>
+      A <strong>page view</strong> is a page someone opened, including reloads.
+      Images, scripts and data requests are not counted.
+    </li>
+    <li>
+      <strong>People</strong> are counted once per period, however often they
+      come back.
+    </li>
+    <li>
+      A <strong>visit</strong> is a series of page views with no more than 30
+      minutes between them.
+    </li>
+    <li>
+      Moving around inside an app without loading a new page is not counted.
+      Days follow UTC.
+    </li>
+  </ul>
+</div>
+{{end}} {{define "admin-sites"}}
+<section class="panel panel-flush" aria-labelledby="sites-heading">
+  <div class="panel-heading">
+    <h2 id="sites-heading">
+      {{if .UserDetail}}Sites they created, own or
+      used{{else}}{{.RowsHeading}}{{end}}
+    </h2>
+    {{if not .UserDetail}}
+    <form
+      class="table-filters"
+      action="{{.FilterURL}}"
+      method="get"
+      hx-get="{{.FilterURL}}"
+      hx-target="#admin-content"
+      hx-select="#admin-content"
+      hx-swap="outerHTML"
+      hx-push-url="true"
+    >
+      <input type="hidden" name="from" value="{{.From}}" /><input
+        type="hidden"
+        name="until"
+        value="{{.Until}}"
+      />
+      <label class="field field-grow"
+        ><span class="visually-hidden">Search sites</span
+        ><input
+          type="search"
+          name="q"
+          value="{{.QueryText}}"
+          placeholder="Search by name, creator or owner"
+      /></label>
+      <label class="field"
+        ><span class="visually-hidden">Sort sites</span
+        ><select name="sort">
+          {{range .SortChoices}}
+          <option value="{{.Value}}" {{.Attr}}>{{.Label}}</option>
+          {{end}}
+        </select></label
+      >
+      <button class="button button-small" type="submit">Apply</button>
+    </form>
+    {{end}}
+  </div>
+  <div class="table-scroll">
+    <table class="analytics-table data-table">
+      <thead>
+        <tr>
           <th scope="col">Site</th>
-          <th scope="col">Creator</th>
-          <th scope="col">Current owners</th>
-          <th scope="col">Created</th>
-          <th scope="col">Latest publication</th>
-          <th scope="col">Page views</th>
-          <th scope="col">Visitors</th>
-          <th scope="col">Last visited</th>
+          <th scope="col" class="hide-small">Created by</th>
+          <th scope="col" class="hide-small">Owners</th>
+          <th scope="col" class="hide-small">Last update</th>
+          <th scope="col" class="numeric">Page views</th>
+          <th scope="col" class="numeric">People</th>
+          <th scope="col" class="hide-small">Last visit</th>
         </tr>
       </thead>
       <tbody>
         {{range .Sites}}
         <tr>
           <th scope="row">
-            <div class="admin-site-heading">
-              {{if .Published}}{{template "site-icon" .}}{{end}}
-              <a
-                href="/admin/sites/{{.Name}}?from={{$.From}}&amp;until={{$.Until}}"
-                >{{.Title}}</a
-              >
+            <div class="cell-identity">
+              {{template "site-icon" .}}
+              <div>
+                <a href="{{.DetailURL}}">{{.Title}}</a>
+                <span class="muted"
+                  >{{if .Published}}{{.Kind}}{{if .Created}} · created
+                  {{.Created}}{{end}}{{else}}No longer published{{end}}</span
+                >
+              </div>
             </div>
-            <small class="muted"
-              >{{.Name}} · {{if .Published}}{{.Kind}} ·
-              <a href="/manage/{{.Name}}">Manage</a>{{else}}Not currently
-              published{{end}}</small
-            >
           </th>
-          <td>
+          <td class="hide-small">
             {{if .CreatorID}}<a
               href="/admin/users?user={{.CreatorID}}&amp;from={{$.From}}&amp;until={{$.Until}}"
               >{{if .CreatedBy}}{{.CreatedBy}}{{else}}{{.CreatorID}}{{end}}</a
-            >{{else}}Unknown{{end}}
+            >{{else}}<span class="muted">Unknown</span>{{end}}
           </td>
-          <td>{{if .Owners}}{{.Owners}}{{else}}Unknown{{end}}</td>
-          <td>{{if .Created}}{{.Created}}{{else}}Unknown{{end}}</td>
-          <td>{{if .Updated}}{{.Updated}}{{else}}—{{end}}</td>
-          <td>{{.PageViews}}</td>
-          <td>{{.Visitors}}</td>
-          <td>{{.LastVisit}}</td>
+          <td class="hide-small">
+            {{if .Owners}}{{.Owners}}{{else}}<span class="muted">—</span>{{end}}
+          </td>
+          <td class="hide-small">
+            {{if .Updated}}{{.Updated}}{{else}}<span class="muted">—</span
+            >{{end}}
+          </td>
+          <td class="numeric">
+            <span class="cell-number">{{.ViewsText}}</span>{{template "bar"
+            .ViewsBar}}
+          </td>
+          <td class="numeric">{{.Visitors}}</td>
+          <td class="hide-small">{{.LastVisit}}</td>
         </tr>
         {{else}}
         <tr>
-          <td colspan="8">No sites match these filters.</td>
+          <td colspan="7" class="table-empty">No sites match these filters.</td>
         </tr>
         {{end}}
       </tbody>
@@ -398,173 +542,275 @@
   </div>
 </section>
 {{end}} {{define "admin-users"}}
-<section class="panel">
+<section class="panel panel-flush" aria-labelledby="people-heading">
   <div class="panel-heading">
-    <h2>People</h2>
-    {{if eq .Section "overview"}}<a
-      href="/admin/users?from={{.From}}&amp;until={{.Until}}"
-      >View all people</a
-    >{{end}}
+    <h2 id="people-heading">{{.RowsHeading}}</h2>
+    <form
+      class="table-filters"
+      action="{{.FilterURL}}"
+      method="get"
+      hx-get="{{.FilterURL}}"
+      hx-target="#admin-content"
+      hx-select="#admin-content"
+      hx-swap="outerHTML"
+      hx-push-url="true"
+    >
+      <input type="hidden" name="from" value="{{.From}}" /><input
+        type="hidden"
+        name="until"
+        value="{{.Until}}"
+      />
+      <label class="field field-grow"
+        ><span class="visually-hidden">Search people</span
+        ><input
+          type="search"
+          name="q"
+          value="{{.QueryText}}"
+          placeholder="Search by name or email"
+      /></label>
+      <label class="field"
+        ><span class="visually-hidden">Sort people</span
+        ><select name="sort">
+          {{range .SortChoices}}
+          <option value="{{.Value}}" {{.Attr}}>{{.Label}}</option>
+          {{end}}
+        </select></label
+      >
+      <button class="button button-small" type="submit">Apply</button>
+    </form>
   </div>
   <div class="table-scroll">
-    <table class="analytics-table">
+    <table class="analytics-table data-table">
       <thead>
         <tr>
           <th scope="col">Person</th>
-          <th scope="col">Current sites created</th>
-          <th scope="col">Current sites owned</th>
-          <th scope="col">First seen</th>
-          <th scope="col">Last active</th>
-          <th scope="col">Page views</th>
-          <th scope="col">Visits</th>
+          <th scope="col" class="numeric hide-small">Sites created</th>
+          <th scope="col" class="numeric hide-small">Sites owned</th>
+          <th scope="col" class="hide-small">Last active</th>
+          <th scope="col" class="numeric">Page views</th>
+          <th scope="col" class="numeric">Visits</th>
         </tr>
       </thead>
       <tbody>
         {{range .Users}}
         <tr>
           <th scope="row">
-            <a href="{{.DetailURL}}">{{.Label}}</a>{{if .Email}}<small
-              class="muted"
-              >{{.Email}}</small
-            >{{end}}
+            <div class="cell-identity">
+              <span class="avatar {{.Tone}}" aria-hidden="true"
+                >{{.Initials}}</span
+              >
+              <div>
+                <a href="{{.DetailURL}}">{{.Label}}</a>
+                {{if .Email}}<span class="muted">{{.Email}}</span>{{end}}
+              </div>
+            </div>
           </th>
-          <td>{{.Created}}</td>
-          <td>{{.Owned}}</td>
-          <td>{{.First}}</td>
-          <td>{{.Last}}</td>
-          <td>{{.PageViews}}</td>
-          <td>{{.Visits}}</td>
+          <td class="numeric hide-small">{{.Created}}</td>
+          <td class="numeric hide-small">{{.Owned}}</td>
+          <td class="hide-small">{{.Last}}</td>
+          <td class="numeric">
+            <span class="cell-number">{{.ViewsText}}</span>{{template "bar"
+            .ViewsBar}}
+          </td>
+          <td class="numeric">{{.Visits}}</td>
         </tr>
         {{else}}
         <tr>
-          <td colspan="7">No people match these filters.</td>
+          <td colspan="6" class="table-empty">
+            No people match these filters.
+          </td>
         </tr>
         {{end}}
       </tbody>
     </table>
   </div>
-  <p class="muted">
-    Ownership counts direct user ownership; group membership is not expanded.
-    First-seen dates remain unknown for people imported from the previous
-    directory.
+  <p class="muted table-note">
+    Ownership counts people named directly as owners, not group members.
   </p>
 </section>
 {{end}} {{define "site-analytics"}}
-<div id="site-analytics">
-  <form
-    class="toolbar analytics-filters"
-    action="/manage/{{.Site}}"
-    method="get"
-    hx-get="/api/hex/manage/sites/{{.Site}}/analytics"
-    hx-target="#site-analytics"
-    hx-swap="outerHTML"
-  >
-    <input type="hidden" name="tab" value="analytics" /><label class="field"
-      ><span class="field-label">From (UTC)</span
-      ><input type="date" name="from" value="{{.From}}" required /></label
-    ><label class="field"
-      ><span class="field-label">Through (UTC)</span
-      ><input type="date" name="until" value="{{.Until}}" required /></label
-    >{{if .ShowVisitors}}<label class="field field-grow"
-      ><span class="field-label">Find visitors</span
-      ><input
-        type="search"
-        name="visitor-q"
-        value="{{.VisitorSearch}}"
-        placeholder="Name or email…" /></label
-    ><label class="field"
-      ><span class="field-label">Sort visitors</span
-      ><select name="visitor-sort">
-        {{range .VisitorSortChoices}}
-        <option value="{{.Value}}" {{.Attr}}>{{.Label}}</option>
-        {{end}}
-      </select></label
-    >{{end}}<button class="button" type="submit">Apply</button>
-  </form>
-  {{with .Lifetime}}
-  <section class="panel">
-    <h2>All recorded traffic</h2>
-    <dl class="stats analytics-stats" aria-label="All-time site traffic">
-      <div>
-        <dt>Page views</dt>
-        <dd>{{.PageViews}}</dd>
-      </div>
-      <div>
-        <dt>Visits</dt>
-        <dd>{{.Visits}}</dd>
-      </div>
-      <div>
-        <dt>Unique visitors</dt>
-        <dd>{{.Visitors}}</dd>
-      </div>
-    </dl>
-    <p class="muted">
-      Totals since traffic collection began. The date range below applies to the
-      activity chart and visitor list.
-    </p>
+<div id="site-analytics" class="site-analytics">
+  <div class="analytics-toolbar">
+    {{template "period-presets" .}}
+    <details class="period-custom" {{.CustomAttr}}>
+      <summary>
+        {{if .CustomPeriod}}{{.Period}}{{else}}Custom dates{{end}}
+      </summary>
+      <form
+        class="period-form"
+        action="/manage/{{.Site}}"
+        method="get"
+        hx-get="/api/hex/manage/sites/{{.Site}}/analytics"
+        hx-target="#site-analytics"
+        hx-swap="outerHTML"
+      >
+        <input type="hidden" name="tab" value="analytics" />
+        <label class="field"
+          ><span class="field-label">From</span
+          ><input type="date" name="from" value="{{.From}}" required
+        /></label>
+        <label class="field"
+          ><span class="field-label">To</span
+          ><input type="date" name="until" value="{{.Until}}" required
+        /></label>
+        <button class="button button-small" type="submit">Show</button>
+      </form>
+    </details>
+    {{with .LastVisit}}
+    <p class="muted">Last visit {{.}}</p>
+    {{end}}
+  </div>
+
+  <section aria-labelledby="site-period-heading">
+    <h2 id="site-period-heading" class="section-label">{{.Period}}</h2>
+    {{template "metric-cards" .Metrics}}
   </section>
-  {{end}} {{template "analytics-summary" .}}{{template "analytics-trends" .}}
+
+  <section class="panel">
+    <div class="panel-heading">
+      <h2>Traffic</h2>
+      {{with .UpdateSummary}}
+      <p class="muted">{{.}}</p>
+      {{end}}
+    </div>
+    {{template "trend-chart" .}}
+  </section>
+
   {{if .ShowVisitors}}
-  <section class="panel" aria-labelledby="visitors-heading">
-    <h2 id="visitors-heading">Who visited</h2>
-    <p class="muted">
-      Authenticated people who loaded a page on this site in the selected
-      period. Page views and visits are for this site only; asset/API-only
-      requests are excluded.
-    </p>
+  <section class="panel panel-flush" aria-labelledby="visitors-heading">
+    <div class="panel-heading">
+      <div>
+        <h2 id="visitors-heading">Who visited</h2>
+        <p class="muted">{{.VisitorSummary}}</p>
+      </div>
+      <form
+        class="table-filters"
+        action="/manage/{{.Site}}"
+        method="get"
+        hx-get="/api/hex/manage/sites/{{.Site}}/analytics"
+        hx-target="#site-analytics"
+        hx-swap="outerHTML"
+        hx-trigger="submit, input delay:350ms"
+      >
+        <input type="hidden" name="tab" value="analytics" /><input
+          type="hidden"
+          name="from"
+          value="{{.From}}"
+        /><input type="hidden" name="until" value="{{.Until}}" />
+        <label class="field field-grow"
+          ><span class="visually-hidden">Find visitors</span
+          ><input
+            type="search"
+            name="visitor-q"
+            value="{{.VisitorSearch}}"
+            placeholder="Find a person"
+        /></label>
+        <label class="field"
+          ><span class="visually-hidden">Sort visitors</span
+          ><select name="visitor-sort">
+            {{range .VisitorSortChoices}}
+            <option value="{{.Value}}" {{.Attr}}>{{.Label}}</option>
+            {{end}}
+          </select></label
+        >
+        <button class="button button-small" type="submit">Apply</button>
+      </form>
+    </div>
     <div class="table-scroll">
-      <table class="analytics-table site-visitors">
+      <table class="analytics-table data-table site-visitors">
         <thead>
           <tr>
             <th scope="col">Person</th>
-            <th scope="col">Page views</th>
-            <th scope="col">Visits</th>
-            <th scope="col">Last visited (UTC)</th>
+            <th scope="col" class="numeric">Page views</th>
+            <th scope="col" class="numeric">Visits</th>
+            <th scope="col" class="hide-small">Last visit</th>
           </tr>
         </thead>
         <tbody>
           {{range .SiteVisitors}}
           <tr>
             <th scope="row">
-              {{.Name}}{{if .Email}}<small class="muted">{{.Email}}</small
-              >{{end}}
+              <div class="cell-identity">
+                <span class="avatar {{.Tone}}" aria-hidden="true"
+                  >{{.Initials}}</span
+                >
+                <div>
+                  <span class="cell-title">{{.Name}}</span>
+                  {{if .Email}}<span class="muted">{{.Email}}</span>{{end}}
+                </div>
+              </div>
             </th>
-            <td>{{.PageViews}}</td>
-            <td>{{.Visits}}</td>
-            <td><time datetime="{{.LastISO}}">{{.Last}}</time></td>
+            <td class="numeric">
+              <span class="cell-number">{{.Views}}</span>{{template "bar"
+              .ViewsBar}}
+            </td>
+            <td class="numeric">{{.Visits}}</td>
+            <td class="hide-small">
+              <time datetime="{{.LastISO}}">{{.Last}}</time>
+            </td>
           </tr>
           {{else}}
           <tr>
-            <td colspan="4">
-              {{if .VisitorSearch}}No visitors match this search.{{else}}No
-              authenticated page visitors recorded in this period.{{end}}
+            <td colspan="4" class="table-empty">
+              {{if .VisitorSearch}}No visitors match this search.{{else}}No one
+              has opened this site in this period.{{end}}
             </td>
           </tr>
           {{end}}
         </tbody>
       </table>
     </div>
-    <nav class="toolbar" aria-label="Visitor pagination">
-      <span
-        >{{.VisitorTotal}} {{if eq .VisitorTotal 1}}person{{else}}people{{end}}
-        · page {{.VisitorPage}} of {{.VisitorPages}}</span
-      >{{if .VisitorPrevious}}<a
-        class="button button-secondary"
-        href="{{.VisitorPrevious}}"
-        >Previous visitors</a
-      >{{end}}{{if .VisitorNext}}<a
-        class="button button-secondary"
-        href="{{.VisitorNext}}"
-        >Next visitors</a
-      >{{end}}
+    {{if gt .VisitorPages 1}}
+    <nav class="pagination" aria-label="Visitor pages">
+      <span class="muted">Page {{.VisitorPage}} of {{.VisitorPages}}</span>
+      <span class="actions"
+        >{{if .VisitorPrevious}}<a
+          class="button button-secondary button-small"
+          href="{{.VisitorPrevious}}"
+          hx-get="{{.VisitorPreviousFragment}}"
+          hx-target="#site-analytics"
+          hx-swap="outerHTML"
+          >Previous visitors</a
+        >{{end}}{{if .VisitorNext}}<a
+          class="button button-secondary button-small"
+          href="{{.VisitorNext}}"
+          hx-get="{{.VisitorNextFragment}}"
+          hx-target="#site-analytics"
+          hx-swap="outerHTML"
+          >Next visitors</a
+        >{{end}}</span
+      >
     </nav>
-    {{if .AnonymousPageViews}}
-    <p class="muted">
-      {{.AnonymousPageViews}} page views had no authenticated identity and
-      cannot be attributed to a person.
+    {{end}} {{if .AnonymousPageViews}}
+    <p class="muted table-note">
+      {{.AnonymousPageViews}} page views came from visitors who could not be
+      identified.
     </p>
     {{end}}
   </section>
   {{end}}
+
+  <details class="panel technical">
+    <summary>Technical details</summary>
+    <dl class="technical-facts">
+      <div>
+        <dt>Requests</dt>
+        <dd>{{.Report.Traffic.Requests}}</dd>
+      </div>
+      <div>
+        <dt>Errors</dt>
+        <dd>{{.Report.Traffic.Errors}}</dd>
+      </div>
+      <div>
+        <dt>Data sent</dt>
+        <dd>{{.Bytes}}</dd>
+      </div>
+      <div>
+        <dt>Average response</dt>
+        <dd>{{.Report.Traffic.AverageMillis}} ms</dd>
+      </div>
+    </dl>
+    {{template "how-we-count"}}
+  </details>
 </div>
 {{end}}

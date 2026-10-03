@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/csv"
 	"errors"
-	"fmt"
+	"html/template"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -32,6 +32,9 @@ type adminSiteRow struct {
 	CreatedAt time.Time
 	TrafficTotals
 	LastVisit string
+	ViewsText string
+	ViewsBar  string
+	DetailURL string
 }
 
 type adminUserRow struct {
@@ -43,6 +46,10 @@ type adminUserRow struct {
 	Last      string
 	DetailURL string
 	TrafficTotals
+	Initials  string
+	Tone      string
+	ViewsText string
+	ViewsBar  string
 }
 
 type AnalyticsView struct {
@@ -50,10 +57,16 @@ type AnalyticsView struct {
 	From               string
 	Until              string
 	Site               string
-	Bars               []analyticsBar
+	Period             string
+	Periods            []periodChoice
+	CustomPeriod       bool
+	CustomAttr         template.HTMLAttr
+	Comparison         string
+	Metrics            []metricCard
+	Chart              trendChart
 	Bytes              string
-	ChartWidth         int
 	Lifetime           *TrafficTotals
+	LastVisit          string
 	ShowVisitors       bool
 	SiteVisitors       []siteVisitorRow
 	AnonymousPageViews int64
@@ -65,39 +78,46 @@ type AnalyticsView struct {
 	VisitorTotal       int
 	VisitorPrevious    string
 	VisitorNext        string
-}
 
-type analyticsBar struct {
-	Date   string
-	Views  int64
-	Height string
-	X      int
-	Y      string
+	VisitorPreviousFragment string
+	VisitorNextFragment     string
+	VisitorSummary          string
+	UpdateSummary           string
 }
 
 type adminView struct {
 	Chrome
 	AnalyticsView
-	Section     string
-	Title       string
-	QueryText   string
-	Sort        string
-	SortChoices []choice
-	FilterUser  string
-	Counts      adminInventoryCounts
-	Sites       []adminSiteRow
-	Users       []adminUserRow
-	Previous    string
-	Next        string
-	Page        int
-	Pages       int
-	TotalRows   int
-	Collector   *TrafficCollectorStatus
-	Failures    uint64
-	Global      bool
-	SiteDetail  bool
-	UserDetail  bool
-	FilterURL   string
+	Section      string
+	Title        string
+	RowsHeading  string
+	Adoption     []metricCard
+	TopSites     []rankedRow
+	TopPeople    []rankedRow
+	Activity     []activityItem
+	MoreActivity []activityItem
+	Status       collectionStatus
+	SiteRow      *adminSiteRow
+	UserRow      *adminUserRow
+	SectionLinks map[string]string
+	QueryText    string
+	Sort         string
+	SortChoices  []choice
+	FilterUser   string
+	Counts       adminInventoryCounts
+	Sites        []adminSiteRow
+	Users        []adminUserRow
+	Previous     string
+	Next         string
+	Page         int
+	Pages        int
+	TotalRows    int
+	Collector    *TrafficCollectorStatus
+	Failures     uint64
+	Global       bool
+	SiteDetail   bool
+	UserDetail   bool
+	FilterURL    string
 }
 
 func (s *Server) registerAnalyticsRoutes() {
@@ -159,23 +179,26 @@ func analyticsQuery(values url.Values, now time.Time) (AnalyticsQuery, error) {
 	return query, nil
 }
 
-func newAnalyticsView(report AnalyticsReport) AnalyticsView {
+func newAnalyticsView(report AnalyticsReport, now time.Time) AnalyticsView {
 	view := AnalyticsView{
 		Report: report, From: report.Query.From.Format(time.DateOnly), Until: report.Query.Until.AddDate(0, 0, -1).Format(time.DateOnly),
 		Site: report.Query.Site, Bytes: formatBytes(report.Traffic.Bytes),
+		Period: periodLabel(report.Query, now), Chart: newTrendChart(report.Days),
 	}
-	maximum := int64(1)
-	for _, day := range report.Days {
-		if day.PageViews > maximum {
-			maximum = day.PageViews
-		}
-	}
-	view.ChartWidth = len(report.Days) * 10
-	for index, day := range report.Days {
-		height := float64(day.PageViews) * 100 / float64(maximum)
-		view.Bars = append(view.Bars, analyticsBar{Date: day.Date, Views: day.PageViews, Height: fmt.Sprintf("%.2f", height), X: index * 10, Y: fmt.Sprintf("%.2f", 100-height)})
-	}
+	days := int(report.Query.Until.Sub(report.Query.From).Hours() / 24)
+	view.Comparison = "previous " + plural(days, "day")
 	return view
+}
+
+// previousReport queries the period before the report's, for comparisons.
+// Comparisons are optional, so a failure only hides them.
+func (s *Server) previousReport(ctx context.Context, query AnalyticsQuery) (AnalyticsReport, bool) {
+	report, err := s.config.Analytics.QueryAnalytics(ctx, previousPeriod(query))
+	if err != nil {
+		slog.Warn("load previous analytics period", "error", err)
+		return AnalyticsReport{}, false
+	}
+	return report, true
 }
 
 func (s *Server) adminInventory(ctx context.Context) ([]adminSiteRow, adminInventoryCounts, error) {
@@ -275,7 +298,7 @@ func analyticsDate(at time.Time) string {
 	if at.IsZero() {
 		return "Unknown"
 	}
-	return at.UTC().Format(time.DateOnly)
+	return at.UTC().Format("Jan 2, 2006")
 }
 
 func analyticsLast(at time.Time) string {
@@ -316,8 +339,9 @@ func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
 		writeServerError(w, err)
 		return
 	}
+	now := time.Now()
 	view := adminView{
-		Chrome: s.chromeFor(identity, "admin"), AnalyticsView: newAnalyticsView(report), Counts: counts,
+		Chrome: s.chromeFor(identity, "admin"), AnalyticsView: newAnalyticsView(report, now), Counts: counts,
 		Section: "overview", Title: "Platform overview", QueryText: strings.TrimSpace(values.Get("q")), Sort: values.Get("sort"),
 		FilterUser: query.User, Failures: s.analyticsFailures.Load(), Global: query.Site == "" && query.User == "",
 		SiteDetail: query.Site != "", UserDetail: query.User != "",
@@ -336,18 +360,29 @@ func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
 	} else if r.URL.Path == "/admin/users" {
 		view.Section, view.Title = "users", "People"
 	}
-	if query.Site != "" {
-		view.Title = "Site analytics · " + query.Site
-	}
 	view.Sites, view.Users = buildAdminRows(sites, report, values)
-	if query.User != "" {
-		view.Title = "User analytics · " + query.User
-		for _, person := range view.Users {
-			if person.ID == query.User {
-				view.Title = "User analytics · " + person.Label
+	if query.Site != "" {
+		view.Title = query.Site
+		for index := range view.Sites {
+			if view.Sites[index].Name == query.Site {
+				row := view.Sites[index]
+				view.SiteRow = &row
+				view.Title = row.Title
 			}
 		}
 	}
+	if query.User != "" {
+		view.Title = query.User
+		for index := range view.Users {
+			if view.Users[index].ID == query.User {
+				row := view.Users[index]
+				view.UserRow = &row
+				view.Title = row.Label
+			}
+		}
+	}
+	previous, comparable := s.previousReport(r.Context(), query)
+	s.describeAdminReport(&view, report, previous, comparable, values, now)
 	if view.Section == "sites" || view.Section == "users" && query.User == "" {
 		total := len(view.Sites)
 		if view.Section == "users" {
@@ -359,19 +394,117 @@ func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if view.Section == "sites" {
+			view.RowsHeading = plural(total, "site")
 			view.Sites = view.Sites[start:end]
 		} else {
+			view.RowsHeading = peopleCount(total)
 			view.Users = view.Users[start:end]
-		}
-	} else if view.Global {
-		if len(view.Sites) > 10 {
-			view.Sites = view.Sites[:10]
-		}
-		if len(view.Users) > 10 {
-			view.Users = view.Users[:10]
 		}
 	}
 	s.writePortalPage(w, "admin", view)
+}
+
+// describeAdminReport adds the headline numbers, top lists, activity feed
+// and navigation for the selected section.
+func (s *Server) describeAdminReport(view *adminView, report, previous AnalyticsReport, comparable bool, values url.Values, now time.Time) {
+	keep := url.Values{}
+	for _, name := range []string{"q", "sort", "user"} {
+		if value := values.Get(name); value != "" {
+			keep.Set(name, value)
+		}
+	}
+	view.Periods, view.CustomPeriod = periodChoices(report.Query, now, keep, view.FilterURL, "")
+	view.CustomAttr = flag("open", view.CustomPeriod)
+	dates := url.Values{"from": {view.From}, "until": {view.Until}}.Encode()
+	view.SectionLinks = map[string]string{
+		"overview": "/admin?" + dates,
+		"sites":    "/admin/sites?" + dates,
+		"users":    "/admin/users?" + dates,
+	}
+
+	metric := func(label string, current, before int64) metricCard {
+		return newMetric(label, current, before, comparable, view.Comparison)
+	}
+	traffic, before := report.Traffic, previous.Traffic
+	views := metric("Page views", traffic.PageViews, before.PageViews)
+	people := metric("People who visited", int64(traffic.Visitors), int64(before.Visitors))
+	updates := metric("Updates published", int64(report.Publications), int64(previous.Publications))
+	updates.Hint = plural(report.Created, "new site")
+	if report.Unpublished > 0 {
+		updates.Hint += " · " + strconv.Itoa(report.Unpublished) + " taken down"
+	}
+	switch {
+	case view.UserRow != nil:
+		visits := metric("Visits", traffic.Visits, before.Visits)
+		visits.Hint = "Across all sites"
+		created := newMetric("Sites created", int64(view.UserRow.Created), 0, false, "")
+		created.Hint = plural(view.UserRow.Owned, "site") + " owned"
+		view.Metrics = []metricCard{views, visits, created, updates}
+	case view.SiteDetail:
+		people.Label = "People"
+		visits := metric("Visits", traffic.Visits, before.Visits)
+		view.Metrics = []metricCard{views, people, visits, updates}
+	default:
+		newPeople := metric("New people", int64(report.NewUsers), int64(previous.NewUsers))
+		newPeople.Hint = "Signed in for the first time"
+		view.Metrics = []metricCard{views, people, updates, newPeople}
+	}
+	if view.Global {
+		active := newMetric("Active people", int64(report.Active30Days), 0, false, "")
+		active.Hint = "Last 30 days, of " + formatCount(int64(report.KnownUsers)) + " who have signed in"
+		week := newMetric("Active this week", int64(report.Active7Days), 0, false, "")
+		week.Hint = "Signed in or visited in the last 7 days"
+		sites := newMetric("Published sites", int64(view.Counts.Sites), 0, false, "")
+		sites.Hint = plural(view.Counts.Apps, "app") + " · " + plural(view.Counts.Artifacts, "shared file")
+		creators := newMetric("Creators", int64(view.Counts.Creators), 0, false, "")
+		creators.Hint = "People who have published"
+		view.Adoption = []metricCard{active, week, sites, creators}
+	}
+
+	if view.Section == "overview" && view.Global {
+		view.TopSites = topSites(view.Sites)
+		view.TopPeople = topPeople(view.Users)
+	}
+
+	activity := activityItems(report.Events, view.From, view.Until, now)
+	if len(activity) > 8 {
+		view.MoreActivity = activity[8:]
+		activity = activity[:8]
+	}
+	view.Activity = activity
+	view.Status = newCollectionStatus(view.Collector, report.LastCollected, now)
+}
+
+// topSites and topPeople take the five most viewed rows, already sorted by
+// page views, scaled against the first.
+func topSites(sites []adminSiteRow) []rankedRow {
+	rows := []rankedRow{}
+	for index := range sites {
+		site := &sites[index]
+		if len(rows) == 5 || site.PageViews == 0 {
+			break
+		}
+		rows = append(rows, rankedRow{
+			Title: site.Title, Detail: peopleCount(site.Visitors), URL: site.DetailURL,
+			Value: site.ViewsText, Percent: site.ViewsBar, Card: &site.siteCard,
+		})
+	}
+	return rows
+}
+
+func topPeople(users []adminUserRow) []rankedRow {
+	rows := []rankedRow{}
+	for _, person := range users {
+		if len(rows) == 5 || person.PageViews == 0 {
+			break
+		}
+		rows = append(rows, rankedRow{
+			Title: person.Label, Detail: person.Email, URL: person.DetailURL,
+			Value: person.ViewsText, Percent: person.ViewsBar,
+			Initials: person.Initials, Tone: person.Tone,
+		})
+	}
+	return rows
 }
 
 func buildAdminRows(sites []adminSiteRow, report AnalyticsReport, values url.Values) ([]adminSiteRow, []adminUserRow) {
@@ -470,6 +603,7 @@ func buildAdminRows(sites []adminSiteRow, report AnalyticsReport, values url.Val
 		}
 		return strings.Compare(a.Name, b.Name)
 	})
+	decorateAdminRows(filteredSites, users, report.Query)
 	slices.SortFunc(users, func(a, b adminUserRow) int {
 		if sort == "name" {
 			return strings.Compare(strings.ToLower(a.Label), strings.ToLower(b.Label))
@@ -483,6 +617,36 @@ func buildAdminRows(sites []adminSiteRow, report AnalyticsReport, values url.Val
 		return strings.Compare(a.ID, b.ID)
 	})
 	return filteredSites, users
+}
+
+// decorateAdminRows adds the display values shared by tables and top lists.
+func decorateAdminRows(sites []adminSiteRow, users []adminUserRow, query AnalyticsQuery) {
+	dates := url.Values{"from": {query.From.Format(time.DateOnly)}, "until": {query.Until.AddDate(0, 0, -1).Format(time.DateOnly)}}.Encode()
+	var peak int64
+	for _, site := range sites {
+		peak = max(peak, site.PageViews)
+	}
+	for index := range sites {
+		site := &sites[index]
+		site.ViewsText = formatCount(site.PageViews)
+		site.ViewsBar = barPercent(site.PageViews, peak)
+		site.DetailURL = "/admin/sites/" + site.Name + "?" + dates
+		if site.Initial == "" {
+			site.Initial = strings.ToUpper(site.Name[:1])
+			site.Tone = tone(site.Name)
+		}
+	}
+	peak = 0
+	for _, user := range users {
+		peak = max(peak, user.PageViews)
+	}
+	for index := range users {
+		user := &users[index]
+		user.ViewsText = formatCount(user.PageViews)
+		user.ViewsBar = barPercent(user.PageViews, peak)
+		user.Initials = initials(user.Label)
+		user.Tone = tone(user.ID)
+	}
 }
 
 func compareDescending(a, b int64) int {

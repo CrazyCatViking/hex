@@ -6,6 +6,22 @@ management page. Admin pages require the configured platform-admin identity on
 the platform host. Site owners/publishers can see their site's traffic and named
 page visitors. Platform admins can view cross-site and per-user reports.
 
+## Pages
+
+The pages are written for everyone who looks after a site, not only developers:
+
+- Quick periods (7 days, 30 days, 90 days, 12 months) with custom dates on
+  demand. Headline numbers compare with the previous period of the same length.
+- A daily chart of page views (bars) and people (line), with weekends shaded.
+  Pointing at, or arrowing through, a day shows its numbers; "Show daily
+  numbers" lists them for screen readers and copying.
+- The admin overview adds adoption today (active people, sites, creators), the
+  most viewed sites and most active people, and a publishing activity feed.
+- A site's Analytics tab adds who visited, searchable as you type, with each
+  person's page views, visits and last visit. Requests, errors, data sent and
+  response time are under "Technical details", with a plain explanation of how
+  each number is counted.
+
 ## What is measured
 
 - Current inventory: all published apps and files/folders, including hidden
@@ -158,8 +174,10 @@ is pruned during ingestion. Older traffic messages are rejected.
 Loopback UDP is **best effort**: traffic is not a billing-grade audit log. The
 bounded collector queue can drop requests during prolonged storage failures, and
 messages can be lost before receipt during restarts or socket pressure. The admin
-dashboard shows last collection time, collector state, received/recorded/rejected
-counts, queue/shutdown drops, write failures and the latest collector error.
+overview ends with a collection status line (collecting, waiting for the first
+visit, quiet for over two days, or stopped); opening it shows received/recorded/
+rejected counts, queue/shutdown drops, write failures and the latest collector
+error.
 Process counters reset on restart; persisted totals do not. User/publishing write
 failures are logged and counted without failing an already-completed publication.
 

@@ -14,11 +14,15 @@ import (
 )
 
 type siteVisitorRow struct {
-	ID      string
-	Name    string
-	Email   string
-	Last    string
-	LastISO string
+	ID       string
+	Name     string
+	Email    string
+	Last     string
+	LastISO  string
+	Initials string
+	Tone     string
+	Views    string
+	ViewsBar string
 	TrafficTotals
 }
 
@@ -49,7 +53,8 @@ func (s *Server) loadSiteAnalytics(ctx context.Context, site string, values url.
 	// These contain platform sign-in information, which is not part of a site's
 	// visitor report. Visitors below use only site-scoped page-view rows.
 	report.People = nil
-	view := newAnalyticsView(report)
+	now := time.Now()
+	view := newAnalyticsView(report, now)
 	view.ShowVisitors = true
 	view.VisitorSearch = strings.TrimSpace(values.Get("visitor-q"))
 	view.VisitorSort = values.Get("visitor-sort")
@@ -58,6 +63,10 @@ func (s *Server) loadSiteAnalytics(ctx context.Context, site string, values url.
 	}
 	view.VisitorSortChoices = choices(view.VisitorSort, [2]string{"views", "Most page views"}, [2]string{"visits", "Most visits"}, [2]string{"recent", "Last visited"}, [2]string{"name", "Name A–Z"})
 	view.AnonymousPageViews = report.Traffic.PageViews
+	var peakViews int64
+	for _, visitor := range report.Users {
+		peakViews = max(peakViews, visitor.PageViews)
+	}
 	for _, visitor := range report.Users {
 		view.AnonymousPageViews -= visitor.PageViews
 		if visitor.PageViews == 0 || visitor.Key == "" {
@@ -75,8 +84,12 @@ func (s *Server) loadSiteAnalytics(ctx context.Context, site string, values url.
 		if view.VisitorSearch != "" && !containsFold(row.Name+" "+row.Email+" "+row.ID, view.VisitorSearch) {
 			continue
 		}
-		row.Last = visitor.LastVisited.UTC().Format("Jan 2, 2006 15:04 UTC")
+		row.Last = relativeTime(visitor.LastVisited, now)
 		row.LastISO = visitor.LastVisited.UTC().Format(time.RFC3339)
+		row.Initials = initials(row.Name)
+		row.Tone = tone(row.ID)
+		row.Views = formatCount(visitor.PageViews)
+		row.ViewsBar = barPercent(visitor.PageViews, peakViews)
 		view.SiteVisitors = append(view.SiteVisitors, row)
 	}
 	slices.SortFunc(view.SiteVisitors, func(a, b siteVisitorRow) int {
@@ -102,6 +115,7 @@ func (s *Server) loadSiteAnalytics(ctx context.Context, site string, values url.
 	if err := paginateSiteVisitors(&view, values); err != nil {
 		return AnalyticsView{}, &siteAnalyticsInputError{err}
 	}
+	s.describeSiteReport(ctx, &view, report, values, now)
 	if reader, ok := s.config.Analytics.(SiteTrafficReader); ok {
 		rows, err := reader.SiteTraffic(ctx, []string{site})
 		if err != nil {
@@ -114,9 +128,50 @@ func (s *Server) loadSiteAnalytics(ctx context.Context, site string, values url.
 					view.Lifetime = &total
 				}
 			}
+			view.Metrics[0].Hint = formatCount(view.Lifetime.PageViews) + " all time"
+			view.Metrics[1].Hint = formatCount(int64(view.Lifetime.Visitors)) + " all time"
+			view.Metrics[2].Hint = formatCount(view.Lifetime.Visits) + " all time"
+			if !view.Lifetime.LastVisited.IsZero() {
+				view.LastVisit = relativeTime(view.Lifetime.LastVisited, now)
+			}
 		}
 	}
 	return view, nil
+}
+
+// describeSiteReport adds headline numbers compared with the previous
+// period, and period links that refresh only the analytics panel.
+func (s *Server) describeSiteReport(ctx context.Context, view *AnalyticsView, report AnalyticsReport, values url.Values, now time.Time) {
+	previous, comparable := s.previousReport(ctx, report.Query)
+	metric := func(label string, current, before int64) metricCard {
+		return newMetric(label, current, before, comparable, view.Comparison)
+	}
+	busiest := metricCard{Label: "Busiest day", Value: "—", Hint: "No page views in this period"}
+	if !view.Chart.Empty {
+		day, views, _ := strings.Cut(view.Chart.Peak, " · ")
+		busiest.Value, busiest.Hint = day, views
+	}
+	view.Metrics = []metricCard{
+		metric("Page views", report.Traffic.PageViews, previous.Traffic.PageViews),
+		metric("People", int64(report.Traffic.Visitors), int64(previous.Traffic.Visitors)),
+		metric("Visits", report.Traffic.Visits, previous.Traffic.Visits),
+		busiest,
+	}
+	if !report.Traffic.LastVisited.IsZero() {
+		view.LastVisit = relativeTime(report.Traffic.LastVisited, now)
+	}
+
+	keep := url.Values{"tab": {"analytics"}}
+	for _, name := range []string{"visitor-q", "visitor-sort"} {
+		if value := values.Get(name); value != "" {
+			keep.Set(name, value)
+		}
+	}
+	view.Periods, view.CustomPeriod = periodChoices(report.Query, now, keep, "/manage/"+view.Site, "/api/hex/manage/sites/"+view.Site+"/analytics")
+	view.CustomAttr = flag("open", view.CustomPeriod)
+	if report.Publications > 0 {
+		view.UpdateSummary = "Updated " + plural(report.Publications, "time") + " in this period"
+	}
 }
 
 func paginateSiteVisitors(view *AnalyticsView, values url.Values) error {
@@ -129,6 +184,10 @@ func paginateSiteVisitors(view *AnalyticsView, values url.Values) error {
 		page = parsed
 	}
 	view.VisitorTotal = len(view.SiteVisitors)
+	view.VisitorSummary = peopleCount(view.VisitorTotal) + " opened this site in the period."
+	if view.VisitorSearch != "" {
+		view.VisitorSummary = peopleCount(view.VisitorTotal) + " match your search."
+	}
 	view.VisitorPages = max(1, (view.VisitorTotal+managePageSize-1)/managePageSize)
 	view.VisitorPage = min(page, view.VisitorPages)
 	link := func(page int) string {
@@ -136,13 +195,17 @@ func paginateSiteVisitors(view *AnalyticsView, values url.Values) error {
 			"tab": {"analytics"}, "from": {view.From}, "until": {view.Until},
 			"visitor-q": {view.VisitorSearch}, "visitor-sort": {view.VisitorSort}, "visitor-page": {strconv.Itoa(page)},
 		}
-		return "/manage/" + view.Site + "?" + query.Encode()
+		return query.Encode()
 	}
+	pageURL := "/manage/" + view.Site + "?"
+	fragment := "/api/hex/manage/sites/" + view.Site + "/analytics?"
 	if view.VisitorPage > 1 {
-		view.VisitorPrevious = link(view.VisitorPage - 1)
+		view.VisitorPrevious = pageURL + link(view.VisitorPage-1)
+		view.VisitorPreviousFragment = fragment + link(view.VisitorPage-1)
 	}
 	if view.VisitorPage < view.VisitorPages {
-		view.VisitorNext = link(view.VisitorPage + 1)
+		view.VisitorNext = pageURL + link(view.VisitorPage+1)
+		view.VisitorNextFragment = fragment + link(view.VisitorPage+1)
 	}
 	start := (view.VisitorPage - 1) * managePageSize
 	view.SiteVisitors = view.SiteVisitors[start:min(start+managePageSize, view.VisitorTotal)]

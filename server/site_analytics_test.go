@@ -44,7 +44,7 @@ func TestPublishersSeeNamedVisitorsAndSiteScopedVisits(t *testing.T) {
 	base := fmt.Sprintf("from=%s&until=%s", day.Format(time.DateOnly), day.AddDate(0, 0, 1).Format(time.DateOnly))
 	for _, path := range []string{"/manage/demo?tab=analytics&", "/api/hex/manage/sites/demo/analytics?"} {
 		body := requestAs(t, server, owner, "GET", path+base+"&site=other&user=elsewhere", nil, 200).Body.String()
-		for _, text := range []string{"Who visited", "Alice &lt;script&gt;", "alice@example.test", "Bob Visitor", "bob@example.test", "All recorded traffic", "no authenticated identity"} {
+		for _, text := range []string{"Who visited", "Alice &lt;script&gt;", "alice@example.test", "Bob Visitor", "bob@example.test", "all time", "could not be"} {
 			if !strings.Contains(body, text) {
 				t.Fatalf("publisher report missing %q: %s", text, body)
 			}

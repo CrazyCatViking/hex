@@ -25,11 +25,6 @@
       <span id="platform-name">{{.Platform}}</span>
     </a>
     <nav class="primary-nav" aria-label="Main">
-      {{if and .Analytics .Viewer}}{{if .Viewer.Admin}}<a
-        href="/admin"
-        aria-current="{{if eq .Active `admin`}}page{{else}}false{{end}}"
-        >Admin</a
-      >{{end}}{{end}}
       <a
         href="/"
         aria-current="{{if eq .Active `home`}}page{{else}}false{{end}}"
@@ -45,6 +40,11 @@
         aria-current="{{if eq .Active `start`}}page{{else}}false{{end}}"
         >Build &amp; publish</a
       >
+      {{if and .Analytics .Viewer}}{{if .Viewer.Admin}}<a
+        href="/admin"
+        aria-current="{{if eq .Active `admin`}}page{{else}}false{{end}}"
+        >Admin</a
+      >{{end}}{{end}}
     </nav>
     {{with .Viewer}}
     <details class="account">
