@@ -17,6 +17,9 @@ import (
 
 var cliObjectSchema = json.RawMessage(`{"type":"object"}`)
 
+// anyResult accepts every result, for endpoints whose output is not under test.
+var anyResult = json.RawMessage(`{}`)
+
 // startIntegrationPlatform runs a platform with integrations, a connector,
 // AI and automations, signed in as a platform admin.
 func startIntegrationPlatform(t *testing.T, calls *atomic.Int32) testPlatform {
@@ -35,7 +38,7 @@ func startIntegrationPlatform(t *testing.T, calls *atomic.Int32) testPlatform {
 			Name: "crm", Title: "CRM", RequiresApproval: true,
 			Endpoints: []hex.IntegrationEndpoint{{
 				Name: "deals", Description: "List deals.",
-				InputSchema: json.RawMessage(`{"type":"object","properties":{"stage":{"type":"string"}},"additionalProperties":false}`),
+				OutputSchema: anyResult, InputSchema: json.RawMessage(`{"type":"object","properties":{"stage":{"type":"string"}},"additionalProperties":false}`),
 				Handler: func(_ context.Context, _ hex.IntegrationCall, input json.RawMessage) (any, error) {
 					calls.Add(1)
 					return map[string]any{"deals": []string{"Acme"}, "input": input}, nil
@@ -45,7 +48,7 @@ func startIntegrationPlatform(t *testing.T, calls *atomic.Int32) testPlatform {
 		{
 			Name: "docs", Title: "Docs", Connector: "docs",
 			Endpoints: []hex.IntegrationEndpoint{{
-				Name: "pages", Description: "List pages.", InputSchema: cliObjectSchema,
+				Name: "pages", Description: "List pages.", OutputSchema: anyResult, InputSchema: cliObjectSchema,
 				Handler: func(ctx context.Context, call hex.IntegrationCall, _ json.RawMessage) (any, error) {
 					_, err := call.HTTPClient(ctx)
 					return nil, err
@@ -56,7 +59,7 @@ func startIntegrationPlatform(t *testing.T, calls *atomic.Int32) testPlatform {
 			Name: "chat", Title: "Chat",
 			Endpoints: []hex.IntegrationEndpoint{{
 				Name: "post", Description: "Post a message.", Write: true,
-				InputSchema: json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}`),
+				OutputSchema: anyResult, InputSchema: json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}`),
 				Handler: func(context.Context, hex.IntegrationCall, json.RawMessage) (any, error) {
 					calls.Add(1)
 					return map[string]string{"ts": "1"}, nil

@@ -75,13 +75,13 @@ func setupAI(t *testing.T, provider hex.AIProvider, limit int) *hex.Server {
 		Name: "crm", Title: "CRM",
 		Endpoints: []hex.IntegrationEndpoint{
 			{
-				Name: "deals", Description: "List deals.", InputSchema: json.RawMessage(`{"type":"object","properties":{"stage":{"type":"string"}}}`),
+				Name: "deals", Description: "List deals.", OutputSchema: anyResult, InputSchema: json.RawMessage(`{"type":"object","properties":{"stage":{"type":"string"}}}`),
 				Handler: func(_ context.Context, call hex.IntegrationCall, input json.RawMessage) (any, error) {
 					return map[string]any{"deals": []string{"Acme"}, "for": call.Identity.ID}, nil
 				},
 			},
 			{
-				Name: "secret", Description: "Restricted.", InputSchema: objectSchema,
+				Name: "secret", Description: "Restricted.", OutputSchema: anyResult, InputSchema: objectSchema,
 				Handler: func(context.Context, hex.IntegrationCall, json.RawMessage) (any, error) { return nil, nil },
 			},
 		},

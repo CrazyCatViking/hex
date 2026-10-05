@@ -284,10 +284,8 @@ func (s *Server) callIntegration(ctx context.Context, caller integrationCaller, 
 	if err != nil {
 		return nil, false, fmt.Errorf("encode %s result: %w", endpoint.qualifiedName(), err)
 	}
-	if endpoint.output != nil {
-		if err := validateActionJSON(endpoint.output, output); err != nil {
-			return nil, false, fmt.Errorf("%s returned an invalid result: %w", endpoint.qualifiedName(), err)
-		}
+	if err := validateActionJSON(endpoint.output, output); err != nil {
+		return nil, false, fmt.Errorf("%s returned an invalid result: %w", endpoint.qualifiedName(), err)
 	}
 	if endpoint.endpoint.CacheTTL > 0 {
 		s.integrationCache.put(cacheKey, output, endpoint.endpoint.CacheTTL)

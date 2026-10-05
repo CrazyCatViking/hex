@@ -32,7 +32,7 @@ func setupAutomations(t *testing.T, grants ...hex.IntegrationGrant) (*hex.Server
 	if err := registry.Register(hex.Integration{
 		Name: "defects", Title: "Defects",
 		Endpoints: []hex.IntegrationEndpoint{{
-			Name: "counts", Description: "Issue counts.", InputSchema: json.RawMessage(`{"type":"object","properties":{"period":{"type":"string"}},"required":["period"]}`),
+			Name: "counts", Description: "Issue counts.", OutputSchema: anyResult, InputSchema: json.RawMessage(`{"type":"object","properties":{"period":{"type":"string"}},"required":["period"]}`),
 			Handler: func(_ context.Context, call hex.IntegrationCall, input json.RawMessage) (any, error) {
 				if call.Automation == "" || call.Identity != nil {
 					t.Errorf("automation calls must not carry a person: %+v", call)
@@ -47,7 +47,7 @@ func setupAutomations(t *testing.T, grants ...hex.IntegrationGrant) (*hex.Server
 		Name: "chat", Title: "Chat",
 		Endpoints: []hex.IntegrationEndpoint{{
 			Name: "post", Description: "Post a message.", Write: true,
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}`),
+			OutputSchema: anyResult, InputSchema: json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}`),
 			Handler: func(_ context.Context, _ hex.IntegrationCall, input json.RawMessage) (any, error) {
 				var message struct{ Text string }
 				if err := json.Unmarshal(input, &message); err != nil {

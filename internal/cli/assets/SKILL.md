@@ -140,7 +140,10 @@ hex integrations list --site my-app --json   # including input/output schemas
 hex integrations catalog                      # every endpoint and its permission
 hex integrations call --site my-app slack.users --input '{"limit":50}'
 hex integrations call --site my-app hubspot.deals --input @query.json
+hex integrations codegen --only hubspot.*,slack.users --out src/hex-integrations.ts   # optional typed wrappers
 ```
+
+For TypeScript apps, prefer generating typed wrappers for the endpoints the app uses: `import { typedIntegrations } from './hex-integrations'; const integrations = typedIntegrations(hex.integrations); await integrations.hubspot.deals({ pipeline: 'default' })`. Regenerate after the platform's integrations change, keep the file out of formatters, and add `hex integrations codegen ... --check` (with `--catalog` from a saved `hex integrations catalog` when the build has no platform sign-in) to CI if the project has one. `hex.integrations.call` remains available for anything not generated.
 
 From an app, `GET /api/sites/<site>/integrations` lists integrations (same shape as `--json`), and `POST /api/sites/<site>/integrations/<integration>/<endpoint>` with a JSON body calls one; the browser client wraps both: `await hex.integrations.list()` and `await hex.integrations.call('crm', 'deals', { stage: 'won' })`. A 409 throws `HexConnectionRequiredError`; `await hex.integrations.connect(error)` opens the platform's connect page in a popup and resolves when it closes, and `hex.integrations.callWithConnect(...)` connects and retries once. Use same-origin requests only.
 

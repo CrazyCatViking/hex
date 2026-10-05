@@ -59,6 +59,7 @@ func (a *App) integrationsCommand() *cobra.Command {
 	}
 
 	command.AddCommand(list, catalog, a.integrationCallCommand(options), a.integrationApprovalsCommand(options))
+	command.AddCommand(a.integrationCodegenCommand(options))
 	command.AddCommand(a.integrationApprovalCommands(options)...)
 	return command
 }
