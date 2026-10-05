@@ -49,6 +49,7 @@ type sitePageView struct {
 	Files     bool
 	Actions   []actionSummary
 	Analytics *AnalyticsView
+	AI        *siteAIView
 }
 
 // actionSummary describes one of a site's actions on its overview.
@@ -221,6 +222,9 @@ func (s *Server) manageSitePage(w http.ResponseWriter, r *http.Request) {
 	if s.automationsEnabled() {
 		tabs = slices.Insert(tabs, 3, siteTab{"automations", "Automations"})
 	}
+	if s.aiAccountingEnabled() {
+		tabs = append(tabs, siteTab{"ai", "AI"})
+	}
 	if s.config.Analytics != nil {
 		tabs = append(tabs, siteTab{"analytics", "Analytics"})
 	}
@@ -250,6 +254,14 @@ func (s *Server) manageSitePage(w http.ResponseWriter, r *http.Request) {
 	view.Sharing = s.sharingView(r.Context(), site, access, exists)
 	view.People = view.Sharing.Entries
 	view.Actions = s.actionSummaries(r.Context(), site)
+	if view.Tab == "ai" {
+		ai, err := s.loadSiteAI(r.Context(), site, identity, r.URL.Query())
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		view.AI = &ai
+	}
 	if view.Tab == "analytics" {
 		analytics, err := s.loadSiteAnalytics(r.Context(), site, r.URL.Query())
 		if err != nil {

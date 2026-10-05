@@ -202,8 +202,8 @@
         {{end}}
       </nav>
 
-      {{with .Analytics}}{{template "site-analytics" .}}{{end}} {{if eq .Tab
-      "overview"}}
+      {{with .Analytics}}{{template "site-analytics" .}}{{end}} {{with
+      .AI}}{{template "site-ai" .}}{{end}} {{if eq .Tab "overview"}}
       <div class="panel-grid">
         <section class="panel" aria-labelledby="about-heading">
           <h2 id="about-heading">About</h2>

@@ -111,6 +111,23 @@ if (element("installer-controls")) {
   updateInstaller();
 }
 
+// A day's tooltip: its own lines from data-tooltip ("title|line|…"), or
+// page views and people for analytics charts.
+function tooltipLines(day) {
+  const lines = day.dataset.tooltip
+    ? day.dataset.tooltip.split("|")
+    : [
+        day.dataset.label,
+        `${day.dataset.views} page views`,
+        `${day.dataset.visitors} people`,
+      ];
+  return lines.map((text, index) => {
+    const element = document.createElement(index === 0 ? "strong" : "span");
+    element.textContent = text;
+    return element;
+  });
+}
+
 // Analytics charts: a tooltip for the day under the pointer. The SVG keeps
 // <title> elements for browsers without JavaScript; they are removed here
 // so two tooltips never show at once.
@@ -132,13 +149,7 @@ function setupTrendCharts(root) {
       day.classList.add("is-active");
       const bounds = plot.getBoundingClientRect();
       const box = day.querySelector(".trend-hit").getBoundingClientRect();
-      const title = document.createElement("strong");
-      title.textContent = day.dataset.label;
-      const views = document.createElement("span");
-      views.textContent = `${day.dataset.views} page views`;
-      const visitors = document.createElement("span");
-      visitors.textContent = `${day.dataset.visitors} people`;
-      tooltip.replaceChildren(title, views, visitors);
+      tooltip.replaceChildren(...tooltipLines(day));
       tooltip.hidden = false;
       const center = box.left - bounds.left + box.width / 2;
       const half = tooltip.offsetWidth / 2;

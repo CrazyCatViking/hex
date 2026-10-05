@@ -10,7 +10,8 @@ provider, err := foundry.New(foundry.Config{
     Credential: managedIdentityCredential, // or APIKey
     Models:     models,                    // foundry.ModelsFromJSON(os.Getenv("HEX_AI_MODELS"))
 })
-config.AI = &hex.AIConfig{Provider: provider, DailyTokenLimit: 2_000_000}
+config.AI = &hex.AIConfig{Provider: provider, Limits: hex.AILimits{PlatformMonthly: 1000, SiteMonthly: 100, PersonMonthly: 20}}
+config.AIUsage = database // PostgreSQL or memory.NewAIUsageStore()
 ```
 
 Included providers:
@@ -25,12 +26,39 @@ A platform can implement `hex.AIProvider` itself: `Models` lists models and `Str
 
 ```json
 [
-  { "id": "claude-opus-5-5", "name": "Claude Opus 5.5", "protocol": "anthropic", "deployment": "claude-opus-5-5", "thinking": true, "tools": true, "images": true, "maxOutputTokens": 64000 },
-  { "id": "gpt-mini", "name": "GPT mini", "protocol": "openai", "deployment": "gpt-mini-prod", "tools": true, "permission": "ai.premium" }
+  { "id": "claude-sonnet-5-5", "name": "Claude Sonnet 5.5", "protocol": "anthropic", "deployment": "claude-sonnet-5-5", "thinking": true, "tools": true, "images": true, "maxOutputTokens": 64000,
+    "price": { "input": 2, "cachedInput": 0.2, "cacheWrite": 2.5, "output": 10 } },
+  { "id": "gpt-mini", "name": "GPT mini", "protocol": "openai", "deployment": "gpt-mini-prod", "tools": true,
+    "price": { "input": 0.25, "output": 2 } }
 ]
 ```
 
-Using AI needs the `ai` permission (`AIConfig.Permission`), granted like any [integration permission](integrations.md#grants); a model's `permission` can require more. `MaxOutputTokens` (default 16000) caps each model call, `MaxToolRounds` (default 8) the server-side tool loop, and `DailyTokenLimit` each person's tokens per UTC day (counted in process).
+Using AI needs the `ai` permission (`AIConfig.Permission`), granted like any [integration permission](integrations.md#grants); a model's `permission` can require more. `MaxOutputTokens` (default 16000) caps each model call and `MaxToolRounds` (default 8) the server-side tool loop.
+
+## Usage, cost and budgets
+
+With `Config.AIUsage`, every model call — each round of a tool loop is one — is stored with its exact token counts as the provider reports them: uncached input, cache reads, cache writes and output (reasoning tokens are part of output). Its cost comes from the model's `price` in US dollars per million tokens; cache reads default to a tenth of the input price and cache writes to 1.25 times it. Records name the site and the person (`user:<id>`) or automation (`automation:<site>/<name>`). When a stream ends without the provider's usage, for example because the app disconnected, usage is estimated from the request and the streamed text and marked as estimated. A model without a price is recorded but not counted against budgets, and the server logs a warning.
+
+Monthly budgets in US dollars (calendar months, UTC) are checked before every model call:
+
+| Budget | Applies to |
+| --- | --- |
+| Platform | All AI spending |
+| Site default, or a site's own limit | Each site, including its automations; a site can also have AI turned off |
+| Person default, or the highest matching override | Each person across all sites; overrides name a `role:`, `group:` or `user:` principal, such as `role:AI.Premium` |
+
+A call is refused with 429 (403 when AI is off for the site) once any budget that applies is used up; the message says which. A call that starts below a limit can end slightly above it. `AIConfig.Limits` sets the starting budgets; platform admins change them, set each site's limit, turn AI off for a site and add overrides in the portal, where saved budgets take precedence.
+
+The portal shows spending:
+
+- **Admin → AI spend** (`/admin/ai`): the platform's month against its budget, daily spending, every site against its limit, spending by model and the top spenders, and the budget forms.
+- Each site's **AI** tab: the site's month against its limit, daily spending, and spending by person, automation and model. Owners see it; platform admins can also change the site's limit and turn AI off.
+
+Costs are what the configured prices say. Reconcile them monthly with Azure Cost Management (Claude in Foundry appears as Marketplace charges); a difference of more than a few percent means a price is out of date. Azure cannot attribute spending to sites or people, which is what these records are for.
+
+## Prompt caching
+
+The Anthropic provider (and Claude through Foundry) caches prompts: one breakpoint on the system prompt and automatic caching of the growing conversation, so each turn reads the earlier ones from the cache at a fraction of the input price. Short prompts below the model's minimum (512 to 4,096 tokens) are simply not cached. Turn it off with `DisablePromptCaching`. OpenAI-compatible models cache automatically on the provider's side; their cached tokens are recorded and priced the same way.
 
 ## Requests and events
 

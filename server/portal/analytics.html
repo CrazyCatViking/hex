@@ -98,6 +98,8 @@
             aria-current="{{if eq .Section `users`}}page{{else}}false{{end}}"
             >People</a
           >
+          {{if .AISpend}}<a href="/admin/ai" aria-current="false">AI spend</a
+          >{{end}}
         </nav>
         {{end}}
 

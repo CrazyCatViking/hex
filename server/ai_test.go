@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
@@ -24,7 +25,7 @@ type scriptedProvider struct {
 
 func (p *scriptedProvider) Models(context.Context) ([]hex.AIModel, error) {
 	return []hex.AIModel{
-		{ID: "general", Name: "General", Thinking: true, Tools: true, MaxOutputTokens: 4000},
+		{ID: "general", Name: "General", Thinking: true, Tools: true, MaxOutputTokens: 4000, Price: &hex.AIPrice{Input: 1, Output: 5}},
 		{ID: "premium", Name: "Premium", Tools: true, Permission: "ai.premium"},
 	}, nil
 }
@@ -68,7 +69,7 @@ func assistantTurn(stop string, content ...hex.AIContent) []hex.AIEvent {
 	)
 }
 
-func setupAI(t *testing.T, provider hex.AIProvider, limit int) *hex.Server {
+func setupAI(t *testing.T, provider hex.AIProvider, limits hex.AILimits) (*hex.Server, *memory.AIUsageStore) {
 	t.Helper()
 	registry := new(hex.IntegrationRegistry)
 	if err := registry.Register(hex.Integration{
@@ -88,15 +89,18 @@ func setupAI(t *testing.T, provider hex.AIProvider, limit int) *hex.Server {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	return hex.New(hex.Config{
+	usage := memory.NewAIUsageStore()
+	server := hex.New(hex.Config{
 		Identity: easyauth.Resolver{}, Access: memory.NewAccessStore(),
 		Integrations: registry, IntegrationStore: memory.NewIntegrationStore(),
 		IntegrationGrants: []hex.IntegrationGrant{
 			{Principal: "*", Permissions: []string{"ai", "crm.deals"}},
 			{Principal: "role:Premium", Permissions: []string{"ai.premium"}},
 		},
-		AI: &hex.AIConfig{Provider: provider, MaxToolRounds: 3, DailyTokenLimit: limit},
+		AI:      &hex.AIConfig{Provider: provider, MaxToolRounds: 3, Limits: limits},
+		AIUsage: usage,
 	})
+	return server, usage
 }
 
 func readEvents(t *testing.T, body string) []hex.AIEvent {
@@ -125,7 +129,7 @@ func TestAIStreamRunsIntegrationTools(t *testing.T) {
 			hex.AIContent{Type: hex.ContentToolCall, ToolCallID: "call-2", Name: "crm__secret", Input: json.RawMessage(`{}`)}),
 		assistantTurn(hex.StopEndTurn, hex.AIContent{Type: hex.ContentText, Text: "Acme won."}),
 	}}
-	server := setupAI(t, provider, 0)
+	server, usage := setupAI(t, provider, hex.AILimits{})
 	person := roleHeaders("person")
 
 	models := requestAs(t, server, person, "GET", "/api/sites/demo/ai/models", nil, 200)
@@ -167,6 +171,59 @@ func TestAIStreamRunsIntegrationTools(t *testing.T) {
 	if last.Type != hex.EventDone || last.StopReason != hex.StopEndTurn || last.Usage.InputTokens != 20 {
 		t.Fatalf("unexpected final event: %+v", last)
 	}
+
+	totals, err := usage.AIUsageTotals(context.Background(), hex.AIUsageFilter{Site: "demo"}, hex.GroupByCaller)
+	if err != nil || len(totals) != 1 || totals[0].Key != "user:person" || totals[0].Calls != 2 || totals[0].CostMicros != 70 {
+		t.Fatalf("each model call must be recorded with its cost: %+v %v", totals, err)
+	}
+}
+
+func TestAIBudgets(t *testing.T) {
+	turn := func() []hex.AIEvent {
+		return assistantTurn(hex.StopEndTurn, hex.AIContent{Type: hex.ContentText, Text: "Hi"})
+	}
+	provider := &scriptedProvider{turns: [][]hex.AIEvent{turn(), turn(), turn(), turn(), turn(), turn()}}
+	// Each call costs 35 micro-dollars; sites may spend 100.
+	server, usage := setupAI(t, provider, hex.AILimits{SiteMonthly: 0.0001, PersonMonthly: 0.00004})
+	body := []byte(`{"model":"general","messages":[{"role":"user","content":[{"type":"text","text":"Hi"}]}]}`)
+	call := func(headers http.Header, site string, want int) string {
+		t.Helper()
+		return requestAs(t, server, headers, "POST", "/api/sites/"+site+"/ai/complete", body, want).Body.String()
+	}
+
+	alice := roleHeaders("alice")
+	call(alice, "demo", 200)
+	call(alice, "demo", 200)
+	if refused := call(alice, "demo", 429); !strings.Contains(refused, "Your AI budget") {
+		t.Fatalf("unexpected refusal: %s", refused)
+	}
+
+	// A role override lifts the person limit; the site limit still applies.
+	limit := int64(1_000_000)
+	if err := usage.PutAIBudget(context.Background(), hex.AIBudget{Scope: hex.BudgetPerson, Subject: "role:Premium", LimitMicros: &limit}); err != nil {
+		t.Fatal(err)
+	}
+	rich := roleHeaders("rich", "Premium")
+	call(rich, "demo", 200)
+	if refused := call(rich, "demo", 429); !strings.Contains(refused, "This site's AI budget") {
+		t.Fatalf("the site limit did not apply: %s", refused)
+	}
+	call(rich, "other", 200)
+
+	if err := usage.PutAIBudget(context.Background(), hex.AIBudget{Scope: hex.BudgetSite, Subject: "other", Disabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if refused := call(rich, "other", 403); !strings.Contains(refused, "turned off") {
+		t.Fatalf("AI was not turned off for the site: %s", refused)
+	}
+
+	platform := int64(140)
+	if err := usage.PutAIBudget(context.Background(), hex.AIBudget{Scope: hex.BudgetPlatform, LimitMicros: &platform}); err != nil {
+		t.Fatal(err)
+	}
+	if refused := call(rich, "third", 429); !strings.Contains(refused, "The platform's AI budget") {
+		t.Fatalf("the platform limit did not apply: %s", refused)
+	}
 }
 
 func TestAIReturnsAppToolsAndEnforcesLimits(t *testing.T) {
@@ -174,7 +231,8 @@ func TestAIReturnsAppToolsAndEnforcesLimits(t *testing.T) {
 		assistantTurn(hex.StopToolUse,
 			hex.AIContent{Type: hex.ContentToolCall, ToolCallID: "call-1", Name: "pick_color", Input: json.RawMessage(`{}`)}),
 	}}
-	server := setupAI(t, provider, 15)
+	// Each scripted call costs 10 input and 5 output tokens: 35 micro-dollars.
+	server, _ := setupAI(t, provider, hex.AILimits{PersonMonthly: 0.00003})
 	person := roleHeaders("person")
 
 	body := `{"model":"general","messages":[{"role":"user","content":[{"type":"text","text":"Pick"}]}],

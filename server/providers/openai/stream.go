@@ -89,8 +89,11 @@ type chunk struct {
 		FinishReason *string `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
+		PromptTokens        int `json:"prompt_tokens"`
+		CompletionTokens    int `json:"completion_tokens"`
+		PromptTokensDetails *struct {
+			CachedTokens int `json:"cached_tokens"`
+		} `json:"prompt_tokens_details"`
 	} `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
@@ -115,7 +118,15 @@ func (s *stream) handle(data string) error {
 		return fmt.Errorf("chat completion stream error: %s", parsed.Error.Message)
 	}
 	if parsed.Usage != nil {
-		s.usage = hex.AIUsage{InputTokens: parsed.Usage.PromptTokens, OutputTokens: parsed.Usage.CompletionTokens}
+		// Prompt tokens include the cached ones, which are priced separately.
+		cached := 0
+		if parsed.Usage.PromptTokensDetails != nil {
+			cached = min(parsed.Usage.PromptTokensDetails.CachedTokens, parsed.Usage.PromptTokens)
+		}
+		s.usage = hex.AIUsage{
+			InputTokens: parsed.Usage.PromptTokens - cached, CachedInputTokens: cached,
+			OutputTokens: parsed.Usage.CompletionTokens,
+		}
 	}
 	if len(parsed.Choices) == 0 {
 		return nil

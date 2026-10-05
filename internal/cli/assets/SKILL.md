@@ -179,7 +179,7 @@ The HTTP API is `GET /api/sites/<site>/ai/models`, `POST /api/sites/<site>/ai/st
 
 - Stream events are `text` and `thinking` deltas, `tool_call`, `tool_result` (an integration tool the server ran), `message` (a complete message to append to the conversation), `done` (`stopReason`: `end_turn`, `max_tokens`, `tool_use` or `refusal`, plus `usage`) and `error`. Keep the conversation by appending every `message` event's message in order, including thinking blocks unchanged, and send the whole list next turn.
 - `integrationTools` offers integration endpoints to the model; the server runs them with the viewer's own permissions and approvals and leaves out endpoints the viewer may not use. Tools defined in `tools` are the app's: on `stopReason: "tool_use"` run them, add `tool_result` blocks to the last user message (it may already hold the server's results), and continue.
-- Show thinking only when the user wants it. Handle 403 (no AI permission), 429 (daily allowance used or rate limit) and `error` events in the UI.
+- Show thinking only when the user wants it. Handle 403 (no AI permission, or AI turned off for the site), 429 (a monthly AI budget is used up, or rate limiting; the message says which) and `error` events in the UI.
 
 ## Automations
 
