@@ -79,6 +79,12 @@ func (d *Database) Migrate(ctx context.Context) error {
 	if err := d.migrateAnalytics(ctx); err != nil {
 		return err
 	}
+	if err := d.migrateIntegrations(ctx); err != nil {
+		return err
+	}
+	if err := d.migrateAutomations(ctx); err != nil {
+		return err
+	}
 	return d.migrateSitePolicies(ctx)
 }
 

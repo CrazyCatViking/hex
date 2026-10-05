@@ -99,6 +99,12 @@ type Project struct {
 	// Actions are operations the app exposes to the CLI and agents, performed
 	// by the platform on the app's documents. The platform validates them.
 	Actions json.RawMessage `json:"actions,omitempty"`
+	// Automations are scheduled or on-demand step lists the platform runs
+	// as the site; more can live one per file in automations/*.json.
+	Automations json.RawMessage `json:"automations,omitempty"`
+	// automations is what publishing sends: nil when the project defines
+	// none, which leaves automations deployed through the API unchanged.
+	automations *[]hex.Automation
 	// ClientID and TenantID come from the platform profile and select the
 	// CLI's own browser sign-in.
 	ClientID     string          `json:"-"`

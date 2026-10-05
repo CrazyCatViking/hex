@@ -90,6 +90,17 @@ As browser request hygiene, state-changing API requests require `X-Hex-Request: 
 | PUT | `/api/sites/{site}/db/{collection}/{id}` | Replace/upsert JSON object → `{id,data,createdBy?}` |
 | DELETE | `/api/sites/{site}/db/{collection}/{id}` | Delete (204) |
 | GET | `/api/sites/{site}/realtime/{channel}` | WebSocket upgrade |
+| GET | `/api/sites/{site}/integrations` | Integrations and endpoint contracts, marked `allowed` for the caller; see [Integrations](integrations.md) |
+| POST | `/api/sites/{site}/integrations/{integration}/{endpoint}` | Call an integration endpoint |
+| GET | `/api/sites/{site}/ai/models` | Models the caller may use; see [AI](ai.md) |
+| POST | `/api/sites/{site}/ai/stream`, `/api/sites/{site}/ai/complete` | A model turn as server-sent events, or its complete result |
+| GET | `/api/hex/integrations`, `/api/hex/integration-approvals` | Integration catalog; admins' approval list |
+| POST/PUT/DELETE | `/api/hex/sites/{site}/integrations/{integration}/approval` | Request, approve or revoke an integration for a site |
+| GET/DELETE | `/api/hex/connections`, `/api/hex/connections/{connector}` | The caller's connected accounts; disconnect |
+| GET | `/api/hex/connections/{connector}/start`, `.../callback` | OAuth authorization code flow for connected accounts |
+| GET/PUT | `/api/hex/sites/{site}/automations` | Owners: list or replace automations; see [Automations](automations.md) |
+| POST | `/api/hex/sites/{site}/automations/test`, `.../automations/{name}/run` | Run a posted definition or a deployed automation |
+| GET | `/api/hex/sites/{site}/automations/{name}/runs`, `/api/hex/sites/{site}/automation-runs/{id}` | Run history and one run |
 
 Publishing routes exist only when a `SitePublisher` is configured. Registered API handlers return errors as `{ "error": "..." }`. Unknown API routes and methods use standard Go HTTP routing responses. Disabled capability APIs have no routes; the platform landing page remains available. Published website responses, redirects, MIME types, conditional requests and range requests are handled by NGINX. Go serves its built-in platform UI/assets and authorized favicon previews, not published website paths. The client handles both JSON and non-JSON errors.
 
@@ -128,6 +139,10 @@ The PostgreSQL provider exposes `Migrate`; the reference executable calls it on 
 `AccessStore` persists one `SiteAccess` policy per site and returns `hex.ErrNotFound` for sites without one, which stay open. The PostgreSQL provider stores policies as JSON in `hex_site_policies`; the in-memory store is for development and tests. Authorization reads current policies without a replica-local cache. Enforcement covers the `/api/sites/{site}/` namespace and its data rules, discovery, publishing, and — through NGINX `auth_request` against `/api/hex/authz` — static assets and path rules. App origins are additionally restricted to their own data namespace; management APIs belong on the platform API host. Policies are managed by their owners and by `Config.AdminGroups` members, directly or through publications.
 
 `UpdateSiteAccess(ctx, site, update)` atomically reads the current policy, runs the authorization/update callback, and commits its result. A nil result deletes the policy; an error preserves it. Callbacks receive detached values and must not reenter the store. All writers, including `PutSiteAccess` and `DeleteSiteAccess`, must serialize with it across instances, even for absent names. PostgreSQL uses transaction-scoped advisory locks plus row locks; memory uses a mutex. Custom providers must supply equivalent semantics.
+
+### Integrations and automations
+
+`IntegrationStore` keeps integration approvals per `(site, integration)` and sealed connected-account credentials per `(owner, connector)`; credentials are opaque bytes the server encrypts. `AutomationStore` keeps each site's automations with their next run and the latest runs; `ClaimAutomation` must atomically move `nextRun` from the expected value to the next one and report whether the caller won, which is how instances avoid running an occurrence twice. PostgreSQL stores them in `hex_integration_approvals`, `hex_integration_credentials`, `hex_automations` and `hex_automation_runs`.
 
 ### Realtime
 

@@ -9,7 +9,7 @@ This is the [github.com/crazycatviking/hex](https://github.com/crazycatviking/he
 | Path | Purpose |
 | --- | --- |
 | `server/` | Embeddable Go HTTP API framework |
-| `server/providers/` | Local storage, Azure Files publishing, Azure Blob Storage, PostgreSQL, in-memory and Easy Auth identity providers |
+| `server/providers/` | Local storage, Azure Files publishing, Azure Blob Storage, PostgreSQL, in-memory and Easy Auth identity providers, the Foundry, Anthropic and OpenAI model providers, and the Key Vault credential sealer |
 | `server/dev/` | Optional local provider adapter for consuming Go applications |
 | `cmd/hex-server/` | Configurable reference server executable |
 | `packages/client/` | `@crazycatviking/hex`, a dependency-free browser JS/TS client |
@@ -139,6 +139,21 @@ channel.close();
 
 Clients use the current origin by default. Local frontend development should proxy `/api/` and WebSockets to the server rather than introduce cross-origin cookie authentication. `baseURL` is available for non-browser clients and tests.
 
+## Integrations, AI and automations
+
+A platform can register **integrations** — typed endpoints over third-party systems such as GitHub, Slack or a CRM — that apps call through `hex.integrations.call(...)`. Each endpoint needs a permission granted to the caller, typically through Entra ID app roles, and sensitive integrations need a platform admin to approve each site. Integrations either use a platform credential or, where the third-party system has its own per-user permissions, the caller's own **connected account**, which the platform's OAuth broker keeps for them. See [Integrations, grants and connected accounts](docs/integrations.md).
+
+The **AI** capability streams model responses — text, thinking and tool calls — through `hex.ai.stream(...)` and `hex.ai.conversation(...)`, with the platform's provider (Azure AI Foundry, Anthropic or OpenAI-compatible). Models can use integration endpoints as tools, run on the server with the caller's own grants. See [AI](docs/ai.md).
+
+**Automations** are JSON definitions in an app's hex.json or `automations/` directory that run on a schedule or on demand: they call integration endpoints, run the site's actions, ask a model, and read or save the site's documents, passing values between steps with templates. They run as the site, with grants of their own. See [Automations](docs/automations.md).
+
+```sh
+hex integrations list --site my-app
+hex connections connect atlassian
+hex ai ask --site my-app --model claude-opus-5-5 "Summarize open bugs" --tools azuredevops.bugs
+hex automations test weekly-report
+```
+
 ## Embed the Go framework
 
 ```go
@@ -201,6 +216,7 @@ The interfaces are defined in `server/storage.go`:
 - `Database`: site-scoped JSON documents with keyset pagination and server-recorded creators. The PostgreSQL provider works with Azure Database for PostgreSQL or another PostgreSQL installation.
 - `Realtime`: subscriptions and JSON broadcasts, allowing a future distributed broker implementation without changing the browser API.
 - `IdentityResolver` and `AccessStore` (in `server/identity.go` and `server/access.go`): optional gateway-forwarded caller identity and per-site access policies. See [Identity and site access control](docs/access-control.md).
+- `IntegrationRegistry`, `IntegrationStore` and `AutomationStore` (in `server/integrations.go`, `server/connections.go` and `server/automations.go`): third-party integrations, approvals and connected accounts, and scheduled automations. `AIProvider` (in `server/ai.go`) answers model requests. The PostgreSQL and in-memory providers implement the stores.
 - `AnalyticsStore` (in `server/analytics.go`): optional platform-owned user activity, publishing lifecycle and daily nginx traffic aggregates. Platform admins use `/admin`; site owners get an Analytics tab. See [platform analytics](docs/analytics.md) for independent PostgreSQL storage and traffic collection.
 
 See [the architecture and API contract](docs/architecture.md) for provider semantics and [the hosting contract](docs/hosting.md) for platform independence and reference-server configuration.
@@ -255,4 +271,4 @@ The end-to-end test requires NGINX. It starts Go and NGINX, publishes through th
 - Documents are JSON objects, at most 1 MiB. `set` replaces the entire document. Lists are ordered by ID, with up to 100 results per page. There is no query language or automatic database-change feed.
 - Application file uploads through the API default to 32 MiB and are buffered in memory. Site publishing has its own limits (by default 256 MiB per file and 2 GiB per site). File and site listings are currently unpaginated.
 - Publishing replaces one site's changed files in place, uploads `index.html` last and deletes obsolete files on completion. It is not a transactional whole-site replacement. Concurrent publishers are not coordinated. Republish after an interrupted publication.
-- No custom integrations, code generation or AI proxy is included in this version.
+- Integrations, AI and automations are frameworks: the platform registers integrations in Go and configures a model provider, and apps use them through typed endpoints. See [Integrations](docs/integrations.md), [AI](docs/ai.md) and [Automations](docs/automations.md). The in-process AI token budget and integration cache are per instance.

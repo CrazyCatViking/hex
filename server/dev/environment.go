@@ -2,6 +2,7 @@ package dev
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"net"
@@ -233,6 +234,43 @@ func (e *Environment) openProviders(ctx context.Context, settings settings) erro
 		e.closers = append(e.closers, collector.Close)
 	}
 	e.configureIdentity(settings)
+	return e.configurePlatformFeatures()
+}
+
+// configurePlatformFeatures prepares integrations, connected accounts and
+// automations. The consuming server registers its integrations in
+// Config.Integrations and may configure Config.AI. Locally every grant is
+// open unless HEX_INTEGRATION_GRANTS says otherwise, and without
+// HEX_CREDENTIAL_KEY connected accounts last until the server restarts.
+func (e *Environment) configurePlatformFeatures() error {
+	e.Config.Integrations = new(hex.IntegrationRegistry)
+	grants, err := hex.ParseIntegrationGrants(value("HEX_INTEGRATION_GRANTS", `{"*":["*"]}`))
+	if err != nil {
+		return fmt.Errorf("HEX_INTEGRATION_GRANTS: %w", err)
+	}
+	e.Config.IntegrationGrants = grants
+
+	if configured := os.Getenv("HEX_CREDENTIAL_KEY"); configured != "" {
+		key, err := hex.ParseCredentialKey(configured)
+		if err != nil {
+			return fmt.Errorf("HEX_CREDENTIAL_KEY: %w", err)
+		}
+		e.Config.CredentialKey = key
+	} else {
+		key := make([]byte, 32)
+		if _, err := rand.Read(key); err != nil {
+			return fmt.Errorf("generate a local credential key: %w", err)
+		}
+		e.Config.CredentialKey = key
+	}
+
+	if database, ok := e.Config.Database.(*postgres.Database); ok {
+		e.Config.IntegrationStore = database
+		e.Config.Automations = database
+		return nil
+	}
+	e.Config.IntegrationStore = memory.NewIntegrationStore()
+	e.Config.Automations = memory.NewAutomationStore()
 	return nil
 }
 

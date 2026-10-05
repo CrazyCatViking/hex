@@ -37,6 +37,9 @@ type publishRequest struct {
 	Metadata *hex.SiteMetadata `json:"metadata,omitempty"`
 	Access   json.RawMessage   `json:"access,omitempty"`
 	Actions  json.RawMessage   `json:"actions,omitempty"`
+	// Automations is omitted, not empty, for projects without any, so the
+	// platform keeps automations deployed through the API.
+	Automations *[]hex.Automation `json:"automations,omitempty"`
 }
 
 type publishPlan struct {
@@ -73,7 +76,13 @@ func readSource(project, directory string) (sourceDirectory, error) {
 		return source, errors.New("publish directory must be the project root or a subdirectory of the project")
 	}
 	source.Files, err = collectFiles(source.Directory, func(path string, entry fs.DirEntry) bool {
-		return source.Directory == project && filepath.Dir(path) == project && rootProjectFile(entry.Name())
+		if source.Directory != project || filepath.Dir(path) != project {
+			return false
+		}
+		if entry.IsDir() {
+			return entry.Name() == automationsDirectory
+		}
+		return rootProjectFile(entry.Name())
 	})
 	if err != nil {
 		return source, err
@@ -166,6 +175,10 @@ func (a *App) publish(ctx context.Context, project Project, directory, name stri
 	if err := a.checkPublication(ctx, source.Files, nil, assumeYes); err != nil {
 		return publishResult{}, err
 	}
+	project.automations, err = projectAutomations(directory, project)
+	if err != nil {
+		return publishResult{}, err
+	}
 	metadata := &hex.SiteMetadata{
 		Title:        project.Title,
 		Description:  project.Description,
@@ -184,7 +197,10 @@ func (a *App) publishFiles(ctx context.Context, project Project, name string, so
 		return result, err
 	}
 
-	request := publishRequest{Files: files, Metadata: metadata, Access: access, Actions: project.Actions}
+	request := publishRequest{
+		Files: files, Metadata: metadata, Access: access,
+		Actions: project.Actions, Automations: project.automations,
+	}
 	sitePath := "/api/hex/sites/" + name + "/publish"
 
 	data, err := a.apiCall(ctx, project, http.MethodPost, sitePath, request)

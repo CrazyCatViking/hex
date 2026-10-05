@@ -171,7 +171,7 @@ func (a *App) rawGet(ctx context.Context, project Project, address string) (*htt
 		if response.StatusCode == http.StatusUnauthorized {
 			return nil, errors.New("authentication required; run hex login in a terminal")
 		}
-		return nil, &apiStatusError{Status: response.StatusCode, Message: apiErrorMessage(response)}
+		return nil, apiResponseError(response)
 	}
 	return response, nil
 }

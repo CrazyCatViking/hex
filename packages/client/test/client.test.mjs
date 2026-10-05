@@ -1,6 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createHexClient, HexError } from "../dist/index.js";
+import {
+  createHexClient,
+  HexConnectionRequiredError,
+  HexError,
+} from "../dist/index.js";
 
 test("client encodes keys, sends the request marker and preserves binary data", async () => {
   const calls = [];
@@ -118,4 +122,371 @@ test("database operations preserve envelopes and report structured failures", as
     calls.at(-1).url,
     "/api/sites/demo/db/tasks?after=last&limit=20",
   );
+});
+
+function sseResponse(chunks, { signal } = {}) {
+  const encoder = new TextEncoder();
+  let index = 0;
+  const body = new ReadableStream({
+    pull(controller) {
+      if (signal?.aborted) {
+        controller.error(signal.reason);
+        return;
+      }
+      if (index >= chunks.length) {
+        controller.close();
+        return;
+      }
+      controller.enqueue(encoder.encode(chunks[index++]));
+    },
+  });
+  return new Response(body, {
+    headers: { "Content-Type": "text/event-stream" },
+  });
+}
+
+function sse(events) {
+  return events
+    .map(
+      (event) =>
+        `event: ${event.type}\r\ndata: ${JSON.stringify(event)}\r\n\r\n`,
+    )
+    .join(": keep-alive\n\n");
+}
+
+// Splits text into chunks at awkward places, including inside CRLF pairs
+// and multi-byte characters.
+function chop(text, size = 7) {
+  const bytes = new TextEncoder().encode(text);
+  const chunks = [];
+  for (let start = 0; start < bytes.length; start += size) {
+    chunks.push(bytes.slice(start, start + size));
+  }
+  return chunks;
+}
+
+function byteResponse(chunks) {
+  let index = 0;
+  return new Response(
+    new ReadableStream({
+      pull(controller) {
+        if (index >= chunks.length) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(chunks[index++]);
+      },
+    }),
+  );
+}
+
+const assistant = (content) => ({ role: "assistant", content });
+
+test("AI streams parse events split across chunks", async () => {
+  const events = [
+    { type: "thinking", text: "Hmm… ✓" },
+    { type: "text", text: "Hei" },
+    { type: "text", text: " på deg" },
+    {
+      type: "message",
+      message: assistant([{ type: "text", text: "Hei på deg" }]),
+    },
+    {
+      type: "done",
+      stopReason: "end_turn",
+      usage: { inputTokens: 3, outputTokens: 2 },
+    },
+  ];
+  const calls = [];
+  const hex = createHexClient({
+    site: "demo",
+    fetch: async (url, init) => {
+      calls.push({ url, init });
+      return byteResponse(chop(sse(events) + 'data: {"type":\n', 5).concat([]));
+    },
+  });
+
+  const request = {
+    model: "general",
+    messages: [{ role: "user", content: [{ type: "text", text: "Hei" }] }],
+    thinking: { effort: "high", show: true },
+  };
+  const seen = [];
+  for await (const event of hex.ai.stream(request)) {
+    seen.push(event);
+    if (seen.length === events.length) {
+      break;
+    }
+  }
+  assert.deepEqual(seen, events);
+  assert.equal(calls[0].url, "/api/sites/demo/ai/stream");
+  assert.equal(calls[0].init.headers.get("Accept"), "text/event-stream");
+  assert.equal(calls[0].init.headers.get("X-Hex-Request"), "1");
+  assert.deepEqual(JSON.parse(calls[0].init.body), request);
+
+  const text = await createHexClient({
+    site: "demo",
+    fetch: async () => byteResponse(chop(sse(events), 3)),
+  })
+    .ai.stream(request)
+    .text();
+  assert.equal(text, "Hei på deg");
+});
+
+test("multi-line data and comments follow the event stream format", async () => {
+  const hex = createHexClient({
+    site: "demo",
+    fetch: async () =>
+      sseResponse([
+        ": hello\r",
+        '\nevent: text\ndata: {"type":"text",\n',
+        'data: "text":"a"}\n\n',
+        'data: {"type":"done","stopReason":"end_turn"}\r\r',
+      ]),
+  });
+  const seen = [];
+  for await (const event of hex.ai.stream({ model: "m", messages: [] })) {
+    seen.push(event);
+  }
+  assert.deepEqual(seen, [
+    { type: "text", text: "a" },
+    { type: "done", stopReason: "end_turn" },
+  ]);
+});
+
+test("stream error events reach iterators and reject the helpers", async () => {
+  const events = [
+    { type: "text", text: "partial" },
+    { type: "error", error: "the model request failed" },
+  ];
+  const hex = createHexClient({
+    site: "demo",
+    fetch: async () => sseResponse([sse(events)]),
+  });
+  const seen = [];
+  for await (const event of hex.ai.stream({ model: "m", messages: [] })) {
+    seen.push(event.type);
+  }
+  assert.deepEqual(seen, ["text", "error"]);
+  await assert.rejects(
+    hex.ai.stream({ model: "m", messages: [] }).finalMessages(),
+    (error) => error instanceof HexError && error.status === 502,
+  );
+});
+
+test("aborting a stream stops reading", async () => {
+  const controller = new AbortController();
+  const hex = createHexClient({
+    site: "demo",
+    fetch: async (url, init) => {
+      assert.equal(init.signal, controller.signal);
+      return sseResponse(
+        [
+          sse([{ type: "text", text: "a" }]),
+          sse([{ type: "text", text: "b" }]),
+        ],
+        { signal: controller.signal },
+      );
+    },
+  });
+  const seen = [];
+  await assert.rejects(async () => {
+    for await (const event of hex.ai.stream(
+      { model: "m", messages: [] },
+      { signal: controller.signal },
+    )) {
+      seen.push(event.text);
+      controller.abort(new Error("stopped"));
+    }
+  });
+  assert.deepEqual(seen, ["a"]);
+});
+
+test("integration calls report accounts that need connecting", async () => {
+  const calls = [];
+  const hex = createHexClient({
+    site: "demo",
+    fetch: async (url, init) => {
+      calls.push({ url, init });
+      if (url.endsWith("/docs/me")) {
+        return new Response(
+          JSON.stringify({
+            error: "connect your Docs account to use this",
+            connect: {
+              connector: "docs",
+              title: "Docs",
+              url: "https://hex.example/api/hex/connections/docs/start",
+            },
+          }),
+          { status: 409 },
+        );
+      }
+      return new Response('{"deals":[]}');
+    },
+  });
+
+  assert.deepEqual(
+    await hex.integrations.call("crm", "deals", { stage: "won" }),
+    { deals: [] },
+  );
+  assert.equal(calls[0].url, "/api/sites/demo/integrations/crm/deals");
+  assert.deepEqual(JSON.parse(calls[0].init.body), { stage: "won" });
+  await assert.rejects(
+    hex.integrations.call("CRM", "deals"),
+    /Invalid integration/,
+  );
+
+  await assert.rejects(hex.integrations.call("docs", "me"), (error) => {
+    assert.ok(error instanceof HexConnectionRequiredError);
+    assert.ok(error instanceof HexError);
+    assert.equal(error.status, 409);
+    assert.equal(error.connect.connector, "docs");
+    return true;
+  });
+});
+
+test("connect opens a popup and resolves when it closes", async () => {
+  const popup = { closed: false };
+  const opened = [];
+  globalThis.open = (url) => {
+    opened.push(url);
+    setTimeout(() => {
+      popup.closed = true;
+    }, 10);
+    return popup;
+  };
+  try {
+    const hex = createHexClient({
+      site: "demo",
+      fetch: async () => new Response("{}"),
+    });
+    await hex.integrations.connect({
+      connector: "docs",
+      title: "Docs",
+      url: "https://hex.example/api/hex/connections/docs/start",
+    });
+    assert.deepEqual(opened, [
+      "https://hex.example/api/hex/connections/docs/start",
+    ]);
+  } finally {
+    delete globalThis.open;
+  }
+});
+
+test("conversations run app tools and merge their results with server results", async () => {
+  const requests = [];
+  const turns = [
+    [
+      { type: "text", text: "Checking" },
+      {
+        type: "message",
+        message: assistant([
+          {
+            type: "tool_call",
+            toolCallId: "s1",
+            name: "crm__deals",
+            input: {},
+          },
+          {
+            type: "tool_call",
+            toolCallId: "a1",
+            name: "pick_color",
+            input: { from: ["red", "blue"] },
+          },
+          { type: "tool_call", toolCallId: "a2", name: "fails", input: {} },
+        ]),
+      },
+      {
+        type: "tool_result",
+        content: { type: "tool_result", toolCallId: "s1", text: "[]" },
+      },
+      {
+        type: "message",
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", toolCallId: "s1", text: "[]" }],
+        },
+      },
+      {
+        type: "done",
+        stopReason: "tool_use",
+        usage: { inputTokens: 10, outputTokens: 4 },
+      },
+    ],
+    [
+      {
+        type: "message",
+        message: assistant([{ type: "text", text: "Blue it is." }]),
+      },
+      {
+        type: "done",
+        stopReason: "end_turn",
+        usage: { inputTokens: 20, outputTokens: 3 },
+      },
+    ],
+  ];
+  const hex = createHexClient({
+    site: "demo",
+    fetch: async (url, init) => {
+      requests.push(JSON.parse(init.body));
+      return sseResponse([sse(turns.shift())]);
+    },
+  });
+
+  const picked = [];
+  const chat = hex.ai.conversation({
+    model: "general",
+    integrationTools: ["crm.*"],
+    tools: {
+      pick_color: {
+        description: "Pick a color.",
+        inputSchema: { type: "object" },
+        run: async (input) => {
+          picked.push(input);
+          return { color: "blue" };
+        },
+      },
+      fails: {
+        description: "Always fails.",
+        inputSchema: { type: "object" },
+        run: () => {
+          throw new Error("no luck");
+        },
+      },
+    },
+  });
+  const deltas = [];
+  const turn = await chat.send("Pick a color", {
+    onEvent: (event) => event.type === "text" && deltas.push(event.text),
+  });
+
+  assert.deepEqual(turn, {
+    text: "Blue it is.",
+    stopReason: "end_turn",
+    usage: { inputTokens: 30, outputTokens: 7 },
+  });
+  assert.deepEqual(deltas, ["Checking"]);
+  assert.deepEqual(picked, [{ from: ["red", "blue"] }]);
+  assert.deepEqual(
+    requests[0].tools.map((tool) => tool.name),
+    ["pick_color", "fails"],
+  );
+  assert.deepEqual(requests[0].integrationTools, ["crm.*"]);
+
+  const second = requests[1].messages;
+  assert.equal(second.length, 3);
+  assert.deepEqual(
+    second[2].content.map((content) => [
+      content.toolCallId,
+      content.isError ?? false,
+    ]),
+    [
+      ["s1", false],
+      ["a1", false],
+      ["a2", true],
+    ],
+  );
+  assert.equal(second[2].content[1].text, '{"color":"blue"}');
+  assert.equal(second[2].content[2].text, "no luck");
+  assert.equal(chat.messages.length, 4);
 });

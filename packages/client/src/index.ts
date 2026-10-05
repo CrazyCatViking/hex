@@ -1,5 +1,19 @@
+import { createAI } from "./ai.js";
+import { HexError, jsonBody, responseError } from "./http.js";
+import { createIntegrations } from "./integrations.js";
+
+export * from "./ai.js";
+export * from "./http.js";
+export * from "./integrations.js";
+
 export interface Capabilities {
   analytics?: boolean;
+  /** Third-party integrations are configured. */
+  integrations?: boolean;
+  /** Integrations can call with the viewer's own connected accounts. */
+  connections?: boolean;
+  ai?: boolean;
+  automations?: boolean;
   version: number;
   files: boolean;
   database: boolean;
@@ -74,17 +88,6 @@ export interface RealtimeOptions<T> {
   onError?: (event: Event) => void;
 }
 
-export class HexError extends Error {
-  constructor(
-    public readonly status: number,
-    message: string,
-    options?: ErrorOptions,
-  ) {
-    super(message, options);
-    this.name = "HexError";
-  }
-}
-
 function validateName(value: string): string {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(value)) {
     throw new Error(`Invalid Hex identifier: ${value}`);
@@ -103,23 +106,6 @@ function encodeFilePath(value: string): string {
   }
 
   return parts.map(encodeURIComponent).join("/");
-}
-
-function jsonBody(method: string, data: unknown): RequestInit {
-  return {
-    method,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  };
-}
-
-async function responseError(response: Response): Promise<HexError> {
-  try {
-    const body = (await response.json()) as { error?: string };
-    return new HexError(response.status, body.error ?? response.statusText);
-  } catch (cause) {
-    return new HexError(response.status, response.statusText, { cause });
-  }
 }
 
 function connectChannel<T>(url: URL, options: RealtimeOptions<T>) {
@@ -278,6 +264,8 @@ export function createHexClient(options: ClientOptions) {
       },
     },
     db: { collection },
+    integrations: createIntegrations(request, root),
+    ai: createAI(request, root),
     realtime: {
       connect<T = unknown>(channel: string, options: RealtimeOptions<T>) {
         const path = `${root}/realtime/${validateName(channel)}`;

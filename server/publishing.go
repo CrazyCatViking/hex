@@ -66,6 +66,9 @@ type publishRequest struct {
 	// Actions are the app's declared actions; omitting them removes
 	// earlier ones.
 	Actions []DeclaredAction `json:"actions,omitempty"`
+	// Automations replace the site's automations; null leaves them
+	// unchanged, so older publishers keep existing automations.
+	Automations *[]Automation `json:"automations,omitempty"`
 }
 
 type publishPlan struct {
@@ -191,6 +194,12 @@ func (s *Server) completePublish(w http.ResponseWriter, r *http.Request) {
 		writeServerError(w, err)
 		return
 	}
+	if request.Automations != nil {
+		if err := s.replaceAutomations(r.Context(), site, *request.Automations, identity); err != nil {
+			writeServerError(w, err)
+			return
+		}
+	}
 
 	result := publishResult{Name: site, Deleted: deleted, Access: savedAccess}
 	if siteURL, err := s.siteURL(site); err == nil {
@@ -237,6 +246,11 @@ func (s *Server) unpublishSite(w http.ResponseWriter, r *http.Request) {
 
 	s.recordPublication(r.Context(), site)
 	if err := s.config.Publisher.DeleteSite(r.Context(), site); err != nil {
+		writeServerError(w, err)
+		return
+	}
+	// An unpublished site must not keep acting on a schedule.
+	if err := s.replaceAutomations(r.Context(), site, nil, identity); err != nil {
 		writeServerError(w, err)
 		return
 	}
@@ -326,6 +340,16 @@ func (s *Server) readPublishRequest(w http.ResponseWriter, r *http.Request) (pub
 	if err := s.validateDeclaredActions(r.PathValue("site"), request.Actions); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return request, false
+	}
+	if request.Automations != nil {
+		if err := ValidateAutomations(*request.Automations); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return request, false
+		}
+		if len(*request.Automations) > 0 && !s.automationsEnabled() {
+			writeError(w, http.StatusBadRequest, "this platform cannot run automations")
+			return request, false
+		}
 	}
 	return request, true
 }

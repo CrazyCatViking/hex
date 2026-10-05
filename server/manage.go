@@ -110,6 +110,7 @@ func (s *Server) registerManageRoutes() {
 		s.mux.HandleFunc("GET /api/hex/manage/sites/{site}/files", s.manageFiles)
 		s.mux.HandleFunc("DELETE /api/hex/manage/sites/{site}/files/{key...}", s.manageDeleteFile)
 	}
+	s.registerManageAutomationRoutes()
 }
 
 // managePage lists the sites and files the viewer owns, filtered by kind and
@@ -217,6 +218,9 @@ func (s *Server) manageSitePage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tabs := slices.Clone(siteTabs)
+	if s.automationsEnabled() {
+		tabs = slices.Insert(tabs, 3, siteTab{"automations", "Automations"})
+	}
 	if s.config.Analytics != nil {
 		tabs = append(tabs, siteTab{"analytics", "Analytics"})
 	}

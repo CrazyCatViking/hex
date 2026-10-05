@@ -312,6 +312,23 @@
         </div>
         {{end}}
       </section>
+      {{end}} {{if eq .Tab "automations"}}
+      <section class="panel" aria-labelledby="automations-heading">
+        <h2 id="automations-heading">Automations</h2>
+        <p class="muted">
+          Work the app does on a schedule, defined in its project and deployed
+          with it. A test is a dry run: it reads and asks as usual but does not
+          post, save or change anything.
+        </p>
+        <div
+          hx-get="/api/hex/manage/sites/{{.Site.Name}}/automations"
+          hx-trigger="load"
+          hx-swap="outerHTML"
+        >
+          <p class="muted">Loading…</p>
+        </div>
+        <div id="automation-detail" aria-live="polite"></div>
+      </section>
       {{end}} {{if eq .Tab "history"}}
       <section class="panel" aria-labelledby="history-heading">
         <h2 id="history-heading">History</h2>
@@ -638,6 +655,169 @@ it.{{end}} {{end}} {{define "person"}}
   </div>
   {{else}}
   <p class="muted">No uploaded files.</p>
+  {{end}}
+</div>
+{{end}} {{define "automations"}}
+<div class="automations">
+  {{if .Automations}}
+  <ul class="action-list automation-list">
+    {{range .Automations}}
+    <li>
+      <div class="action-main">
+        <code>{{.Name}}</code>
+        {{with .Description}}<span>{{.}}</span>{{end}}
+        <span class="muted"
+          >{{if .Disabled}}Turned off{{else}}{{.Schedule}}{{if .Cron}}
+          ({{.Timezone}}){{end}}{{end}}</span
+        >
+        {{if .NextRuns}}
+        <span class="muted"
+          >Next: {{range $index, $run := .NextRuns}}{{if $index}} · {{end}}<time
+            datetime="{{$run.ISO}}"
+            >{{$run.When}}</time
+          >{{if eq $index 0}} ({{$run.Relative}}){{end}}{{end}}</span
+        >
+        {{end}}
+        <ol class="automation-steps">
+          {{range .Steps}}
+          <li>
+            <code>{{.ID}}</code> {{.Kind}} <code>{{.Target}}</code>{{range
+            .Notes}} <span class="muted">· {{.}}</span>{{end}}
+          </li>
+          {{end}}
+        </ol>
+        {{with .LastRun}}
+        <span class="automation-last"
+          ><span class="status-dot status-{{.Tone}}" aria-hidden="true"></span>
+          Last run {{.Status}}{{if .DryRun}} (test){{end}}
+          <time datetime="{{.ISO}}">{{.When}}</time></span
+        >
+        {{end}}
+      </div>
+      <div class="row-actions">
+        <button
+          type="button"
+          class="button button-secondary button-small"
+          hx-post="/api/hex/manage/sites/{{$.Site}}/automations/{{.Name}}/run"
+          hx-target="#automation-detail"
+        >
+          Test
+        </button>
+        <button
+          type="button"
+          class="button button-secondary button-small"
+          hx-post="/api/hex/manage/sites/{{$.Site}}/automations/{{.Name}}/run?live=true"
+          hx-confirm="Run {{.Name}} now? It will post, save and change things for real."
+          hx-target="#automation-detail"
+        >
+          Run now
+        </button>
+        <button
+          type="button"
+          class="button button-secondary button-small"
+          hx-get="/api/hex/manage/sites/{{$.Site}}/automations/{{.Name}}/runs"
+          hx-target="#automation-detail"
+        >
+          History
+        </button>
+      </div>
+    </li>
+    {{end}}
+  </ul>
+  {{else}}
+  <p class="muted">
+    This app has no automations. Add them to its hex.json or an
+    <code>automations/</code> folder and publish, or run
+    <code>hex automations deploy</code>.
+  </p>
+  {{end}}
+</div>
+{{end}} {{define "automation-run"}}
+<div
+  class="automation-run"
+  {{if
+  .Running}}hx-get="/api/hex/manage/sites/{{.Site}}/automation-runs/{{.Run.ID}}"
+  hx-trigger="load delay:1s"
+  hx-swap="outerHTML"
+  {{end}}
+>
+  <h3>
+    <span class="status-dot status-{{.Run.Tone}}" aria-hidden="true"></span>
+    {{.Automation}}: {{if .Running}}running…{{else}}{{.Run.Status}}{{end}} {{if
+    .Run.DryRun}}<span class="tag">Test</span>{{end}}
+  </h3>
+  <p class="muted">
+    Started <time datetime="{{.Run.ISO}}">{{.Run.When}}</time>{{with .Run.By}}
+    by {{.}}{{end}}{{with .Run.Duration}} · took {{.}}{{end}}
+  </p>
+  {{with .Run.Error}}
+  <p class="automation-error">{{.}}</p>
+  {{end}} {{if .Steps}}
+  <ol class="automation-results">
+    {{range .Steps}}
+    <li>
+      <details>
+        <summary>
+          <span class="status-dot status-{{.Tone}}" aria-hidden="true"></span>
+          <code>{{.ID}}</code> {{.Status}}
+          <span class="muted">{{.Duration}}</span>
+        </summary>
+        {{with .Error}}
+        <p class="automation-error">{{.}}</p>
+        {{end}} {{with .Output}}
+        <pre>{{.}}</pre>
+        {{end}}
+      </details>
+    </li>
+    {{end}}
+  </ol>
+  {{end}}
+</div>
+{{end}} {{define "automation-runs"}}
+<div class="automation-run">
+  <h3>Recent runs of {{.Automation}}</h3>
+  {{if .Runs}}
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th scope="col">Started</th>
+          <th scope="col">How</th>
+          <th scope="col">Result</th>
+          <th scope="col">Took</th>
+          <th scope="col"><span class="visually-hidden">Details</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Runs}}
+        <tr>
+          <td><time datetime="{{.ISO}}">{{.When}}</time></td>
+          <td>
+            {{if eq .Trigger "schedule"}}On schedule{{else if
+            .DryRun}}Test{{else}}By hand{{end}}{{with .By}} · {{.}}{{end}}
+          </td>
+          <td>
+            <span class="status-dot status-{{.Tone}}" aria-hidden="true"></span>
+            {{.Status}}
+          </td>
+          <td>{{if .Duration}}{{.Duration}}{{else}}—{{end}}</td>
+          <td class="row-actions">
+            <button
+              type="button"
+              class="button button-secondary button-small"
+              hx-get="/api/hex/manage/sites/{{$.Site}}/automation-runs/{{.ID}}"
+              hx-target="#automation-detail"
+            >
+              View
+            </button>
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <p class="muted">It has not run yet.</p>
   {{end}}
 </div>
 {{end}}

@@ -73,6 +73,9 @@
         </ul>
         {{end}}
         <a class="menu-link" href="/manage">Your sites</a>
+        {{if $.Connections}}<a class="menu-link" href="/connections"
+          >Connected accounts</a
+        >{{end}}
         <a class="menu-link" href="/.auth/logout">Sign out</a>
       </div>
     </details>

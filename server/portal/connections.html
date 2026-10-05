@@ -1,0 +1,121 @@
+{{define "connections"}}
+<!doctype html>
+<html lang="en">
+  <head>
+    {{template "head" (printf "%s · Connected accounts" .Platform)}}
+  </head>
+  <body hx-headers='{"X-Hex-Request":"1"}'>
+    {{template "header" .Chrome}}
+    <main id="main" class="page">
+      <section class="page-heading">
+        <div>
+          <p class="eyebrow">Your account</p>
+          <h1>Connected accounts</h1>
+          <p class="lead">
+            Some apps read from other systems as you, so you only see what you
+            are allowed to see there. The platform keeps these sign-ins
+            encrypted, never shows them to apps, and forgets one after
+            {{.IdleExpiry}} without use.
+          </p>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="mine-heading">
+        <h2 id="mine-heading">Your connections</h2>
+        <ul class="action-list">
+          {{range .Mine}}{{template "connection-row" .}}{{end}}
+        </ul>
+      </section>
+
+      {{if .Admin}}
+      <section class="panel" aria-labelledby="everyone-heading">
+        <h2 id="everyone-heading">Everyone's connections</h2>
+        <p class="muted">
+          As a platform admin you can remove anyone's connection, for example
+          when they leave. They can connect again if they still have access.
+        </p>
+        {{if .Everyone}}
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th scope="col">Person</th>
+                <th scope="col">Service</th>
+                <th scope="col">Account</th>
+                <th scope="col">Connected</th>
+                <th scope="col">Last used</th>
+                <th scope="col">
+                  <span class="visually-hidden">Actions</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {{range .Everyone}}
+              <tr>
+                <td>{{.Person}}</td>
+                <td>{{.Title}}</td>
+                <td>{{if .Account}}{{.Account}}{{else}}—{{end}}</td>
+                <td>{{.ConnectedAt}}</td>
+                <td>{{.LastUsed}}</td>
+                <td class="row-actions">
+                  <button
+                    type="button"
+                    class="button button-secondary button-small"
+                    hx-delete="/api/hex/manage/connections/{{.Connector}}/{{.Owner}}"
+                    hx-confirm="Remove {{.Person}}'s {{.Title}} connection?"
+                    hx-target="closest tr"
+                    hx-swap="outerHTML"
+                  >
+                    Remove
+                  </button>
+                </td>
+              </tr>
+              {{end}}
+            </tbody>
+          </table>
+        </div>
+        {{else}}
+        <p class="muted">Nobody has connected an account yet.</p>
+        {{end}}
+      </section>
+      {{end}}
+    </main>
+    {{template "footer" .Chrome}}
+  </body>
+</html>
+{{end}} {{define "connection-row"}}
+<li>
+  <div class="action-main">
+    <strong>{{.Title}}</strong>
+    {{with .Description}}<span class="muted">{{.}}</span>{{end}} {{if
+    .Connected}}
+    <span
+      ><span
+        class="status-dot status-ok connection-dot"
+        aria-hidden="true"
+      ></span>
+      Connected{{with .Account}} as {{.}}{{end}} since {{.ConnectedAt}} · last
+      used {{.LastUsed}}</span
+    >
+    {{else}}
+    <span class="muted">Not connected</span>
+    {{end}}
+  </div>
+  <div class="row-actions">
+    {{if .Connected}}
+    <button
+      type="button"
+      class="button button-secondary button-small"
+      hx-delete="/api/hex/manage/connections/{{.Connector}}"
+      hx-confirm="Disconnect {{.Title}}? Apps that read from it as you stop working until you connect again."
+      hx-target="closest li"
+      hx-swap="outerHTML"
+    >
+      Disconnect
+    </button>
+    {{else}}
+    <a class="button button-small" href="{{.ConnectURL}}">Connect</a>
+    {{end}}
+  </div>
+</li>
+{{end}}

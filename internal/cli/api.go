@@ -25,6 +25,7 @@ var errAPIResponseTooLarge = errors.New("JSON response from Hex exceeds 16 MiB")
 type apiStatusError struct {
 	Status  int
 	Message string
+	Body    json.RawMessage
 }
 
 func (e *apiStatusError) Error() string {
@@ -62,6 +63,67 @@ func (a *App) apiCall(ctx context.Context, project Project, method, path string,
 }
 
 func (a *App) apiSend(ctx context.Context, project Project, method, path string, payload io.Reader, size int64, contentType string) (json.RawMessage, error) {
+	// Uploads can take longer than the default request timeout.
+	long := payload != nil && contentType != "application/json"
+	return a.apiSendWith(ctx, project, long, method, path, payload, size, contentType)
+}
+
+// apiCallWithoutTimeout is apiCall for requests that may take minutes,
+// such as model answers; the context still bounds them.
+func (a *App) apiCallWithoutTimeout(ctx context.Context, project Project, method, path string, body any) (json.RawMessage, error) {
+	data, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	return a.apiSendWith(ctx, project, true, method, path, bytes.NewReader(data), int64(len(data)), "application/json")
+}
+
+func (a *App) apiSendWith(ctx context.Context, project Project, withoutTimeout bool, method, path string, payload io.Reader, size int64, contentType string) (json.RawMessage, error) {
+	request, err := a.newAPIRequest(ctx, project, method, path, payload, size, contentType)
+	if err != nil {
+		return nil, err
+	}
+
+	client := a.HTTP
+	if withoutTimeout {
+		streaming := *a.HTTP
+		streaming.Timeout = 0
+		client = &streaming
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer closeLogged(a.Err, response.Body)
+
+	if err := gatewayError(response); err != nil {
+		return nil, err
+	}
+	if response.StatusCode == http.StatusNoContent {
+		return nil, nil
+	}
+	accepted := response.StatusCode == http.StatusOK || response.StatusCode == http.StatusCreated || response.StatusCode == http.StatusAccepted
+	if !accepted {
+		return nil, apiResponseError(response)
+	}
+	if !strings.Contains(response.Header.Get("Content-Type"), "application/json") {
+		return nil, errors.New("expected a JSON response from Hex")
+	}
+	data, err := io.ReadAll(io.LimitReader(response.Body, maxAPIResponseBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxAPIResponseBytes {
+		return nil, errAPIResponseTooLarge
+	}
+	if !json.Valid(data) {
+		return nil, errors.New("invalid JSON response from Hex")
+	}
+	return data, nil
+}
+
+// newAPIRequest builds an authenticated request for the platform API.
+func (a *App) newAPIRequest(ctx context.Context, project Project, method, path string, payload io.Reader, size int64, contentType string) (*http.Request, error) {
 	server, err := origin(project.Server, true)
 	if err != nil {
 		return nil, err
@@ -83,43 +145,7 @@ func (a *App) apiSend(ctx context.Context, project Project, method, path string,
 	if token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
-
-	client := a.HTTP
-	if payload != nil && contentType != "application/json" {
-		// Uploads can take longer than the default request timeout.
-		streaming := *a.HTTP
-		streaming.Timeout = 0
-		client = &streaming
-	}
-	response, err := client.Do(request)
-	if err != nil {
-		return nil, err
-	}
-	defer closeLogged(a.Err, response.Body)
-
-	if requiresBrowser(response.StatusCode) {
-		return nil, fmt.Errorf("gateway access requires authentication or permission (HTTP %d); run hex login, or set HEX_TOKEN", response.StatusCode)
-	}
-	if response.StatusCode == http.StatusNoContent {
-		return nil, nil
-	}
-	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusCreated {
-		return nil, &apiStatusError{Status: response.StatusCode, Message: apiErrorMessage(response)}
-	}
-	if !strings.Contains(response.Header.Get("Content-Type"), "application/json") {
-		return nil, errors.New("expected a JSON response from Hex")
-	}
-	data, err := io.ReadAll(io.LimitReader(response.Body, maxAPIResponseBytes+1))
-	if err != nil {
-		return nil, err
-	}
-	if len(data) > maxAPIResponseBytes {
-		return nil, errAPIResponseTooLarge
-	}
-	if !json.Valid(data) {
-		return nil, errors.New("invalid JSON response from Hex")
-	}
-	return data, nil
+	return request, nil
 }
 
 // apiToken returns HEX_TOKEN or uses the platform's configured sign-in flow.
@@ -198,18 +224,41 @@ func (a *App) azureAccessToken(ctx context.Context, resource string) (string, er
 	return strings.TrimSpace(string(output)), nil
 }
 
-func apiErrorMessage(response *http.Response) string {
+// gatewayError reports responses that need a browser sign-in. A JSON error
+// from Hex itself, such as a missing permission, is returned as such, so
+// the caller sees why the platform refused.
+func gatewayError(response *http.Response) error {
+	if !requiresBrowser(response.StatusCode) {
+		return nil
+	}
+	if response.StatusCode == http.StatusForbidden || response.StatusCode == http.StatusUnauthorized {
+		var status *apiStatusError
+		if errors.As(apiResponseError(response), &status) && status.Message != "" {
+			return status
+		}
+	}
+	return fmt.Errorf("gateway access requires authentication or permission (HTTP %d); run hex login, or set HEX_TOKEN", response.StatusCode)
+}
+
+// apiResponseError reads a failed response's JSON error, keeping the body
+// for commands that act on more than the message.
+func apiResponseError(response *http.Response) error {
+	statusError := &apiStatusError{Status: response.StatusCode}
 	if !strings.Contains(response.Header.Get("Content-Type"), "application/json") {
-		return ""
+		return statusError
+	}
+	data, err := io.ReadAll(io.LimitReader(response.Body, 8<<10))
+	if err != nil {
+		return statusError
 	}
 	var body struct {
 		Error string `json:"error"`
 	}
-	data, err := io.ReadAll(io.LimitReader(response.Body, 8<<10))
-	if err != nil || json.Unmarshal(data, &body) != nil {
-		return ""
+	if json.Unmarshal(data, &body) == nil {
+		statusError.Message = body.Error
+		statusError.Body = data
 	}
-	return body.Error
+	return statusError
 }
 
 func (a *App) sitesCommand() *cobra.Command {

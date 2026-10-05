@@ -1,6 +1,6 @@
 ---
 name: hex
-description: Build and publish web apps on Hex using its file storage, JSON document database, and realtime channels. Use when working in a Hex project with hex.json.
+description: Build and publish web apps on Hex using its file storage, JSON document database, realtime channels, third-party integrations, built-in AI models and scheduled automations. Use when working in a Hex project with hex.json.
 ---
 
 # Hex apps
@@ -130,6 +130,90 @@ channel.close();
 
 Messages are JSON, limited to 64 KiB, and delivered to connected subscribers including the sender. Channels are scoped by site. They are transient, not durable queues. Slow clients disconnect. Handle disconnects explicitly; no automatic reconnect or history replay is provided. For live database UIs, save first and then broadcast an invalidation message; reload authoritative state from the database on connect and invalidation.
 
+## Integrations
+
+Platforms can offer typed integrations with third-party systems (for example Slack, GitHub, Azure DevOps, Sentry, HubSpot or BigQuery). The platform calls the third-party API itself: apps never hold credentials and there is no raw proxy. Each integration has named endpoints with JSON Schema input contracts. Check `capabilities.integrations`, then discover what the viewer may use:
+
+```sh
+hex integrations list --site my-app          # endpoints, allowed flags, approval and connection state
+hex integrations list --site my-app --json   # including input/output schemas
+hex integrations catalog                      # every endpoint and its permission
+hex integrations call --site my-app slack.users --input '{"limit":50}'
+hex integrations call --site my-app hubspot.deals --input @query.json
+```
+
+From an app, `GET /api/sites/<site>/integrations` lists integrations (same shape as `--json`), and `POST /api/sites/<site>/integrations/<integration>/<endpoint>` with a JSON body calls one; the browser client wraps both: `await hex.integrations.list()` and `await hex.integrations.call('crm', 'deals', { stage: 'won' })`. A 409 throws `HexConnectionRequiredError`; `await hex.integrations.connect(error)` opens the platform's connect page in a popup and resolves when it closes, and `hex.integrations.callWithConnect(...)` connects and retries once. Use same-origin requests only.
+
+- Every endpoint needs a permission such as `hubspot.deals`, granted by platform administrators to users, groups or Entra app roles. It is separate from site access policies; you cannot grant it in hex.json. Expect 403 and explain in the UI which access to request; use the `allowed` flag to hide unavailable features.
+- Endpoints marked `write` change data in the other system and need the site's editor role.
+- Some integrations require a platform admin to approve each site (`requiresApproval`). A site owner asks with `hex integrations request --site my-app hubspot --reason "..."`; admins use `hex integrations approvals`, `approve` and `revoke`. Until approved, calls answer 403.
+- Results are shaped and may be cached briefly by the platform; do not poll endpoints in tight loops.
+
+## Connected accounts
+
+Some integrations (for example Azure DevOps, Atlassian Confluence or Google Tasks) call the other system as the viewer, so its own permissions apply. The viewer connects their account once through the platform; tokens stay on the server. Such integrations list a `connection` with `connected` and a `connectURL`. When an endpoint answers 409 with `{"error", "connect": {"connector", "title", "url"}}`, open `connect.url` in a popup or new tab (add `?return=<the app URL>` to come back) and retry after it closes. From the CLI:
+
+```sh
+hex connections list
+hex connections connect atlassian    # opens the browser; the same platform sign-in is used
+hex connections disconnect atlassian
+```
+
+Never ask users for third-party passwords or tokens.
+
+## AI models
+
+When `capabilities.ai` is true the platform offers language models through one streaming interface, whichever provider answers. Use it instead of calling model APIs from the browser; never embed API keys.
+
+```sh
+hex ai models --site my-app
+hex ai ask --site my-app --model <id> --thinking medium --show-thinking "Summarize open bugs"
+hex ai ask --site my-app --tools azuredevops.bugs,sentry.issues "Which bugs are new this week?"
+hex ai ask --site my-app --json "Hi"    # the complete answer as JSON
+```
+
+The HTTP API is `GET /api/sites/<site>/ai/models`, `POST /api/sites/<site>/ai/stream` (server-sent events) and `POST /api/sites/<site>/ai/complete` (one JSON answer). The browser client wraps them: `hex.ai.models()`, `hex.ai.complete(request)`, `hex.ai.stream(request, { signal })` (an async iterable of events with `text()` and `finalMessages()` helpers), and `hex.ai.conversation({ model, system, thinking, integrationTools, tools: { name: { description, inputSchema, run } } })`, whose `send(text, { onEvent })` keeps the history, runs app tools and continues automatically — prefer it for chat UIs. A request is `{ model, system?, messages, tools?, thinking?: { effort?: "low"|"medium"|"high"|"xhigh"|"max", show? }, maxTokens?, integrationTools?: ["crm.*", ...] }`. Messages are `{ role: "user"|"assistant", content: [blocks] }` with blocks `text`, `image` (`mediaType`, base64 `data`), `thinking`, `tool_call` (`toolCallId`, `name`, `input`) and `tool_result` (`toolCallId`, `text`, `isError`); the last message must come from the user.
+
+- Stream events are `text` and `thinking` deltas, `tool_call`, `tool_result` (an integration tool the server ran), `message` (a complete message to append to the conversation), `done` (`stopReason`: `end_turn`, `max_tokens`, `tool_use` or `refusal`, plus `usage`) and `error`. Keep the conversation by appending every `message` event's message in order, including thinking blocks unchanged, and send the whole list next turn.
+- `integrationTools` offers integration endpoints to the model; the server runs them with the viewer's own permissions and approvals and leaves out endpoints the viewer may not use. Tools defined in `tools` are the app's: on `stopReason: "tool_use"` run them, add `tool_result` blocks to the last user message (it may already hold the server's results), and continue.
+- Show thinking only when the user wants it. Handle 403 (no AI permission), 429 (daily allowance used or rate limit) and `error` events in the UI.
+
+## Automations
+
+Automations run work on a schedule or on demand without server code, as the site itself rather than a person. Declare them in hex.json under `automations`, or one per file as `automations/<name>.json` (the name defaults to the file name). `hex publish` deploys them and never publishes the `automations/` folder; `hex automations deploy` deploys them without republishing. A project that declares no automations leaves deployed ones unchanged; `"automations": []` removes them all.
+
+```json
+{
+  "name": "weekly-defects",
+  "description": "Post the weekly defect summary",
+  "schedule": "0 8 * * MON",
+  "timezone": "Europe/Oslo",
+  "steps": [
+    { "id": "counts", "call": "sentry.issue-counts", "input": { "statsPeriod": "7d" } },
+    { "id": "summary", "ai": { "model": "<id>", "prompt": "Summarize: {{ steps.counts.output | json }}" } },
+    { "id": "post", "if": "steps.counts.output.total | gt(0)", "call": "slack.post-message",
+      "input": { "channel": "#dev", "text": "Week {{ now.week }}: {{ steps.summary.output.text }}" } },
+    { "id": "archive", "save": { "collection": "reports", "id": "week-{{ now.week }}", "data": { "total": "{{ steps.counts.output.total }}" } } }
+  ]
+}
+```
+
+- `schedule` is a five-field cron expression or `@daily`/`@weekly`/`@hourly`, at most every 5 minutes, in `timezone` (IANA, default UTC). Without a schedule the automation only runs when triggered. `"disabled": true` pauses it.
+- Each step has a unique `id` and exactly one of `call` (`<integration>.<endpoint>` with `input`), `action` (a site action with `input`), `ai` (`model`, `prompt`, optional `system`, `maxTokens`, `thinking`, `tools`), `query` (`collection`, `where` equality on top-level fields, `limit` up to 1000; output is `[{ id, data }]`) or `save` (`collection`, optional `id`, `data` object). `if` skips a step when falsy; `forEach` repeats it for each item of a list, exposing `item` and `index`, and its output is the list of outputs. A step stops the run when it fails.
+- Templates: any string may contain `{{ expression }}`. A string that is exactly one placeholder becomes the JSON value; otherwise the text is inserted. Values are paths (`steps.<id>.output...`, `item`, `index`, `site`, `automation`, `run.trigger`, `run.dryRun`, `now.date|time|iso|year|month|day|monthDay|weekday|week|yesterday|weekStart|previousWeekStart|previousWeekEnd|unix`) or literals, followed by filters: `length`, `json`, `join(", ")`, `default("x")`, `first`, `last`, `limit(n)`, `upper`, `lower`, `truncate(n)`, `map("field")`, `where("field", value)`, `sum("field")`, `round(n)`, `eq(v)`, `ne(v)`, `gt(n)`, `lt(n)`, `not`, `date("DD.MM.YYYY")`. Missing paths are null; steps may only refer to earlier steps.
+- Automations need integration permissions granted to `site:<name>` by platform administrators, and site approval where required. They cannot use connected-account integrations. Saved documents have `createdBy` `automation:<name>`.
+
+```sh
+hex automations list
+hex automations test weekly-defects          # runs the local definition as a dry run: writes, actions and saves are skipped
+hex automations test weekly-defects --live   # performs them
+hex automations deploy
+hex automations run weekly-defects [--dry-run]
+hex automations runs weekly-defects --limit 5
+```
+
+Always dry-run with `hex automations test` before deploying or running live, and ask the user before running automations that post messages or change data.
+
 ## Errors and publishing
 
 Catch `HexError` for HTTP failures (`status` and `message`). A 404 means a missing object or unavailable capability. Network and authentication redirect failures can be ordinary errors. Never insert untrusted text using innerHTML.
@@ -144,4 +228,4 @@ Set `"discoverable": false` in hex.json for an app that should not appear in the
 
 To share a single report, export or build without creating an app, use `hex publish <file or folder without hex.json> -n "<title>"`: it prints a private link only the user can open, `--with user:<email>` or `--with group:<object id>` shares it, and `--update <site>` replaces its content at the same link. Ask the user who should see it before adding `--with`. `hex sites --mine` lists the user's sites. Publishing refuses node_modules, .git and secret-looking files such as .env or *.pem, and asks before more than 100 files or 20 MB; pass `--yes` only after the user agrees.
 
-All API commands, including `fetch`, `data`, `files` and `actions`, use the saved platform sign-in or an operator-supplied `HEX_TOKEN`. Never store tokens in app files or hex.json. Hex does not implement AI calls or code generation yet.
+All API commands, including `fetch`, `data`, `files`, `actions`, `integrations`, `ai` and `automations`, use the saved platform sign-in or an operator-supplied `HEX_TOKEN`. Never store tokens in app files or hex.json.

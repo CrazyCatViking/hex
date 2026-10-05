@@ -1,11 +1,13 @@
 package hex
 
 import (
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type Config struct {
@@ -36,6 +38,25 @@ type Config struct {
 	MaxPublishBytes     int64
 	Connection          *ConnectionConfig
 	CLIReleaseURL       string
+
+	// Integrations are the platform's third-party systems, called by apps,
+	// AI tool use and automations. IntegrationGrants gives principals their
+	// endpoint permissions. IntegrationStore keeps site approvals and
+	// connected accounts, whose tokens CredentialSealer encrypts; a 32-byte
+	// CredentialKey configures a local KeySealer instead. Connections
+	// unused for ConnectionIdleExpiry (90 days by default) are removed.
+	Integrations         *IntegrationRegistry
+	IntegrationGrants    []IntegrationGrant
+	IntegrationStore     IntegrationStore
+	CredentialSealer     CredentialSealer
+	CredentialKey        []byte
+	ConnectionIdleExpiry time.Duration
+
+	// AI enables streaming model access for apps and automations.
+	AI *AIConfig
+	// Automations stores declared automations and their runs; the host
+	// runs the scheduler with Server.RunBackground.
+	Automations AutomationStore
 }
 
 type Server struct {
@@ -45,6 +66,11 @@ type Server struct {
 	analyticsFailures     atomic.Uint64
 	analyticsBootstrap    sync.Mutex
 	analyticsBootstrapped bool
+	integrationCache      responseCache
+	connectionLocks       sync.Map
+	aiUsage               usageMeter
+	stateSealer           *KeySealer
+	automationRuns        sync.WaitGroup
 }
 
 func New(config Config) *Server {
@@ -61,10 +87,25 @@ func New(config Config) *Server {
 		config.MaxPublishBytes = 2 << 30
 	}
 
+	if config.CredentialSealer == nil && len(config.CredentialKey) > 0 {
+		sealer, err := NewKeySealer(config.CredentialKey)
+		if err != nil {
+			slog.Error("connected accounts disabled: invalid credential key", "error", err)
+		} else {
+			config.CredentialSealer = sealer
+		}
+	}
+	// crypto/rand does not fail on supported platforms.
+	stateSealer, err := newRandomKeySealer()
+	if err != nil {
+		panic(err)
+	}
+
 	server := &Server{
-		config: config,
-		mux:    http.NewServeMux(),
-		seen:   peopleSeen{entries: make(map[string]seenPerson)},
+		config:      config,
+		mux:         http.NewServeMux(),
+		seen:        peopleSeen{entries: make(map[string]seenPerson)},
+		stateSealer: stateSealer,
 	}
 	server.registerRoutes()
 
@@ -142,7 +183,11 @@ func (s *Server) registerRoutes() {
 		s.mux.HandleFunc("GET /api/sites", s.listSites)
 	}
 
+	s.registerIntegrationRoutes()
+	s.registerAIRoutes()
+	s.registerAutomationRoutes()
 	s.registerManageRoutes()
+	s.registerPortalConnectionRoutes()
 	s.registerAnalyticsRoutes()
 }
 
@@ -157,7 +202,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if !s.allowAppAPI(w, r) {
 			return
 		}
-		if !platformDownloadNavigation(r) && !authorizationSubrequest(r) && !validateRequestOrigin(w, r) {
+		exempt := platformDownloadNavigation(r) || authorizationSubrequest(r) || connectionCallback(r)
+		if !exempt && !validateRequestOrigin(w, r) {
 			return
 		}
 	}
@@ -267,6 +313,10 @@ func (s *Server) capabilityDescription() map[string]any {
 		"artifacts":      s.artifactsEnabled(),
 		"actions":        s.actionsEnabled(),
 		"analytics":      s.config.Analytics != nil,
+		"integrations":   s.integrationsEnabled(),
+		"connections":    s.connectionsEnabled(),
+		"ai":             s.aiEnabled(),
+		"automations":    s.automationsEnabled(),
 		"maxUploadBytes": s.config.MaxUploadBytes,
 	}
 }
