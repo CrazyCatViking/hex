@@ -38,26 +38,29 @@ func roleHeaders(id string, roles ...string) http.Header {
 
 var objectSchema = json.RawMessage(`{"type":"object"}`)
 
+// anyResult accepts every result, for endpoints whose output is not under test.
+var anyResult = json.RawMessage(`{}`)
+
 func crmIntegration(calls *atomic.Int32) hex.Integration {
 	return hex.Integration{
 		Name: "crm", Title: "CRM", RequiresApproval: true,
 		Endpoints: []hex.IntegrationEndpoint{
 			{
 				Name: "deals", Description: "List deals.", CacheTTL: 60e9,
-				InputSchema: json.RawMessage(`{"type":"object","properties":{"stage":{"type":"string"}},"additionalProperties":false}`),
+				OutputSchema: anyResult, InputSchema: json.RawMessage(`{"type":"object","properties":{"stage":{"type":"string"}},"additionalProperties":false}`),
 				Handler: func(_ context.Context, call hex.IntegrationCall, input json.RawMessage) (any, error) {
 					calls.Add(1)
 					return map[string]any{"site": call.Site, "caller": call.Identity.ID, "input": input}, nil
 				},
 			},
 			{
-				Name: "contacts", Description: "List contacts.", InputSchema: objectSchema,
+				Name: "contacts", Description: "List contacts.", OutputSchema: anyResult, InputSchema: objectSchema,
 				Handler: func(context.Context, hex.IntegrationCall, json.RawMessage) (any, error) {
 					return []string{}, nil
 				},
 			},
 			{
-				Name: "update-deal", Description: "Change a deal.", Write: true, InputSchema: objectSchema,
+				Name: "update-deal", Description: "Change a deal.", Write: true, OutputSchema: anyResult, InputSchema: objectSchema,
 				Handler: func(context.Context, hex.IntegrationCall, json.RawMessage) (any, error) {
 					return map[string]bool{"ok": true}, nil
 				},
@@ -172,8 +175,12 @@ func TestIntegrationGrantValidation(t *testing.T) {
 		{Name: "Bad", Title: "Bad"},
 		{Name: "empty", Title: "Empty"},
 		{Name: "linked", Title: "Linked", Connector: "unknown", Endpoints: crmIntegration(new(atomic.Int32)).Endpoints},
+		{Name: "untyped", Title: "Untyped", Endpoints: []hex.IntegrationEndpoint{{
+			Name: "read", Description: "Read.", InputSchema: objectSchema,
+			Handler: func(context.Context, hex.IntegrationCall, json.RawMessage) (any, error) { return nil, nil },
+		}}},
 		{Name: "cached", Title: "Cached", Endpoints: []hex.IntegrationEndpoint{{
-			Name: "write", Description: "Write.", Write: true, CacheTTL: 1, InputSchema: objectSchema,
+			Name: "write", Description: "Write.", Write: true, CacheTTL: 1, OutputSchema: anyResult, InputSchema: objectSchema,
 			Handler: func(context.Context, hex.IntegrationCall, json.RawMessage) (any, error) { return nil, nil },
 		}}},
 	}
@@ -241,7 +248,7 @@ func TestConnectedAccountFlow(t *testing.T) {
 	if err := registry.Register(hex.Integration{
 		Name: "docs", Title: "Docs", Connector: "docs",
 		Endpoints: []hex.IntegrationEndpoint{{
-			Name: "me", Description: "Who the connected account is.", InputSchema: objectSchema,
+			Name: "me", Description: "Who the connected account is.", OutputSchema: anyResult, InputSchema: objectSchema,
 			Handler: func(ctx context.Context, call hex.IntegrationCall, _ json.RawMessage) (any, error) {
 				client, err := call.HTTPClient(ctx)
 				if err != nil {

@@ -54,6 +54,24 @@ const tasks = await hex.integrations.callWithConnect("google", "tasks", {
 });
 ```
 
+### Typed wrappers (optional)
+
+`hex integrations codegen` generates a TypeScript module with input and output types for the platform's endpoints, from the same JSON Schemas the server validates against. It imports nothing and wraps `hex.integrations.call`, which keeps working alongside it:
+
+```sh
+hex integrations codegen --only hubspot.*,slack.users --out src/hex-integrations.ts
+hex integrations codegen --only hubspot.*,slack.users --out src/hex-integrations.ts --check # in CI
+```
+
+```ts
+import { typedIntegrations } from "./hex-integrations";
+
+const integrations = typedIntegrations(hex.integrations);
+const { deals } = await integrations.hubspot.deals({ pipeline: "default" });
+```
+
+Exclude the generated file from formatters so `--check` can compare it. Without platform access, as in CI, generate from a saved `hex integrations catalog > catalog.json` with `--catalog catalog.json`.
+
 ## AI
 
 `hex.ai` streams model responses with text, readable thinking and tool calls in one shape, whichever model answers. `models()` lists the models the viewer may use.

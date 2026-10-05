@@ -64,6 +64,19 @@ Errors: 400 invalid input, 403 missing grant, role or approval, 404 unknown endp
 const deals = await hex.integrations.call('hubspot', 'deals', { pipeline: 'default', limit: 50 });
 ```
 
+### Typed wrappers
+
+Every endpoint publishes its input and output JSON Schemas in the catalog, and results are validated against the output schema before they leave the server. `hex integrations codegen` turns them into an optional TypeScript module: an interface per input and output (local `$defs` become named types, so recursive results work), and a `typedIntegrations(caller)` function whose wrappers call `hex.integrations.call` with those types. The module imports nothing, so it works with any client version, and untyped calls keep working alongside it.
+
+```sh
+hex integrations codegen --out src/hex-integrations.ts                         # every endpoint
+hex integrations codegen --only hubspot.*,slack.users --out src/hex-integrations.ts
+hex integrations catalog > catalog.json                                         # for builds without platform access
+hex integrations codegen --catalog catalog.json --out src/hex-integrations.ts --check
+```
+
+Output is deterministic, so `--check` fails a build when the file is stale. Exclude the generated file from formatters, whose line wrapping would otherwise make it differ.
+
 ## Connected accounts
 
 A connector is an OAuth 2.0 authorization server (Atlassian, Google, Microsoft Entra ID for Azure DevOps). The platform runs the authorization code flow with PKCE on its own domain and stores each person's tokens in the `IntegrationStore`, sealed by `Config.CredentialSealer` and bound to the person and connector. It refreshes tokens itself, serializing refreshes per account because some providers rotate refresh tokens. Apps and browsers never see the tokens.
@@ -116,4 +129,4 @@ err := registry.Register(hex.Integration{
 config.Integrations = registry
 ```
 
-Descriptions are shown to app developers and to models as tool descriptions, so say what the endpoint returns and when to use it. Return slim, purpose-built results rather than raw third-party payloads, and keep personal data to what the endpoint is for. `hex.DoJSON` maps third-party 400/404/409/422/429 to statuses the app sees and 401/403 to "refused access"; return `*hex.IntegrationError` for other app-visible failures. Connector-backed handlers use `call.HTTPClient(ctx)`; register the connector first with `registry.RegisterConnector`. Tests can build calls with `hex.NewIntegrationCall`.
+Both schemas are required. Describe results precisely, including the properties of list items: they become the app's generated types. Descriptions are shown to app developers and to models as tool descriptions, so say what the endpoint returns and when to use it. Return slim, purpose-built results rather than raw third-party payloads, and keep personal data to what the endpoint is for. `hex.DoJSON` maps third-party 400/404/409/422/429 to statuses the app sees and 401/403 to "refused access"; return `*hex.IntegrationError` for other app-visible failures. Connector-backed handlers use `call.HTTPClient(ctx)`; register the connector first with `registry.RegisterConnector`. Tests can build calls with `hex.NewIntegrationCall`.

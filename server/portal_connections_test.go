@@ -23,7 +23,7 @@ func TestConnectedAccountsPage(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := registry.Register(hex.Integration{Name: "docs", Title: "Docs", Connector: "docs", Endpoints: []hex.IntegrationEndpoint{{
-		Name: "me", Description: "Who you are.", InputSchema: json.RawMessage(`{"type":"object"}`),
+		Name: "me", Description: "Who you are.", OutputSchema: anyResult, InputSchema: json.RawMessage(`{"type":"object"}`),
 		Handler: func(context.Context, hex.IntegrationCall, json.RawMessage) (any, error) { return nil, nil },
 	}}}); err != nil {
 		t.Fatal(err)

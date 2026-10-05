@@ -40,7 +40,9 @@ type Integration struct {
 	Endpoints []IntegrationEndpoint
 }
 
-// IntegrationEndpoint is one typed operation of an integration. Permission
+// IntegrationEndpoint is one typed operation of an integration. Both
+// schemas are required: results are validated against OutputSchema, and
+// apps generate their types from both. Permission
 // defaults to "<integration>.<endpoint>"; endpoints can share a permission
 // by naming it explicitly. Write endpoints change data in the third-party
 // system: they need the site's editor role, are never cached, and are
@@ -246,15 +248,14 @@ func compileEndpoint(integration *registeredIntegration, endpoint IntegrationEnd
 	if err != nil {
 		return nil, fmt.Errorf("%s input schema: %w", label, err)
 	}
-	compiled := &registeredEndpoint{integration: integration, endpoint: endpoint, input: input}
-	if len(endpoint.OutputSchema) > 0 {
-		output, err := compileActionSchema(endpoint.OutputSchema)
-		if err != nil {
-			return nil, fmt.Errorf("%s output schema: %w", label, err)
-		}
-		compiled.output = output
+	if len(endpoint.InputSchema) == 0 || len(endpoint.OutputSchema) == 0 {
+		return nil, fmt.Errorf("%s needs an input and an output schema", label)
 	}
-	return compiled, nil
+	output, err := compileActionSchema(endpoint.OutputSchema)
+	if err != nil {
+		return nil, fmt.Errorf("%s output schema: %w", label, err)
+	}
+	return &registeredEndpoint{integration: integration, endpoint: endpoint, input: input, output: output}, nil
 }
 
 func (r *IntegrationRegistry) integration(name string) *registeredIntegration {
