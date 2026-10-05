@@ -1,7 +1,9 @@
 // Package foundry is a Hex AI provider for models deployed in Azure AI
 // Foundry. Claude deployments use the Anthropic Messages API under
-// {endpoint}/anthropic and other models the OpenAI v1 Chat Completions API
-// under {endpoint}/openai/v1. Requests authenticate with Entra ID tokens
+// {endpoint}/anthropic and other models the OpenAI v1 API under
+// {endpoint}/openai/v1: Chat Completions, or the Responses API for
+// reasoning models such as GPT-5 and GPT-6, which need it to use tools
+// with reasoning. Requests authenticate with Entra ID tokens
 // for https://cognitiveservices.azure.com/.default, such as from the
 // server's managed identity, or with a resource API key.
 package foundry
@@ -27,13 +29,16 @@ import (
 const (
 	ProtocolAnthropic = "anthropic"
 	ProtocolOpenAI    = "openai"
+	// ProtocolOpenAIResponses is the OpenAI Responses API.
+	ProtocolOpenAIResponses = "openai-responses"
 
 	cognitiveServicesScope = "https://cognitiveservices.azure.com/.default"
 	tokenRefreshMargin     = 5 * time.Minute
 )
 
 // Model is a Foundry deployment apps can choose by its Hex model ID.
-// Deployment defaults to the ID; Protocol is "anthropic" or "openai".
+// Deployment defaults to the ID; Protocol is "anthropic", "openai" (Chat
+// Completions) or "openai-responses".
 type Model struct {
 	hex.AIModel
 	Deployment string `json:"deployment,omitempty"`
@@ -82,7 +87,7 @@ func New(config Config) (*Provider, error) {
 	}
 
 	var anthropicModels []anthropic.Model
-	var openaiModels []openai.Model
+	var openaiModels, responsesModels []openai.Model
 	provider := &Provider{routes: make(map[string]hex.AIProvider)}
 	for _, model := range config.Models {
 		if model.ID == "" {
@@ -103,8 +108,10 @@ func New(config Config) (*Provider, error) {
 			anthropicModels = append(anthropicModels, anthropic.Model{AIModel: model.AIModel, Upstream: deployment})
 		case ProtocolOpenAI:
 			openaiModels = append(openaiModels, openai.Model{AIModel: model.AIModel, Upstream: deployment})
+		case ProtocolOpenAIResponses:
+			responsesModels = append(responsesModels, openai.Model{AIModel: model.AIModel, Upstream: deployment})
 		default:
-			return nil, fmt.Errorf("foundry: model %s needs protocol anthropic or openai", model.ID)
+			return nil, fmt.Errorf("foundry: model %s needs protocol anthropic, openai or openai-responses", model.ID)
 		}
 		provider.routes[model.ID] = nil
 		provider.models = append(provider.models, model.AIModel)
@@ -125,16 +132,19 @@ func New(config Config) (*Provider, error) {
 			provider.routes[model.ID] = claude
 		}
 	}
-	if len(openaiModels) > 0 {
-		chat, err := openai.New(openai.Config{
-			BaseURL: base + "/openai/v1", Models: openaiModels, HTTPClient: config.HTTPClient,
+	for api, models := range map[string][]openai.Model{openai.APIChatCompletions: openaiModels, openai.APIResponses: responsesModels} {
+		if len(models) == 0 {
+			continue
+		}
+		route, err := openai.New(openai.Config{
+			BaseURL: base + "/openai/v1", API: api, Models: models, HTTPClient: config.HTTPClient,
 			Authorize: authorizer(tokens, config.APIKey, "api-key"),
 		})
 		if err != nil {
 			return nil, err
 		}
-		for _, model := range openaiModels {
-			provider.routes[model.ID] = chat
+		for _, model := range models {
+			provider.routes[model.ID] = route
 		}
 	}
 	return provider, nil

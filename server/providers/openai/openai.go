@@ -1,9 +1,18 @@
-// Package openai is a Hex AI provider for OpenAI-compatible Chat Completions
-// APIs, including the Azure OpenAI v1 API and other models in Azure AI
-// Foundry ({endpoint}/openai/v1). Reasoning text that a model streams as
+// Package openai is a Hex AI provider for OpenAI-compatible APIs, including
+// the Azure OpenAI v1 API and other models in Azure AI Foundry
+// ({endpoint}/openai/v1). It speaks Chat Completions by default or, with
+// API set to "responses", the Responses API.
+//
+// Chat Completions: reasoning text that a model streams as
 // reasoning_content or reasoning is shown as thinking when the app asks for
-// it; Chat Completions has no way to send reasoning back, so thinking
-// blocks are dropped when a conversation is replayed.
+// it; it has no way to send reasoning back, so thinking blocks are dropped
+// when a conversation is replayed. Reasoning models such as GPT-5 and GPT-6
+// refuse function tools together with a reasoning effort there.
+//
+// Responses: tools and reasoning work together, reasoning summaries stream
+// as thinking when the app asks to show it, and reasoning is carried
+// between turns as encrypted content (requests are not stored by the
+// service).
 package openai
 
 import (
@@ -35,11 +44,19 @@ func (m Model) upstream() string {
 	return m.Upstream
 }
 
+// The APIs a provider can speak.
+const (
+	APIChatCompletions = "chat"
+	APIResponses       = "responses"
+)
+
 // Config configures the provider. BaseURL is everything before
-// /chat/completions, such as https://api.openai.com/v1. Authorize adds
+// /chat/completions or /responses, such as https://api.openai.com/v1.
+// API is APIChatCompletions (the default) or APIResponses. Authorize adds
 // credentials and defaults to a bearer APIKey.
 type Config struct {
 	BaseURL    string
+	API        string
 	APIKey     string
 	Authorize  func(*http.Request) error
 	Models     []Model
@@ -57,6 +74,13 @@ func New(config Config) (*Provider, error) {
 		return nil, errors.New("openai: a base URL is required")
 	}
 	config.BaseURL = strings.TrimSuffix(config.BaseURL, "/")
+	switch config.API {
+	case "":
+		config.API = APIChatCompletions
+	case APIChatCompletions, APIResponses:
+	default:
+		return nil, fmt.Errorf("openai: API must be %q or %q, got %q", APIChatCompletions, APIResponses, config.API)
+	}
 	if config.HTTPClient == nil {
 		config.HTTPClient = http.DefaultClient
 	}
@@ -99,30 +123,39 @@ func (p *Provider) Stream(ctx context.Context, request hex.AIRequest) (hex.AIStr
 	if !exists {
 		return nil, &hex.AIError{Status: http.StatusBadRequest, Message: fmt.Sprintf("model %q is not configured", request.Model)}
 	}
-	body, err := json.Marshal(completionRequest(model, request))
-	if err != nil {
-		return nil, fmt.Errorf("encode chat completion request: %w", err)
+	showThinking := request.Thinking != nil && request.Thinking.Show
+	path, label := "/chat/completions", "chat completion"
+	var payload any = completionRequest(model, request)
+	if p.config.API == APIResponses {
+		path, label = "/responses", "response"
+		payload = responsesRequest(model, request)
 	}
-	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, p.config.BaseURL+"/chat/completions", bytes.NewReader(body))
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("encode %s request: %w", label, err)
+	}
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, p.config.BaseURL+path, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	httpRequest.Header.Set("Content-Type", "application/json")
 	httpRequest.Header.Set("Accept", "text/event-stream")
 	if err := p.config.Authorize(httpRequest); err != nil {
-		return nil, fmt.Errorf("authorize chat completion request: %w", err)
+		return nil, fmt.Errorf("authorize %s request: %w", label, err)
 	}
 
 	response, err := p.config.HTTPClient.Do(httpRequest)
 	if err != nil {
-		return nil, fmt.Errorf("chat completion request: %w", err)
+		return nil, fmt.Errorf("%s request: %w", label, err)
 	}
 	if response.StatusCode < 200 || response.StatusCode > 299 {
 		defer response.Body.Close()
 		detail, _ := io.ReadAll(io.LimitReader(response.Body, maxErrorBytes))
 		return nil, hex.ProviderError("The model service", response.StatusCode, detail)
 	}
-	showThinking := request.Thinking != nil && request.Thinking.Show
+	if p.config.API == APIResponses {
+		return newResponsesStream(response.Body, showThinking), nil
+	}
 	return newStream(response.Body, showThinking), nil
 }
 
