@@ -36,6 +36,9 @@ const anthropicBody = "event: message_start\ndata: {\"type\":\"message_start\",\
 
 const openaiBody = "data: {\"choices\":[{\"delta\":{\"content\":\"gpt\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
 
+const responsesBody = "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"m\",\"delta\":\"gpt-6\"}\n\n" +
+	"data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n"
+
 func firstText(t *testing.T, stream hex.AIStream) string {
 	t.Helper()
 	defer stream.Close()
@@ -63,6 +66,8 @@ func TestRoutesModelsByProtocolWithEntraTokens(t *testing.T) {
 			io.WriteString(w, anthropicBody)
 		case "/openai/v1/chat/completions":
 			io.WriteString(w, openaiBody)
+		case "/openai/v1/responses":
+			io.WriteString(w, responsesBody)
 		default:
 			t.Errorf("unexpected path %s", r.URL.Path)
 		}
@@ -71,7 +76,8 @@ func TestRoutesModelsByProtocolWithEntraTokens(t *testing.T) {
 
 	models, err := ModelsFromJSON(`[
 		{"id":"claude-opus-5-5","name":"Claude Opus 5.5","protocol":"anthropic","thinking":true,"tools":true},
-		{"id":"gpt","protocol":"openai","deployment":"gpt-prod","permission":"ai.premium"}
+		{"id":"gpt","protocol":"openai","deployment":"gpt-prod","permission":"ai.premium"},
+		{"id":"gpt-6","protocol":"openai-responses","thinking":true,"tools":true}
 	]`)
 	if err != nil {
 		t.Fatal(err)
@@ -83,10 +89,10 @@ func TestRoutesModelsByProtocolWithEntraTokens(t *testing.T) {
 	}
 
 	listed, _ := provider.Models(context.Background())
-	if len(listed) != 2 || listed[1].Name != "gpt" || listed[1].Permission != "ai.premium" || !listed[0].Thinking {
+	if len(listed) != 3 || listed[1].Name != "gpt" || listed[1].Permission != "ai.premium" || !listed[0].Thinking {
 		t.Fatalf("unexpected models %+v", listed)
 	}
-	for model, want := range map[string]string{"claude-opus-5-5": "claude", "gpt": "gpt"} {
+	for model, want := range map[string]string{"claude-opus-5-5": "claude", "gpt": "gpt", "gpt-6": "gpt-6"} {
 		stream, err := provider.Stream(context.Background(), hex.AIRequest{Model: model})
 		if err != nil {
 			t.Fatal(err)

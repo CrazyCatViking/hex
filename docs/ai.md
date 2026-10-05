@@ -18,9 +18,9 @@ Included providers:
 
 | Package | Talks to |
 | --- | --- |
-| `server/providers/foundry` | Azure AI Foundry with Entra ID (managed identity) or a key; routes each model to the Anthropic or OpenAI protocol |
+| `server/providers/foundry` | Azure AI Foundry with Entra ID (managed identity) or a key; routes each model to the Anthropic Messages API, OpenAI Chat Completions or the OpenAI Responses API |
 | `server/providers/anthropic` | The Anthropic Messages API (also used for Claude models in Foundry) |
-| `server/providers/openai` | OpenAI-compatible Chat Completions (Azure OpenAI, other Foundry models) |
+| `server/providers/openai` | OpenAI-compatible Chat Completions or, with `API: openai.APIResponses`, the Responses API (Azure OpenAI, other Foundry models) |
 
 A platform can implement `hex.AIProvider` itself: `Models` lists models and `Stream` returns provider-neutral events (below). Models are configured as JSON, for example `HEX_AI_MODELS`:
 
@@ -28,10 +28,14 @@ A platform can implement `hex.AIProvider` itself: `Models` lists models and `Str
 [
   { "id": "claude-sonnet-5-5", "name": "Claude Sonnet 5.5", "protocol": "anthropic", "deployment": "claude-sonnet-5-5", "thinking": true, "tools": true, "images": true, "maxOutputTokens": 64000,
     "price": { "input": 2, "cachedInput": 0.2, "cacheWrite": 2.5, "output": 10 } },
+  { "id": "gpt-6-luna", "name": "GPT-6 Luna", "protocol": "openai-responses", "deployment": "gpt-6-luna", "thinking": true, "tools": true, "images": true,
+    "price": { "input": 0.11, "cachedInput": 0.011, "output": 0.55 } },
   { "id": "gpt-mini", "name": "GPT mini", "protocol": "openai", "deployment": "gpt-mini-prod", "tools": true,
     "price": { "input": 0.25, "output": 2 } }
 ]
 ```
+
+Use `openai-responses` for OpenAI reasoning models (GPT-5, GPT-6 and later). Over Chat Completions (`openai`) they refuse function tools together with a reasoning effort, stream no readable reasoning, and lose their reasoning between tool rounds. The Responses API streams reasoning summaries as `thinking` when the app sets `show`, and carries the model's encrypted reasoning in `thinking` blocks so it continues after tool calls; requests are sent with `store: false`, so the service keeps nothing between turns. `openai` remains for models and services that offer only Chat Completions.
 
 Using AI needs the `ai` permission (`AIConfig.Permission`), granted like any [integration permission](integrations.md#grants); a model's `permission` can require more. `MaxOutputTokens` (default 16000) caps each model call and `MaxToolRounds` (default 8) the server-side tool loop.
 
