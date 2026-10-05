@@ -1,6 +1,6 @@
 {
   "name": "@crazycatviking/hex",
-  "version": "0.12.0",
+  "version": "0.12.1",
   "type": "module",
   "description": "Browser client for Hex file storage, documents, and realtime channels",
   "publishConfig": {
