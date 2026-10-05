@@ -128,7 +128,9 @@ func TestStreamMapsRequestAndEvents(t *testing.T) {
 
 	encoded, _ := json.Marshal(sent)
 	for _, want := range []string{
-		`"model":"claude-opus-5-5"`, `"stream":true`, `"max_tokens":1000`, `"system":"Be brief."`,
+		`"model":"claude-opus-5-5"`, `"stream":true`, `"max_tokens":1000`,
+		`"system":[{"cache_control":{"type":"ephemeral"},"text":"Be brief.","type":"text"}]`,
+		`"cache_control":{"type":"ephemeral"},"max_tokens"`,
 		`"thinking":{"display":"summarized","type":"adaptive"}`, `"output_config":{"effort":"high"}`,
 		`"input_schema":{"type":"object"}`, `"source":{"data":"iVBO","media_type":"image/png","type":"base64"}`,
 		`{"signature":"s1","thinking":"hmm","type":"thinking"}`, `{"data":"opaque","type":"redacted_thinking"}`,
@@ -161,10 +163,40 @@ func TestStreamMapsRequestAndEvents(t *testing.T) {
 		t.Fatalf("unexpected message %+v", message)
 	}
 	done := events[5]
-	if done.StopReason != hex.StopToolUse || done.Usage.InputTokens != 25 || done.Usage.OutputTokens != 42 {
+	usage := done.Usage
+	if done.StopReason != hex.StopToolUse || usage.InputTokens != 20 || usage.CachedInputTokens != 5 || usage.OutputTokens != 42 {
 		t.Fatalf("unexpected done %+v %+v", done, done.Usage)
 	}
 }
+
+func TestPromptCachingCanBeDisabled(t *testing.T) {
+	var sent map[string]any
+	provider, err := New(Config{
+		APIKey: "key", DisablePromptCaching: true,
+		Models: []Model{{AIModel: hex.AIModel{ID: "claude"}}},
+		HTTPClient: &http.Client{Transport: roundTripper(func(r *http.Request) (*http.Response, error) {
+			if err := json.NewDecoder(r.Body).Decode(&sent); err != nil {
+				t.Fatal(err)
+			}
+			return &http.Response{StatusCode: 400, Body: io.NopCloser(strings.NewReader(`{}`)), Header: http.Header{}}, nil
+		})},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = provider.Stream(context.Background(), hex.AIRequest{
+		Model: "claude", System: "Be brief.",
+		Messages: []hex.AIMessage{{Role: hex.RoleUser, Content: []hex.AIContent{{Type: hex.ContentText, Text: "Hi"}}}},
+	})
+	encoded, _ := json.Marshal(sent)
+	if strings.Contains(string(encoded), "cache_control") || !strings.Contains(string(encoded), `"text":"Be brief."`) {
+		t.Fatalf("caching was not disabled: %s", encoded)
+	}
+}
+
+type roundTripper func(*http.Request) (*http.Response, error)
+
+func (f roundTripper) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func TestStreamErrors(t *testing.T) {
 	limited := testProvider(t, func(w http.ResponseWriter, r *http.Request) {

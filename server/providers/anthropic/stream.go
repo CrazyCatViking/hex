@@ -101,6 +101,24 @@ type apiUsage struct {
 	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 }
 
+// applyUsage takes the counts an event reports. Usage is cumulative, and
+// later events may omit fields reported earlier, so zero values are kept
+// from before. Input tokens exclude cache reads and writes.
+func (s *stream) applyUsage(usage apiUsage) {
+	if usage.InputTokens > 0 {
+		s.usage.InputTokens = usage.InputTokens
+	}
+	if usage.CacheReadInputTokens > 0 {
+		s.usage.CachedInputTokens = usage.CacheReadInputTokens
+	}
+	if usage.CacheCreationInputTokens > 0 {
+		s.usage.CacheWriteTokens = usage.CacheCreationInputTokens
+	}
+	if usage.OutputTokens > 0 {
+		s.usage.OutputTokens = usage.OutputTokens
+	}
+}
+
 func (s *stream) handle(name, data string) error {
 	if data == "" {
 		return nil
@@ -112,9 +130,7 @@ func (s *stream) handle(name, data string) error {
 
 	switch event.Type {
 	case "message_start":
-		usage := event.Message.Usage
-		s.usage.InputTokens = usage.InputTokens + usage.CacheCreationInputTokens + usage.CacheReadInputTokens
-		s.usage.OutputTokens = usage.OutputTokens
+		s.applyUsage(event.Message.Usage)
 	case "content_block_start":
 		return s.startBlock(event)
 	case "content_block_delta":
@@ -126,7 +142,7 @@ func (s *stream) handle(name, data string) error {
 			s.stop = event.Delta.StopReason
 		}
 		if event.Usage != nil {
-			s.usage.OutputTokens = event.Usage.OutputTokens
+			s.applyUsage(*event.Usage)
 		}
 	case "message_stop":
 		s.finish()

@@ -40,8 +40,8 @@
         aria-current="{{if eq .Active `start`}}page{{else}}false{{end}}"
         >Build &amp; publish</a
       >
-      {{if and .Analytics .Viewer}}{{if .Viewer.Admin}}<a
-        href="/admin"
+      {{if and .AdminLink .Viewer}}{{if .Viewer.Admin}}<a
+        href="{{.AdminLink}}"
         aria-current="{{if eq .Active `admin`}}page{{else}}false{{end}}"
         >Admin</a
       >{{end}}{{end}}

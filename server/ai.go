@@ -8,8 +8,6 @@ import (
 	"io"
 	"regexp"
 	"strings"
-	"sync"
-	"time"
 )
 
 // The AI capability gives apps a built-in, streaming interface to language
@@ -22,17 +20,19 @@ import (
 
 // AIModel describes a model apps can choose. Permission defaults to "ai";
 // expensive models can require a narrower permission granted through
-// Config.IntegrationGrants.
+// Config.IntegrationGrants. Price is needed to count the model's spending
+// against budgets.
 type AIModel struct {
-	ID              string `json:"id"`
-	Name            string `json:"name"`
-	Description     string `json:"description,omitempty"`
-	Thinking        bool   `json:"thinking"`
-	Tools           bool   `json:"tools"`
-	Images          bool   `json:"images"`
-	ContextTokens   int    `json:"contextTokens,omitempty"`
-	MaxOutputTokens int    `json:"maxOutputTokens,omitempty"`
-	Permission      string `json:"permission,omitempty"`
+	ID              string   `json:"id"`
+	Name            string   `json:"name"`
+	Description     string   `json:"description,omitempty"`
+	Thinking        bool     `json:"thinking"`
+	Tools           bool     `json:"tools"`
+	Images          bool     `json:"images"`
+	ContextTokens   int      `json:"contextTokens,omitempty"`
+	MaxOutputTokens int      `json:"maxOutputTokens,omitempty"`
+	Permission      string   `json:"permission,omitempty"`
+	Price           *AIPrice `json:"price,omitempty"`
 }
 
 // AIProvider answers model requests. Stream returns events until io.EOF;
@@ -146,10 +146,17 @@ const (
 	StopRefusal   = "refusal"
 )
 
-// AIUsage counts tokens for one model call or a whole tool loop.
+// AIUsage counts tokens for one model call or a whole tool loop. Input
+// tokens exclude the cached ones: CachedInputTokens were read from the
+// provider's prompt cache and CacheWriteTokens written to it, each priced
+// separately. Estimated marks counts the server estimated because the
+// provider did not report them, for example when a stream was cut off.
 type AIUsage struct {
-	InputTokens  int `json:"inputTokens"`
-	OutputTokens int `json:"outputTokens"`
+	InputTokens       int  `json:"inputTokens"`
+	CachedInputTokens int  `json:"cachedInputTokens,omitempty"`
+	CacheWriteTokens  int  `json:"cacheWriteTokens,omitempty"`
+	OutputTokens      int  `json:"outputTokens"`
+	Estimated         bool `json:"estimated,omitempty"`
 }
 
 func (u *AIUsage) add(other *AIUsage) {
@@ -157,19 +164,23 @@ func (u *AIUsage) add(other *AIUsage) {
 		return
 	}
 	u.InputTokens += other.InputTokens
+	u.CachedInputTokens += other.CachedInputTokens
+	u.CacheWriteTokens += other.CacheWriteTokens
 	u.OutputTokens += other.OutputTokens
+	u.Estimated = u.Estimated || other.Estimated
 }
 
 // AIConfig enables the AI capability. Permission (default "ai") is needed to
 // use it at all. MaxOutputTokens caps each model call (default 16000) and
-// MaxToolRounds the server-side tool loop (default 8). DailyTokenLimit caps
-// each person's input and output tokens per UTC day, counted in process.
+// MaxToolRounds the server-side tool loop (default 8). Limits are the
+// monthly budgets used where Config.AIUsage stores none; budgets need
+// Config.AIUsage.
 type AIConfig struct {
 	Provider        AIProvider
 	Permission      string
 	MaxOutputTokens int
 	MaxToolRounds   int
-	DailyTokenLimit int
+	Limits          AILimits
 }
 
 func (c *AIConfig) permission() string {
@@ -229,35 +240,6 @@ func (s *Server) aiEnabled() bool {
 	return s.config.AI != nil && s.config.AI.Provider != nil
 }
 
-// usageMeter counts tokens per person and UTC day for DailyTokenLimit.
-type usageMeter struct {
-	mu   sync.Mutex
-	day  string
-	used map[string]int
-}
-
-func (m *usageMeter) spent(key string) int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.rollOver()
-	return m.used[key]
-}
-
-func (m *usageMeter) record(key string, tokens int) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.rollOver()
-	m.used[key] += tokens
-}
-
-func (m *usageMeter) rollOver() {
-	today := time.Now().UTC().Format(time.DateOnly)
-	if m.day != today || m.used == nil {
-		m.day = today
-		m.used = make(map[string]int)
-	}
-}
-
 // availableModels lists the provider's models the caller may use.
 func (s *Server) availableModels(ctx context.Context, caller integrationCaller) ([]AIModel, error) {
 	models, err := s.config.AI.Provider.Models(ctx)
@@ -288,11 +270,8 @@ func (s *Server) prepareAIRequest(ctx context.Context, caller integrationCaller,
 	if !s.granted(caller, s.config.AI.permission()) {
 		return AIRequest{}, nil, &AIError{Status: 403, Message: "you do not have the " + s.config.AI.permission() + " permission"}
 	}
-	if caller.identity != nil {
-		limit := s.config.AI.DailyTokenLimit
-		if limit > 0 && s.aiUsage.spent(caller.usageKey()) >= limit {
-			return AIRequest{}, nil, &AIError{Status: 429, Message: "you have used today's AI token allowance"}
-		}
+	if err := s.checkAIBudget(ctx, caller); err != nil {
+		return AIRequest{}, nil, err
 	}
 
 	models, err := s.availableModels(ctx, caller)
@@ -435,18 +414,19 @@ func matchesAnyPattern(patterns []string, name string) bool {
 func (s *Server) runAI(ctx context.Context, caller integrationCaller, request AIRequest, tools map[string]serverTool, emit func(AIEvent) error) (AIUsage, error) {
 	var total AIUsage
 	messages := append([]AIMessage(nil), request.Messages...)
-	defer func() {
-		tokens := total.InputTokens + total.OutputTokens
-		s.aiUsage.record(caller.usageKey(), tokens)
-		logAIUsage(caller, request.Model, total)
-	}()
 
 	for round := 0; ; round++ {
-		request.Messages = messages
-		assistant, done, err := s.streamModel(ctx, request, emit)
-		if done != nil {
-			total.add(done.Usage)
+		if round > 0 {
+			// Each round is a separate model call, so a tool loop stops
+			// once a budget runs out.
+			if err := s.checkAIBudget(ctx, caller); err != nil {
+				return total, err
+			}
 		}
+		request.Messages = messages
+		assistant, done, usage, err := s.streamModel(ctx, request, emit)
+		total.add(&usage)
+		s.recordAIUsage(caller, request.Model, usage)
 		if err != nil {
 			return total, err
 		}
@@ -491,12 +471,14 @@ func (s *Server) runAI(ctx context.Context, caller integrationCaller, request AI
 	}
 }
 
-// streamModel relays one model call and returns its assistant message and
-// final done event, which is held back for the caller to emit.
-func (s *Server) streamModel(ctx context.Context, request AIRequest, emit func(AIEvent) error) (*AIMessage, *AIEvent, error) {
+// streamModel relays one model call and returns its assistant message, its
+// final done event (held back for the caller to emit) and its usage. When
+// the stream ends without the provider's usage, as when the app disconnects,
+// usage is estimated from the request and what was streamed.
+func (s *Server) streamModel(ctx context.Context, request AIRequest, emit func(AIEvent) error) (*AIMessage, *AIEvent, AIUsage, error) {
 	stream, err := s.config.AI.Provider.Stream(ctx, request)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, AIUsage{}, err
 	}
 	defer func() {
 		if err := stream.Close(); err != nil {
@@ -506,13 +488,20 @@ func (s *Server) streamModel(ctx context.Context, request AIRequest, emit func(A
 
 	var assistant *AIMessage
 	var done *AIEvent
+	streamed := 0
+	result := func(err error) (*AIMessage, *AIEvent, AIUsage, error) {
+		if done != nil && done.Usage != nil {
+			return assistant, done, *done.Usage, err
+		}
+		return assistant, done, estimateUsage(request, streamed), err
+	}
 	for {
 		event, err := stream.Next()
 		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
-			return assistant, done, err
+			return result(err)
 		}
 		switch event.Type {
 		case EventDone:
@@ -521,15 +510,28 @@ func (s *Server) streamModel(ctx context.Context, request AIRequest, emit func(A
 			continue
 		case EventMessage:
 			assistant = event.Message
+		case EventText, EventThinking:
+			streamed += len(event.Text)
 		}
 		if err := emit(event); err != nil {
-			return assistant, done, err
+			return result(err)
 		}
 	}
 	if assistant == nil || done == nil {
-		return assistant, done, errors.New("the model stream ended without a complete message")
+		return result(errors.New("the model stream ended without a complete message"))
 	}
-	return assistant, done, nil
+	return result(nil)
+}
+
+// estimateUsage approximates tokens at four bytes each. It is only used
+// when a provider reports nothing, and the record says so.
+func estimateUsage(request AIRequest, streamedBytes int) AIUsage {
+	encoded, err := json.Marshal(request)
+	inputBytes := len(encoded)
+	if err != nil {
+		inputBytes = 0
+	}
+	return AIUsage{InputTokens: inputBytes / 4, OutputTokens: streamedBytes / 4, Estimated: true}
 }
 
 func isAppTool(tools map[string]serverTool, name string) bool {

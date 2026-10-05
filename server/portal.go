@@ -35,6 +35,9 @@ type Chrome struct {
 	Manage      bool
 	Analytics   bool
 	Connections bool
+	// AdminLink is where the Admin navigation leads platform admins: the
+	// analytics overview, or the AI page when only AI is enabled.
+	AdminLink string
 }
 
 type viewerView struct {
@@ -133,6 +136,12 @@ func (s *Server) chromeFor(identity *Identity, active string) Chrome {
 	view := Chrome{
 		Platform: s.platformName(), Active: active, Manage: s.manageEnabled() && identity != nil,
 		Analytics: s.config.Analytics != nil, Connections: s.connectionsEnabled() && identity != nil,
+	}
+	switch {
+	case s.config.Analytics != nil && s.config.Identity != nil:
+		view.AdminLink = "/admin"
+	case s.aiAccountingEnabled() && s.manageEnabled():
+		view.AdminLink = "/admin/ai"
 	}
 	if identity == nil {
 		return view

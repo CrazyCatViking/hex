@@ -2027,3 +2027,73 @@ textarea:focus {
   display: inline-block;
   margin-right: 6px;
 }
+
+/* AI spending */
+.budget-meter {
+  display: grid;
+  gap: 8px;
+  margin: 4px 0 12px;
+}
+.budget-meter-numbers {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.budget-spent {
+  font-size: 28px;
+  font-weight: 700;
+}
+.budget-bar {
+  width: 100%;
+  max-width: 480px;
+  height: 8px;
+}
+.budget-bar rect {
+  stroke: none;
+}
+td .status-dot {
+  display: inline-block;
+  margin-right: 6px;
+}
+.budget-track {
+  fill: var(--surface-muted);
+}
+.budget-fill {
+  fill: var(--accent);
+}
+.budget-warning {
+  fill: var(--focus);
+}
+.budget-danger {
+  fill: var(--danger);
+}
+.budget-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 14px;
+}
+.month-nav {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.ai-budget-form,
+.ai-override-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+  margin: 12px 0;
+}
+.ai-defaults {
+  display: grid;
+  gap: 12px;
+}
+.form-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}

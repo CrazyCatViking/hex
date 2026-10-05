@@ -179,3 +179,64 @@ func TestAutomationStoreAgainstPostgres(t *testing.T) {
 		t.Fatalf("automations were not removed: %+v %v", listed, err)
 	}
 }
+
+func TestAIUsageStoreAgainstPostgres(t *testing.T) {
+	database, ctx := openTestDatabase(t)
+	site := "test-" + rand.Text()
+	day := time.Date(2026, time.October, 3, 12, 0, 0, 0, time.UTC)
+	records := []hex.AIUsageRecord{
+		{ID: rand.Text(), At: day, Site: site, Caller: "user:a", CallerName: "Old Name", Model: "sonnet", CostMicros: 100,
+			Usage: hex.AIUsage{InputTokens: 10, CachedInputTokens: 20, CacheWriteTokens: 5, OutputTokens: 3}},
+		{ID: rand.Text(), At: day.Add(time.Hour), Site: site, Caller: "user:a", CallerName: "New Name", Model: "sonnet", CostMicros: 50,
+			Usage: hex.AIUsage{InputTokens: 1, OutputTokens: 1, Estimated: true}},
+		{ID: rand.Text(), At: day.AddDate(0, 0, 1), Site: site, Caller: "automation:" + site + "/report", Model: "haiku", CostMicros: 7},
+		{ID: rand.Text(), At: day.AddDate(0, 1, 0), Site: site, Caller: "user:a", Model: "sonnet", CostMicros: 1000},
+	}
+	for _, record := range records {
+		if err := database.RecordAIUsage(ctx, record); err != nil {
+			t.Fatal(err)
+		}
+	}
+	october := hex.AIUsageFilter{Since: time.Date(2026, time.October, 1, 0, 0, 0, 0, time.UTC), Until: time.Date(2026, time.November, 1, 0, 0, 0, 0, time.UTC), Site: site}
+	if total, err := database.SumAICost(ctx, october); err != nil || total != 157 {
+		t.Fatalf("unexpected October total %d %v", total, err)
+	}
+	person := october
+	person.Caller = "user:a"
+	if total, err := database.SumAICost(ctx, person); err != nil || total != 150 {
+		t.Fatalf("unexpected person total %d %v", total, err)
+	}
+
+	callers, err := database.AIUsageTotals(ctx, october, hex.GroupByCaller)
+	if err != nil || len(callers) != 2 || callers[0].Key != "user:a" || callers[0].Name != "New Name" ||
+		callers[0].Calls != 2 || callers[0].CachedInputTokens != 20 || callers[0].CacheWriteTokens != 5 || callers[0].Estimated != 1 {
+		t.Fatalf("unexpected caller totals %+v %v", callers, err)
+	}
+	days, err := database.AIUsageTotals(ctx, october, hex.GroupByDay)
+	if err != nil || len(days) != 2 || days[0].Key != "2026-10-03" || days[0].CostMicros != 150 {
+		t.Fatalf("unexpected daily totals %+v %v", days, err)
+	}
+	if _, err := database.AIUsageTotals(ctx, october, "colour"); err == nil {
+		t.Fatal("an unknown grouping was accepted")
+	}
+
+	limit := int64(5_000_000)
+	budget := hex.AIBudget{Scope: hex.BudgetSite, Subject: site, LimitMicros: &limit, Disabled: true}
+	if err := database.PutAIBudget(ctx, budget); err != nil {
+		t.Fatal(err)
+	}
+	budgets, err := database.ListAIBudgets(ctx)
+	found := false
+	for _, stored := range budgets {
+		found = found || stored.Subject == site && stored.Disabled && *stored.LimitMicros == limit
+	}
+	if err != nil || !found {
+		t.Fatalf("the budget was not stored: %+v %v", budgets, err)
+	}
+	if err := database.DeleteAIBudget(ctx, hex.BudgetSite, site); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.DeleteAIBudget(ctx, hex.BudgetSite, site); !errors.Is(err, hex.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}

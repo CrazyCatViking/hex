@@ -49,6 +49,8 @@ type Config struct {
 	APIKey     string
 	Models     []Model
 	HTTPClient *http.Client
+	// DisablePromptCaching turns off prompt caching for Claude models.
+	DisablePromptCaching bool
 }
 
 // Provider routes each request to the protocol of its model.
@@ -113,7 +115,8 @@ func New(config Config) (*Provider, error) {
 	if len(anthropicModels) > 0 {
 		claude, err := anthropic.New(anthropic.Config{
 			BaseURL: base + "/anthropic", Models: anthropicModels, HTTPClient: config.HTTPClient,
-			Authorize: authorizer(tokens, config.APIKey, "x-api-key"),
+			Authorize:            authorizer(tokens, config.APIKey, "x-api-key"),
+			DisablePromptCaching: config.DisablePromptCaching,
 		})
 		if err != nil {
 			return nil, err

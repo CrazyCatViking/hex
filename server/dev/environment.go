@@ -267,10 +267,12 @@ func (e *Environment) configurePlatformFeatures() error {
 	if database, ok := e.Config.Database.(*postgres.Database); ok {
 		e.Config.IntegrationStore = database
 		e.Config.Automations = database
+		e.Config.AIUsage = database
 		return nil
 	}
 	e.Config.IntegrationStore = memory.NewIntegrationStore()
 	e.Config.Automations = memory.NewAutomationStore()
+	e.Config.AIUsage = memory.NewAIUsageStore()
 	return nil
 }
 

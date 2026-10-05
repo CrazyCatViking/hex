@@ -57,6 +57,10 @@ type Config struct {
 	HTTPClient       *http.Client
 	EagerToolInput   bool
 	AnthropicVersion string
+	// DisablePromptCaching turns off the cache breakpoints the provider
+	// otherwise sets: one on the system prompt and automatic caching of the
+	// growing conversation, so later turns read earlier ones from the cache.
+	DisablePromptCaching bool
 }
 
 // Provider implements hex.AIProvider.
@@ -146,12 +150,25 @@ type messagesRequest struct {
 	Model        string        `json:"model"`
 	MaxTokens    int           `json:"max_tokens"`
 	Stream       bool          `json:"stream"`
-	System       string        `json:"system,omitempty"`
+	System       []systemBlock `json:"system,omitempty"`
 	Messages     []apiMessage  `json:"messages"`
+	CacheControl *cacheControl `json:"cache_control,omitempty"`
 	Tools        []apiTool     `json:"tools,omitempty"`
 	Thinking     *apiThinking  `json:"thinking,omitempty"`
 	OutputConfig *outputConfig `json:"output_config,omitempty"`
 }
+
+type systemBlock struct {
+	Type         string        `json:"type"`
+	Text         string        `json:"text"`
+	CacheControl *cacheControl `json:"cache_control,omitempty"`
+}
+
+type cacheControl struct {
+	Type string `json:"type"`
+}
+
+var ephemeral = &cacheControl{Type: "ephemeral"}
 
 type apiThinking struct {
 	Type    string `json:"type"`
@@ -198,7 +215,17 @@ type apiTool struct {
 func (p *Provider) messagesRequest(model Model, request hex.AIRequest) messagesRequest {
 	result := messagesRequest{
 		Model: model.upstream(), MaxTokens: request.MaxTokens, Stream: true,
-		System: request.System, Messages: make([]apiMessage, 0, len(request.Messages)),
+		Messages: make([]apiMessage, 0, len(request.Messages)),
+	}
+	if request.System != "" {
+		system := systemBlock{Type: "text", Text: request.System}
+		if !p.config.DisablePromptCaching {
+			system.CacheControl = ephemeral
+		}
+		result.System = []systemBlock{system}
+	}
+	if !p.config.DisablePromptCaching {
+		result.CacheControl = ephemeral
 	}
 	if result.MaxTokens <= 0 {
 		result.MaxTokens = 16000

@@ -52,8 +52,11 @@ type Config struct {
 	CredentialKey        []byte
 	ConnectionIdleExpiry time.Duration
 
-	// AI enables streaming model access for apps and automations.
-	AI *AIConfig
+	// AI enables streaming model access for apps and automations. AIUsage
+	// records each model call's usage and cost and keeps the monthly AI
+	// budgets that are managed in the portal.
+	AI      *AIConfig
+	AIUsage AIUsageStore
 	// Automations stores declared automations and their runs; the host
 	// runs the scheduler with Server.RunBackground.
 	Automations AutomationStore
@@ -68,7 +71,6 @@ type Server struct {
 	analyticsBootstrapped bool
 	integrationCache      responseCache
 	connectionLocks       sync.Map
-	aiUsage               usageMeter
 	stateSealer           *KeySealer
 	automationRuns        sync.WaitGroup
 }
@@ -188,6 +190,7 @@ func (s *Server) registerRoutes() {
 	s.registerAutomationRoutes()
 	s.registerManageRoutes()
 	s.registerPortalConnectionRoutes()
+	s.registerAIPortalRoutes()
 	s.registerAnalyticsRoutes()
 }
 

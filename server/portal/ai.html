@@ -1,0 +1,395 @@
+{{define "spend-meter"}}
+<div class="budget-meter">
+  <div class="budget-meter-numbers">
+    <strong class="budget-spent">{{.Spent}}</strong>
+    <span class="muted">of {{.Limit}}</span>
+  </div>
+  {{if .Limited}}
+  <svg
+    class="budget-bar"
+    viewBox="0 0 100 8"
+    preserveAspectRatio="none"
+    role="img"
+    aria-label="{{.Spent}} of {{.Limit}}, {{.Status}}"
+  >
+    <rect class="budget-track" width="100" height="8" rx="4" />
+    <rect
+      class="budget-fill budget-{{.Tone}}"
+      width="{{.Percent}}"
+      height="8"
+      rx="4"
+    />
+  </svg>
+  <p class="budget-status">
+    <span class="status-dot status-{{.Tone}}" aria-hidden="true"></span>
+    {{.Status}}
+  </p>
+  {{end}}
+</div>
+{{end}} {{define "month-nav"}}
+<nav class="month-nav" aria-label="Month">
+  <a class="link-button" href="?{{.Query}}month={{.Month.Previous}}"
+    >← Previous month</a
+  >
+  <strong>{{.Month.Label}}</strong>
+  {{if .Month.Next}}<a
+    class="link-button"
+    href="?{{.Query}}month={{.Month.Next}}"
+    >Next month →</a
+  >{{end}}
+</nav>
+{{end}} {{define "spend-chart"}}
+<figure class="trend analytics-chart">
+  {{if .Empty}}
+  <p class="trend-empty">No AI spending this month yet.</p>
+  {{end}}
+  <div class="trend-body">
+    <div class="trend-y" aria-hidden="true">
+      {{range .YLabels}}<span>{{.}}</span>{{end}}
+    </div>
+    <div class="trend-plot" data-trend>
+      <svg
+        viewBox="0 0 {{.Width}} 100"
+        preserveAspectRatio="none"
+        role="img"
+        aria-label="{{.Summary}}"
+      >
+        {{range .Days}}{{if .Weekend}}
+        <rect class="trend-weekend" x="{{.X}}" y="0" width="10" height="100" />
+        {{end}}{{end}} {{range .Grid}}
+        <line
+          class="trend-grid"
+          x1="0"
+          x2="{{$.Width}}"
+          y1="{{.Y}}"
+          y2="{{.Y}}"
+          vector-effect="non-scaling-stroke"
+        />
+        {{end}} {{range .Days}}
+        <g class="trend-day" data-tooltip="{{.Tooltip}}">
+          <rect class="trend-hit" x="{{.X}}" y="0" width="10" height="100" />
+          <rect
+            class="trend-bar"
+            x="{{.BarX}}"
+            y="{{.BarY}}"
+            width="{{.BarWidth}}"
+            height="{{.BarHeight}}"
+          />
+          <title>{{.Label}}: {{.Views}}</title>
+        </g>
+        {{end}}
+      </svg>
+      <div class="trend-tooltip" role="presentation" hidden></div>
+    </div>
+    <div class="trend-x" aria-hidden="true">
+      {{range .XLabels}}<span>{{.}}</span>{{end}}
+    </div>
+  </div>
+</figure>
+{{end}} {{define "spend-table"}}
+<div class="table-wrap">
+  <table class="table">
+    <thead>
+      <tr>
+        <th scope="col">{{.Heading}}</th>
+        <th scope="col" class="numeric">Cost</th>
+        <th scope="col" class="numeric">Calls</th>
+        <th scope="col" class="numeric">Tokens</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Rows}}
+      <tr>
+        <td>
+          {{if .Link}}<a href="{{.Link}}">{{.Label}}</a
+          >{{else}}{{.Label}}{{end}} {{with .Detail}}<span class="tag"
+            >{{.}}</span
+          >{{end}}
+        </td>
+        <td class="numeric">
+          <span class="cell-number">{{.Cost}}{{if .Estimated}}*{{end}}</span
+          >{{template "bar" .Percent}}
+        </td>
+        <td class="numeric">{{.Calls}}</td>
+        <td class="numeric">{{.Tokens}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>
+{{end}} {{define "site-ai"}}
+<section class="panel" aria-labelledby="ai-heading">
+  <div class="panel-heading">
+    <h2 id="ai-heading">AI spending</h2>
+    {{template "month-nav" .MonthNav}}
+  </div>
+  {{template "site-ai-budget" .}}
+  <h3>Daily spending</h3>
+  {{template "spend-chart" .Chart}}
+  <div class="panel-grid">
+    <div>
+      <h3>By person and automation</h3>
+      {{if .People.Rows}}{{template "spend-table" .People}}{{else}}
+      <p class="muted">Nobody has used AI on this site this month.</p>
+      {{end}}
+    </div>
+    <div>
+      <h3>By model</h3>
+      {{if .Models.Rows}}{{template "spend-table" .Models}}{{else}}
+      <p class="muted">No models used this month.</p>
+      {{end}}
+    </div>
+  </div>
+  <p class="muted">
+    {{.Calls}} model calls. Costs come from each model's configured prices and
+    can differ slightly from the Azure bill.{{if .Estimated}} * includes
+    estimates for calls the provider did not report, such as streams the app
+    stopped.{{end}}
+  </p>
+</section>
+{{end}} {{define "site-ai-budget"}}
+<div class="ai-budget" id="ai-budget">
+  {{if .Disabled}}
+  <p class="banner banner-warning">
+    AI is turned off for this site. Apps and automations on it get an error when
+    they ask a model.
+  </p>
+  {{end}} {{template "spend-meter" .Meter}}
+  <p class="muted">
+    {{.LimitFrom}}. Spending is counted per calendar month (UTC).
+  </p>
+  {{if .Admin}}
+  <form
+    class="ai-budget-form"
+    hx-put="/api/hex/manage/sites/{{.Site}}/ai/budget?month={{.Month.Param}}"
+    hx-target="#ai-budget"
+    hx-swap="outerHTML"
+  >
+    <label class="field"
+      ><span class="field-label">This site's monthly limit (USD)</span
+      ><input
+        name="limit"
+        inputmode="decimal"
+        value="{{.OwnLimit}}"
+        placeholder="Use the default"
+        autocomplete="off"
+    /></label>
+    <label class="field"
+      ><span class="field-label">AI on this site</span
+      ><select name="enabled">
+        <option value="on" {{if not .Disabled}}selected{{end}}>On</option>
+        <option value="off" {{if .Disabled}}selected{{end}}>Off</option>
+      </select></label
+    >
+    <button class="button" type="submit">Save</button>
+    {{with .Message}}<span class="muted" role="status">{{.}}</span>{{end}}
+  </form>
+  {{with .ErrorText}}
+  <p class="banner banner-error" role="alert">{{.}}</p>
+  {{end}} {{end}}
+</div>
+{{end}} {{define "admin-ai"}}
+<!doctype html>
+<html lang="en">
+  <head>
+    {{template "head" (printf "%s · AI spending" .Platform)}}
+  </head>
+  <body hx-headers='{"X-Hex-Request":"1"}'>
+    {{template "header" .Chrome}}
+    <main id="main" class="page">
+      <section class="page-heading">
+        <div>
+          <p class="eyebrow">Admin</p>
+          <h1>AI spending</h1>
+          <p class="lead">
+            What apps and automations spend on AI models, and the monthly
+            budgets that stop them.
+          </p>
+        </div>
+      </section>
+      {{if .Analytics}}
+      <nav class="tabs" aria-label="Admin sections">
+        <a href="/admin" aria-current="false">Overview</a>
+        <a href="/admin/sites" aria-current="false">Sites</a>
+        <a href="/admin/users" aria-current="false">People</a>
+        <a href="/admin/ai" aria-current="page">AI spend</a>
+      </nav>
+      {{end}}
+      <section class="panel" aria-labelledby="platform-heading">
+        <div class="panel-heading">
+          <h2 id="platform-heading">The platform</h2>
+          {{template "month-nav" .MonthNav}}
+        </div>
+        {{template "spend-meter" .Meter}} {{template "spend-chart" .Chart}}
+      </section>
+      <div class="panel-grid">
+        <section class="panel" aria-labelledby="defaults-heading">
+          <h2 id="defaults-heading">Budgets</h2>
+          {{template "admin-ai-defaults" .}}
+        </section>
+        <section class="panel" aria-labelledby="overrides-heading">
+          <h2 id="overrides-heading">Higher limits for people</h2>
+          {{template "admin-ai-overrides" .}}
+        </section>
+      </div>
+      <section class="panel" aria-labelledby="sites-heading">
+        <h2 id="sites-heading">Sites</h2>
+        {{if .Sites}}
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th scope="col">Site</th>
+                <th scope="col">Spent</th>
+                <th scope="col">Limit</th>
+                <th scope="col">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {{range .Sites}}
+              <tr>
+                <td><a href="{{.Link}}">{{.Name}}</a></td>
+                <td>{{.Meter.Spent}}</td>
+                <td>
+                  {{.Meter.Limit}}{{if .Own}}
+                  <span class="tag">Own</span>{{end}}
+                </td>
+                <td>
+                  {{if .Disabled}}<span class="tag">AI off</span>{{else if
+                  .Meter.Limited}}<span
+                    class="status-dot status-{{.Meter.Tone}}"
+                    aria-hidden="true"
+                  ></span>
+                  {{.Meter.Status}}{{else}}—{{end}}
+                </td>
+              </tr>
+              {{end}}
+            </tbody>
+          </table>
+        </div>
+        {{else}}
+        <p class="muted">No site has used AI this month.</p>
+        {{end}}
+      </section>
+      <div class="panel-grid">
+        <section class="panel" aria-labelledby="models-heading">
+          <h2 id="models-heading">By model</h2>
+          {{if .Models.Rows}}{{template "spend-table" .Models}}{{else}}
+          <p class="muted">No models used this month.</p>
+          {{end}}
+        </section>
+        <section class="panel" aria-labelledby="people-heading">
+          <h2 id="people-heading">Top spenders</h2>
+          {{if .People.Rows}}{{template "spend-table" .People}}{{else}}
+          <p class="muted">Nobody has used AI this month.</p>
+          {{end}}
+        </section>
+      </div>
+    </main>
+    {{template "footer" .Chrome}}
+  </body>
+</html>
+{{end}} {{define "admin-ai-defaults"}}
+<form
+  id="ai-defaults"
+  class="ai-defaults"
+  hx-put="/api/hex/manage/ai/budgets?month={{.Month.Param}}"
+  hx-target="#ai-defaults"
+  hx-swap="outerHTML"
+>
+  <p class="muted">
+    Monthly limits in US dollars. Leave a field empty for no limit. A call is
+    refused once any limit that applies to it is used up.
+  </p>
+  <label class="field"
+    ><span class="field-label">The whole platform</span
+    ><input
+      name="platform"
+      inputmode="decimal"
+      value="{{.Platform}}"
+      placeholder="No limit"
+      autocomplete="off"
+  /></label>
+  <label class="field"
+    ><span class="field-label">Each site, unless it has its own limit</span
+    ><input
+      name="siteDefault"
+      inputmode="decimal"
+      value="{{.SiteDefault}}"
+      placeholder="No limit"
+      autocomplete="off"
+  /></label>
+  <label class="field"
+    ><span class="field-label">Each person, unless a higher limit applies</span
+    ><input
+      name="personDefault"
+      inputmode="decimal"
+      value="{{.PersonDefault}}"
+      placeholder="No limit"
+      autocomplete="off"
+  /></label>
+  {{with .FromConfig}}
+  <p class="field-hint">
+    From the server's configuration until saved here: {{.}}.
+  </p>
+  {{end}}
+  <div class="form-actions">
+    <button class="button" type="submit">Save budgets</button>
+    {{with .Message}}<span class="muted" role="status">{{.}}</span>{{end}}
+  </div>
+  {{with .ErrorText}}
+  <p class="banner banner-error" role="alert">{{.}}</p>
+  {{end}}
+</form>
+{{end}} {{define "admin-ai-overrides"}}
+<div id="ai-overrides">
+  <p class="muted">
+    Give a role, group or person a higher monthly limit than the default, for
+    example role:AI.Premium.
+  </p>
+  {{if .Overrides}}
+  <ul class="action-list">
+    {{range .Overrides}}
+    <li>
+      <div class="action-main">
+        <strong>{{.Label}}</strong>
+        <span class="muted">{{.Limit}} a month</span>
+      </div>
+      <button
+        type="button"
+        class="button button-secondary button-small"
+        hx-delete="/api/hex/manage/ai/overrides?subject={{.Subject}}&month={{$.Month.Param}}"
+        hx-target="#ai-overrides"
+        hx-swap="outerHTML"
+      >
+        Remove
+      </button>
+    </li>
+    {{end}}
+  </ul>
+  {{end}}
+  <form
+    class="ai-override-form"
+    hx-post="/api/hex/manage/ai/overrides?month={{.Month.Param}}"
+    hx-target="#ai-overrides"
+    hx-swap="outerHTML"
+  >
+    <label class="field field-grow"
+      ><span class="field-label">Who</span
+      ><input name="subject" placeholder="role:AI.Premium" autocomplete="off"
+    /></label>
+    <label class="field"
+      ><span class="field-label">Monthly limit (USD)</span
+      ><input
+        name="limit"
+        inputmode="decimal"
+        placeholder="50"
+        autocomplete="off"
+    /></label>
+    <button class="button" type="submit">Add</button>
+  </form>
+  {{with .OverrideError}}
+  <p class="banner banner-error" role="alert">{{.}}</p>
+  {{end}}
+</div>
+{{end}}

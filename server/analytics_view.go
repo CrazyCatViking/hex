@@ -185,6 +185,8 @@ type chartDay struct {
 	Weekend   bool
 	Views     string
 	Visitors  string
+	// Tooltip replaces the default tooltip with lines separated by |.
+	Tooltip string
 }
 
 type chartGridLine struct {

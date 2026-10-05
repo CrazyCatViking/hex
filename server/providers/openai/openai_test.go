@@ -29,7 +29,7 @@ data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"argu
 
 data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
 
-data: {"choices":[],"usage":{"prompt_tokens":30,"completion_tokens":12}}
+data: {"choices":[],"usage":{"prompt_tokens":30,"completion_tokens":12,"prompt_tokens_details":{"cached_tokens":8}}}
 
 data: [DONE]
 
@@ -126,7 +126,7 @@ func TestStreamMapsRequestAndEvents(t *testing.T) {
 		t.Fatalf("unexpected message %+v", message)
 	}
 	done := events[6]
-	if done.StopReason != hex.StopToolUse || done.Usage.InputTokens != 30 || done.Usage.OutputTokens != 12 {
+	if done.StopReason != hex.StopToolUse || done.Usage.InputTokens != 22 || done.Usage.CachedInputTokens != 8 || done.Usage.OutputTokens != 12 {
 		t.Fatalf("unexpected done %+v", done)
 	}
 }
