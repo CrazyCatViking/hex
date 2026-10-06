@@ -285,9 +285,9 @@ func (s *Server) exportIntegrationAudit(w http.ResponseWriter, r *http.Request, 
 	rows := [][]string{{"at_utc", "site", "integration", "endpoint", "caller", "caller_name", "cached", "failed", "records", "input"}}
 	for _, record := range records {
 		rows = append(rows, []string{
-			record.At.UTC().Format(time.RFC3339), record.Site, record.Integration, record.Endpoint,
-			record.Caller, record.CallerName, strconv.FormatBool(record.Cached), strconv.FormatBool(record.Failed),
-			strings.Join(record.Records, " "), string(record.Input),
+			record.At.UTC().Format(time.RFC3339), spreadsheetText(record.Site), spreadsheetText(record.Integration), spreadsheetText(record.Endpoint),
+			spreadsheetText(record.Caller), spreadsheetText(record.CallerName), strconv.FormatBool(record.Cached), strconv.FormatBool(record.Failed),
+			spreadsheetText(strings.Join(record.Records, " ")), spreadsheetText(string(record.Input)),
 		})
 	}
 	if err := writer.WriteAll(rows); err != nil {

@@ -178,6 +178,10 @@ func (r *IntegrationRegistry) RegisterConnector(connector Connector) error {
 	if connector.OAuth2.ClientID == "" || connector.OAuth2.Endpoint.AuthURL == "" || connector.OAuth2.Endpoint.TokenURL == "" {
 		return fmt.Errorf("connector %s needs a client ID and OAuth endpoints", connector.Name)
 	}
+	if _, err := connectorOrigins(connector); err != nil {
+		return err
+	}
+	connector.APIOrigins = slices.Clone(connector.APIOrigins)
 
 	r.mu.Lock()
 	defer r.mu.Unlock()

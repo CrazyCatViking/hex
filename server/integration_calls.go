@@ -557,17 +557,15 @@ func (s *Server) removeSiteIntegrationApproval(ctx context.Context, identity *Id
 	if !owner {
 		return &IntegrationError{Status: http.StatusForbidden, Message: "only the site's owners can withdraw requests"}
 	}
-	approval, err := s.config.IntegrationStore.GetIntegrationApproval(ctx, site, integration.integration.Name)
-	if errors.Is(err, ErrNotFound) {
-		return nil
+	if s.isAdmin(identity) {
+		err = s.config.IntegrationStore.DeleteIntegrationApproval(ctx, site, integration.integration.Name)
+	} else {
+		err = s.config.IntegrationStore.WithdrawIntegrationApproval(ctx, site, integration.integration.Name)
 	}
-	if err != nil {
-		return err
-	}
-	if !s.isAdmin(identity) && approval.Status != ApprovalRequested {
+	if errors.Is(err, ErrForbidden) {
 		return &IntegrationError{Status: http.StatusForbidden, Message: "only platform admins revoke approvals"}
 	}
-	if err := s.config.IntegrationStore.DeleteIntegrationApproval(ctx, site, integration.integration.Name); err != nil && !errors.Is(err, ErrNotFound) {
+	if err != nil && !errors.Is(err, ErrNotFound) {
 		return err
 	}
 	slog.Info("integration approval removed", "site", site, "integration", integration.integration.Name, "by", identityName(identity))

@@ -42,10 +42,13 @@ func accountRejection(err error) string {
 // error rejects the connection, so it can also enforce which accounts may
 // connect (return an IntegrationError to explain why).
 type Connector struct {
-	Name            string
-	Title           string
-	Description     string
-	OAuth2          oauth2.Config
+	Name        string
+	Title       string
+	Description string
+	OAuth2      oauth2.Config
+	// APIOrigins limits bearer-token destinations. Empty defaults to the token
+	// endpoint's origin; configure distinct API origins explicitly.
+	APIOrigins      []string
 	AuthCodeOptions []oauth2.AuthCodeOption
 	Account         func(ctx context.Context, client *http.Client) (string, error)
 }
@@ -97,6 +100,9 @@ type IntegrationStore interface {
 	GetIntegrationApproval(ctx context.Context, site, integration string) (IntegrationApproval, error)
 	PutIntegrationApproval(ctx context.Context, approval IntegrationApproval) error
 	DeleteIntegrationApproval(ctx context.Context, site, integration string) error
+	// WithdrawIntegrationApproval atomically deletes only a pending request.
+	// Approved/other states return ErrForbidden; missing records succeed.
+	WithdrawIntegrationApproval(ctx context.Context, site, integration string) error
 	ListIntegrationApprovals(ctx context.Context) ([]IntegrationApproval, error)
 
 	GetCredential(ctx context.Context, owner, connector string) (CredentialRecord, error)
@@ -373,7 +379,12 @@ func (s *Server) completeConnection(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	record := CredentialRecord{Owner: identity.ID, Connector: connector.Name, ConnectedAt: now, LastUsedAt: now}
 	if connector.Account != nil {
-		account, err := connector.Account(r.Context(), config.Client(r.Context(), token))
+		client, err := connectorHTTPClient(r.Context(), connector, config.TokenSource(r.Context(), token))
+		if err != nil {
+			writeServerError(w, err)
+			return
+		}
+		account, err := connector.Account(r.Context(), client)
 		if err != nil {
 			slog.Warn("connected account rejected", "connector", connector.Name, "error", err)
 			writeError(w, http.StatusForbidden, "this "+connector.Title+" account cannot be connected: "+accountRejection(err))
@@ -502,7 +513,7 @@ func (s *Server) connectionClientGeneration(ctx context.Context, connectorName, 
 	if err != nil {
 		return nil, err
 	}
-	return oauth2.NewClient(ctx, oauth2.StaticTokenSource(token)), nil
+	return connectorHTTPClient(ctx, connector, oauth2.StaticTokenSource(token))
 }
 
 func (s *Server) connectionToken(ctx context.Context, connector Connector, owner string) (*oauth2.Token, error) {

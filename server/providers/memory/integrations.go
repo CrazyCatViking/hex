@@ -68,6 +68,24 @@ func (s *IntegrationStore) DeleteIntegrationApproval(ctx context.Context, site, 
 	return nil
 }
 
+func (s *IntegrationStore) WithdrawIntegrationApproval(ctx context.Context, site, integration string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := pairKey(site, integration)
+	approval, exists := s.approvals[key]
+	if !exists {
+		return nil
+	}
+	if approval.Status != hex.ApprovalRequested {
+		return hex.ErrForbidden
+	}
+	delete(s.approvals, key)
+	return nil
+}
+
 func (s *IntegrationStore) ListIntegrationApprovals(ctx context.Context) ([]hex.IntegrationApproval, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

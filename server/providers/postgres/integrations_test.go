@@ -90,6 +90,35 @@ func TestCredentialVersionsAgainstPostgres(t *testing.T) {
 	}
 }
 
+func TestPendingWithdrawalAgainstPostgres(t *testing.T) {
+	database, ctx := openTestDatabase(t)
+	site := "withdraw-" + rand.Text()
+	defer func() {
+		if err := database.DeleteIntegrationApproval(context.Background(), site, "docs"); err != nil && !errors.Is(err, hex.ErrNotFound) {
+			t.Error(err)
+		}
+	}()
+	if err := database.PutIntegrationApproval(ctx, hex.IntegrationApproval{Site: site, Integration: "docs", Status: hex.ApprovalRequested}); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.WithdrawIntegrationApproval(ctx, site, "docs"); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.WithdrawIntegrationApproval(ctx, site, "docs"); err != nil {
+		t.Fatal("missing withdrawal should be idempotent", err)
+	}
+	if err := database.PutIntegrationApproval(ctx, hex.IntegrationApproval{Site: site, Integration: "docs", Status: hex.ApprovalApproved}); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.WithdrawIntegrationApproval(ctx, site, "docs"); !errors.Is(err, hex.ErrForbidden) {
+		t.Fatalf("approved withdrawal accepted: %v", err)
+	}
+	approval, err := database.GetIntegrationApproval(ctx, site, "docs")
+	if err != nil || approval.Status != hex.ApprovalApproved {
+		t.Fatalf("approved record changed: %+v %v", approval, err)
+	}
+}
+
 func openSingleConnectionCredentialDatabase(t *testing.T) (*Database, context.Context) {
 	t.Helper()
 	connection := os.Getenv("HEX_TEST_POSTGRES_URL")

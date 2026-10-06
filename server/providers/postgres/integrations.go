@@ -91,6 +91,25 @@ func (d *Database) DeleteIntegrationApproval(ctx context.Context, site, integrat
 	return nil
 }
 
+func (d *Database) WithdrawIntegrationApproval(ctx context.Context, site, integration string) error {
+	result, err := d.pool.Exec(ctx, `DELETE FROM hex_integration_approvals
+		WHERE site=$1 AND integration=$2 AND approval->>'status'=$3`, site, integration, hex.ApprovalRequested)
+	if err != nil {
+		return fmt.Errorf("withdraw integration approval: %w", err)
+	}
+	if result.RowsAffected() > 0 {
+		return nil
+	}
+	_, err = d.GetIntegrationApproval(ctx, site, integration)
+	if errors.Is(err, hex.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return hex.ErrForbidden
+}
+
 func (d *Database) ListIntegrationApprovals(ctx context.Context) ([]hex.IntegrationApproval, error) {
 	rows, err := d.pool.Query(ctx, `SELECT approval FROM hex_integration_approvals ORDER BY site, integration`)
 	if err != nil {
