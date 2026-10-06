@@ -148,7 +148,10 @@ func (a *App) accessRequest(ctx context.Context, options *accessOptions, site, m
 		project.Server = options.server
 	}
 	if options.resource != "" {
-		project = project.withResource(options.resource)
+		project, err = project.withResource(options.resource)
+		if err != nil {
+			return err
+		}
 	}
 
 	data, err := a.apiCall(ctx, project, method, "/api/hex/sites/"+site+suffix, body)

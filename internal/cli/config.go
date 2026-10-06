@@ -113,16 +113,22 @@ type Project struct {
 	Capabilities *Capabilities   `json:"-"`
 }
 
-// withResource overrides the API resource. The profile's sign-in app only
-// applies to the platform's own resource, so other resources use Azure CLI.
-func (p Project) withResource(resource string) Project {
-	if resource != p.Resource && !authMatchesResource(p.Auth, resource) {
+// withResource retains configured auth only for a resource named by its scopes.
+// Profiles without Auth retain the legacy Azure CLI resource override behavior.
+func (p Project) withResource(resource string) (Project, error) {
+	if p.Auth != nil {
+		if !authMatchesResource(p.Auth, resource) {
+			return p, fmt.Errorf("--resource %q is incompatible with the configured auth scopes; configure a separate platform profile for that resource", resource)
+		}
+		p.Resource = resource
+		return p, nil
+	}
+	if resource != p.Resource {
 		p.ClientID = ""
 		p.TenantID = ""
-		p.Auth = nil
 	}
 	p.Resource = resource
-	return p
+	return p, nil
 }
 
 func decodeStrict(data []byte, value any) error {

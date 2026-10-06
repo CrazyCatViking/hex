@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	hex "github.com/crazycatviking/hex/server"
+	"github.com/jackc/pgx/v5"
 )
 
 func (d *Database) migrateAIUsage(ctx context.Context) error {
@@ -29,31 +30,217 @@ func (d *Database) migrateAIUsage(ctx context.Context) error {
 		CREATE INDEX IF NOT EXISTS hex_ai_usage_at ON hex_ai_usage (at);
 		CREATE INDEX IF NOT EXISTS hex_ai_usage_site ON hex_ai_usage (site, at);
 		CREATE INDEX IF NOT EXISTS hex_ai_usage_caller ON hex_ai_usage (caller, at);
+		CREATE TABLE IF NOT EXISTS hex_ai_usage_lock (
+			id integer PRIMARY KEY CHECK (id = 1)
+		);
+		INSERT INTO hex_ai_usage_lock (id) VALUES (1) ON CONFLICT DO NOTHING;
+		CREATE TABLE IF NOT EXISTS hex_ai_reservations (
+			id text PRIMARY KEY,
+			at timestamptz NOT NULL,
+			site text NOT NULL,
+			caller text NOT NULL,
+			cost_micros bigint NOT NULL CHECK (cost_micros >= 0)
+		);
+		ALTER TABLE hex_ai_reservations ADD COLUMN IF NOT EXISTS details jsonb NOT NULL DEFAULT '{}';
 		CREATE TABLE IF NOT EXISTS hex_ai_budgets (
 			scope text NOT NULL,
 			subject text NOT NULL,
 			budget jsonb NOT NULL,
 			PRIMARY KEY (scope, subject)
 		)`
-	if _, err := d.pool.Exec(ctx, statements); err != nil {
+	tx, err := d.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	// Serialize this capability's CREATE/ALTER operations across instances,
+	// including first boot when the accounting serialization row is absent.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('hex_ai_usage_migration', 0))`); err != nil {
+		return fmt.Errorf("lock AI usage migration: %w", err)
+	}
+	if _, err := tx.Exec(ctx, statements); err != nil {
 		return fmt.Errorf("create AI usage tables: %w", err)
 	}
-	return nil
+	return tx.Commit(ctx)
 }
 
 func (d *Database) RecordAIUsage(ctx context.Context, record hex.AIUsageRecord) error {
+	if record.ID == "" || record.CostMicros < 0 {
+		return fmt.Errorf("invalid AI usage record")
+	}
+	tx, err := d.beginAIUsage(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var held bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM hex_ai_reservations WHERE id=$1)`, record.ID).Scan(&held); err != nil {
+		return err
+	}
+	if held {
+		return fmt.Errorf("use SettleAIUsage for reserved calls")
+	}
+	if err := insertAIUsage(ctx, tx, record); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// The single database row serializes short accounting transactions across
+// all replicas. No lock is held while waiting for a model or running tools.
+func (d *Database) beginAIUsage(ctx context.Context) (pgx.Tx, error) {
+	tx, err := d.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var lockID int
+	if err := tx.QueryRow(ctx, `SELECT id FROM hex_ai_usage_lock WHERE id=1 FOR UPDATE`).Scan(&lockID); err != nil {
+		tx.Rollback(ctx)
+		return nil, err
+	}
+	return tx, nil
+}
+
+func insertAIUsage(ctx context.Context, tx pgx.Tx, record hex.AIUsageRecord) error {
 	const statement = `
 		INSERT INTO hex_ai_usage (id, at, site, caller, caller_name, model, input_tokens, cached_input_tokens,
 			cache_write_tokens, output_tokens, estimated, cost_micros, priced)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		ON CONFLICT (id) DO NOTHING`
 	usage := record.Usage
-	_, err := d.pool.Exec(ctx, statement, record.ID, record.At, record.Site, record.Caller, record.CallerName, record.Model,
+	_, err := tx.Exec(ctx, statement, record.ID, record.At, record.Site, record.Caller, record.CallerName, record.Model,
 		usage.InputTokens, usage.CachedInputTokens, usage.CacheWriteTokens, usage.OutputTokens, usage.Estimated,
 		record.CostMicros, record.Priced)
 	if err != nil {
 		return fmt.Errorf("record AI usage: %w", err)
 	}
 	return nil
+}
+
+func (d *Database) ReserveAIUsage(ctx context.Context, reservation hex.AIUsageReservation, checks []hex.AIBudgetCheck) error {
+	reservation.EstimatedUsage.Estimated = true
+	if reservation.ID == "" || reservation.CostMicros < 0 {
+		return fmt.Errorf("invalid AI reservation")
+	}
+	details, err := json.Marshal(reservation)
+	if err != nil {
+		return err
+	}
+	tx, err := d.beginAIUsage(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var settled, held, matching bool
+	if err := tx.QueryRow(ctx, `SELECT
+		EXISTS(SELECT 1 FROM hex_ai_usage WHERE id=$1),
+		EXISTS(SELECT 1 FROM hex_ai_reservations WHERE id=$1),
+		EXISTS(SELECT 1 FROM hex_ai_reservations WHERE id=$1 AND at=$2 AND site=$3 AND caller=$4 AND cost_micros=$5 AND details=$6::jsonb)`,
+		reservation.ID, reservation.At, reservation.Site, reservation.Caller, reservation.CostMicros, details).Scan(&settled, &held, &matching); err != nil {
+		return err
+	}
+	if settled || (held && !matching) {
+		return fmt.Errorf("AI reservation ID already exists")
+	}
+	if matching {
+		return tx.Commit(ctx)
+	}
+	for index, check := range checks {
+		where, arguments := usageConditions(check.Filter)
+		var spent int64
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(SUM(cost_micros),0) FROM hex_ai_usage`+where, arguments...).Scan(&spent); err != nil {
+			return err
+		}
+		var outstanding int64
+		// Never age an unresolved hold out of admission's spending.
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(SUM(cost_micros),0) FROM hex_ai_reservations
+			WHERE ($1='' OR site=$1) AND ($2='' OR caller=$2)`, check.Filter.Site, check.Filter.Caller).Scan(&outstanding); err != nil {
+			return err
+		}
+		if spent >= check.LimitMicros || outstanding >= check.LimitMicros-spent {
+			return &hex.AIBudgetExceededError{Index: index}
+		}
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO hex_ai_reservations (id,at,site,caller,cost_micros,details) VALUES ($1,$2,$3,$4,$5,$6)`,
+		reservation.ID, reservation.At, reservation.Site, reservation.Caller, reservation.CostMicros, details); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (d *Database) SettleAIUsage(ctx context.Context, record hex.AIUsageRecord) error {
+	if record.CostMicros < 0 {
+		return fmt.Errorf("invalid AI settlement cost")
+	}
+	tx, err := d.beginAIUsage(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var settled bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM hex_ai_usage WHERE id=$1)`, record.ID).Scan(&settled); err != nil {
+		return err
+	}
+	if settled {
+		return tx.Commit(ctx)
+	}
+	result, err := tx.Exec(ctx, `DELETE FROM hex_ai_reservations WHERE id=$1 AND site=$2 AND caller=$3 AND at=$4
+		AND (COALESCE(details->>'model','')='' OR details->>'model'=$5)`,
+		record.ID, record.Site, record.Caller, record.At, record.Model)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() != 1 {
+		return fmt.Errorf("AI settlement has no matching reservation: %w", hex.ErrNotFound)
+	}
+	if err := insertAIUsage(ctx, tx, record); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (d *Database) ListAIReservations(ctx context.Context, filter hex.AIUsageFilter) ([]hex.AIUsageReservation, error) {
+	where, arguments := usageConditions(filter)
+	rows, err := d.pool.Query(ctx, `SELECT id,at,site,caller,cost_micros,details FROM hex_ai_reservations`+where+` ORDER BY at,id COLLATE "C"`, arguments...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]hex.AIUsageReservation, 0)
+	for rows.Next() {
+		var held hex.AIUsageReservation
+		var details []byte
+		if err := rows.Scan(&held.ID, &held.At, &held.Site, &held.Caller, &held.CostMicros, &details); err != nil {
+			return nil, err
+		}
+		// Columns remain authoritative for legacy holds and preserve the
+		// database's timestamp precision for exact settlement matching.
+		var metadata hex.AIUsageReservation
+		if err := json.Unmarshal(details, &metadata); err != nil {
+			return nil, fmt.Errorf("decode AI reservation %s: %w", held.ID, err)
+		}
+		metadata.ID, metadata.At = held.ID, held.At
+		metadata.Site, metadata.Caller, metadata.CostMicros = held.Site, held.Caller, held.CostMicros
+		metadata.EstimatedUsage.Estimated = true
+		result = append(result, metadata)
+	}
+	return result, rows.Err()
+}
+
+func (d *Database) AIBudgetSpend(ctx context.Context, filter hex.AIUsageFilter) (hex.AIUsageSpend, error) {
+	where, arguments := usageConditions(filter)
+	// One SQL statement gives a single MVCC snapshot across both tables.
+	siteIndex, callerIndex := len(arguments)+1, len(arguments)+2
+	query := fmt.Sprintf(`SELECT
+		(SELECT COALESCE(SUM(cost_micros),0) FROM hex_ai_usage%s),
+		COALESCE(SUM(cost_micros),0), COUNT(*) FROM hex_ai_reservations
+		WHERE ($%d='' OR site=$%d) AND ($%d='' OR caller=$%d)`, where, siteIndex, siteIndex, callerIndex, callerIndex)
+	arguments = append(arguments, filter.Site, filter.Caller)
+	var spend hex.AIUsageSpend
+	if err := d.pool.QueryRow(ctx, query, arguments...).Scan(&spend.SettledMicros, &spend.ReservedMicros, &spend.Reservations); err != nil {
+		return spend, fmt.Errorf("read AI budget spending: %w", err)
+	}
+	return spend, nil
 }
 
 // usageConditions turns a filter into a WHERE clause and its arguments.
@@ -108,7 +295,7 @@ func (d *Database) AIUsageTotals(ctx context.Context, filter hex.AIUsageFilter, 
 		order = "key"
 	}
 	where, arguments := usageConditions(filter)
-	query := `SELECT ` + column + ` AS key, (array_agg(caller_name ORDER BY at DESC))[1], COUNT(*),
+	query := `SELECT ` + column + ` AS key, (array_agg(caller_name ORDER BY at DESC, id COLLATE "C" DESC))[1], COUNT(*),
 			SUM(input_tokens), SUM(cached_input_tokens), SUM(cache_write_tokens), SUM(output_tokens),
 			SUM(cost_micros), COUNT(*) FILTER (WHERE estimated)
 		FROM hex_ai_usage` + where + ` GROUP BY key ORDER BY ` + order

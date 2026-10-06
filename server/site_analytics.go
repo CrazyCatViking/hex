@@ -46,7 +46,13 @@ func (s *Server) loadSiteAnalytics(ctx context.Context, site string, values url.
 	if err != nil {
 		return AnalyticsView{}, &siteAnalyticsInputError{err}
 	}
-	report, err := s.config.Analytics.QueryAnalytics(ctx, query)
+	visitorReader, paged := s.config.Analytics.(AnalyticsVisitorReader)
+	var report AnalyticsReport
+	if paged {
+		report, err = s.analyticsSummary(ctx, query)
+	} else {
+		report, err = s.config.Analytics.QueryAnalytics(ctx, query)
+	}
 	if err != nil {
 		return AnalyticsView{}, err
 	}
@@ -64,11 +70,29 @@ func (s *Server) loadSiteAnalytics(ctx context.Context, site string, values url.
 	view.VisitorSortChoices = choices(view.VisitorSort, [2]string{"views", "Most page views"}, [2]string{"visits", "Most visits"}, [2]string{"recent", "Last visited"}, [2]string{"name", "Name A–Z"})
 	view.AnonymousPageViews = report.Traffic.PageViews
 	var peakViews int64
+	if paged {
+		pageNumber := 1
+		if value := values.Get("visitor-page"); value != "" {
+			pageNumber, err = strconv.Atoi(value)
+			if err != nil || pageNumber < 1 {
+				return AnalyticsView{}, &siteAnalyticsInputError{errors.New("visitor-page must be a positive integer")}
+			}
+		}
+		page, err := visitorReader.QueryAnalyticsVisitors(ctx, AnalyticsVisitorsQuery{AnalyticsQuery: query, Search: view.VisitorSearch, Sort: view.VisitorSort, Page: pageNumber, Limit: managePageSize})
+		if err != nil {
+			return AnalyticsView{}, err
+		}
+		report.Users = page.Rows
+		view.AnonymousPageViews, peakViews = page.AnonymousPageViews, page.PeakPageViews
+		view.VisitorTotal, view.VisitorPage = page.Total, page.Page
+	}
 	for _, visitor := range report.Users {
 		peakViews = max(peakViews, visitor.PageViews)
 	}
 	for _, visitor := range report.Users {
-		view.AnonymousPageViews -= visitor.PageViews
+		if !paged {
+			view.AnonymousPageViews -= visitor.PageViews
+		}
 		if visitor.PageViews == 0 || visitor.Key == "" {
 			continue
 		}
@@ -81,7 +105,7 @@ func (s *Server) loadSiteAnalytics(ctx context.Context, site string, values url.
 				row.Name = visitor.Person.Email
 			}
 		}
-		if view.VisitorSearch != "" && !containsFold(row.Name+" "+row.Email+" "+row.ID, view.VisitorSearch) {
+		if !paged && view.VisitorSearch != "" && !containsFold(row.Name+" "+row.Email+" "+row.ID, view.VisitorSearch) {
 			continue
 		}
 		row.Last = relativeTime(visitor.LastVisited, now)
@@ -112,7 +136,7 @@ func (s *Server) loadSiteAnalytics(ctx context.Context, site string, values url.
 		}
 		return strings.Compare(a.ID, b.ID)
 	})
-	if err := paginateSiteVisitors(&view, values); err != nil {
+	if err := paginateSiteVisitorsPage(&view, values, paged); err != nil {
 		return AnalyticsView{}, &siteAnalyticsInputError{err}
 	}
 	s.describeSiteReport(ctx, &view, report, values, now)
@@ -175,6 +199,10 @@ func (s *Server) describeSiteReport(ctx context.Context, view *AnalyticsView, re
 }
 
 func paginateSiteVisitors(view *AnalyticsView, values url.Values) error {
+	return paginateSiteVisitorsPage(view, values, false)
+}
+
+func paginateSiteVisitorsPage(view *AnalyticsView, values url.Values, paged bool) error {
 	page := 1
 	if value := values.Get("visitor-page"); value != "" {
 		parsed, err := strconv.Atoi(value)
@@ -183,7 +211,11 @@ func paginateSiteVisitors(view *AnalyticsView, values url.Values) error {
 		}
 		page = parsed
 	}
-	view.VisitorTotal = len(view.SiteVisitors)
+	if !paged {
+		view.VisitorTotal = len(view.SiteVisitors)
+	} else {
+		page = view.VisitorPage
+	}
 	view.VisitorSummary = peopleCount(view.VisitorTotal) + " opened this site in the period."
 	if view.VisitorSearch != "" {
 		view.VisitorSummary = peopleCount(view.VisitorTotal) + " match your search."
@@ -207,7 +239,9 @@ func paginateSiteVisitors(view *AnalyticsView, values url.Values) error {
 		view.VisitorNext = pageURL + link(view.VisitorPage+1)
 		view.VisitorNextFragment = fragment + link(view.VisitorPage+1)
 	}
-	start := (view.VisitorPage - 1) * managePageSize
-	view.SiteVisitors = view.SiteVisitors[start:min(start+managePageSize, view.VisitorTotal)]
+	if !paged {
+		start := (view.VisitorPage - 1) * managePageSize
+		view.SiteVisitors = view.SiteVisitors[start:min(start+managePageSize, view.VisitorTotal)]
+	}
 	return nil
 }

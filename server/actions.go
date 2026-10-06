@@ -79,6 +79,55 @@ type registeredAction struct {
 	effect string
 }
 
+type actionInputError struct {
+	err error
+}
+
+func (e *actionInputError) Error() string { return e.err.Error() }
+func (e *actionInputError) Unwrap() error { return e.err }
+
+// A result failure is an internal contract error, even when a custom JSON
+// marshaler returns an ActionError or an authorization error.
+type actionResultError struct {
+	name string
+	err  error
+}
+
+func (e *actionResultError) Error() string {
+	return fmt.Sprintf("action %s returned an invalid result: %v", e.name, e.err)
+}
+
+func (a *registeredAction) validateInput(input json.RawMessage) error {
+	if len(input) > MaxActionInputBytes {
+		return &actionInputError{err: errors.New("action input exceeds 1 MiB")}
+	}
+	if err := validateActionJSON(a.input, input); err != nil {
+		return &actionInputError{err: err}
+	}
+	return nil
+}
+
+// execute applies the action's contract independently of its transport. The
+// caller supplies its existing authorization context; handler errors retain
+// their identity so each transport can map them appropriately.
+func (a *registeredAction) execute(ctx context.Context, caller ActionContext, input json.RawMessage) (json.RawMessage, error) {
+	if err := a.validateInput(input); err != nil {
+		return nil, err
+	}
+	result, err := a.handler(ctx, caller, input)
+	if err != nil {
+		return nil, err
+	}
+	output, err := json.Marshal(result)
+	if err == nil {
+		err = validateActionJSON(a.output, output)
+	}
+	if err != nil {
+		return nil, &actionResultError{name: a.definition.Name, err: err}
+	}
+	return json.RawMessage(output), nil
+}
+
 // ActionRegistry stores per-site operations. Register validates and compiles
 // contracts before exposing them; registered definitions cannot be replaced.
 // Its zero value is ready to use and registration is safe alongside requests.
@@ -235,19 +284,18 @@ func (s *Server) runAction(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "expected action input of at most 1 MiB")
 		return
 	}
-	if err := validateActionJSON(action.input, input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid action input: "+err.Error())
-		return
-	}
 	authorization := requestAuthorization(r)
 	caller := ActionContext{
 		Site: r.PathValue("site"), Identity: authorization.identity,
 		Role: roleNames[authorization.role], authorization: authorization,
 	}
-	result, err := action.handler(r.Context(), caller, input)
+	output, err := action.execute(r.Context(), caller, input)
 	if err != nil {
+		var inputError *actionInputError
 		var actionError *ActionError
 		switch {
+		case errors.As(err, &inputError):
+			writeError(w, http.StatusBadRequest, "invalid action input: "+inputError.Error())
 		case errors.Is(err, ErrForbidden):
 			writeError(w, http.StatusForbidden, "performing this action is restricted")
 		case errors.As(err, &actionError):
@@ -257,13 +305,5 @@ func (s *Server) runAction(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	output, err := json.Marshal(result)
-	if err == nil {
-		err = validateActionJSON(action.output, output)
-	}
-	if err != nil {
-		writeServerError(w, fmt.Errorf("action %s returned an invalid result: %w", action.definition.Name, err))
-		return
-	}
-	writeJSON(w, http.StatusOK, json.RawMessage(output))
+	writeJSON(w, http.StatusOK, output)
 }

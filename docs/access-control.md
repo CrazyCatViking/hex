@@ -12,11 +12,13 @@ A **principal** is a typed value in a policy:
 
 | Principal | Matches |
 | --- | --- |
-| `user:<value>` | The caller's stable identity ID, case-insensitively. Email and display-name claims never grant access. |
+| `user:<value>` | The caller's exact, case-sensitive stable identity ID. Email and display-name claims never grant access. |
 | `group:<value>` | One of the caller's group claims (Entra group object IDs) |
 | `role:<value>` | One of the caller's role claims (app role values) |
 
-Values are 1–128 letters, digits, `@`, `.`, `_` or `-`, starting with a letter or digit. Configured `HEX_ADMIN_GROUPS` values may be untyped; an untyped value matches the ID, any group or any role.
+Values are opaque, case-sensitive strings of 1–256 non-whitespace printable ASCII characters. Punctuation such as `:`, `|`, `/` and `@` is supported: `user:oidc|Subject:AbC` matches the full ID `oidc|Subject:AbC`. Only the first reserved `user:`, `group:` or `role:` prefix identifies the claim kind. Configured `HEX_ADMIN_GROUPS` and `HEX_PUBLISHER_GROUPS` values may be untyped; an untyped value matches the exact ID, any group or any role. Use a typed principal when an opaque ID starts with a reserved prefix.
+
+The resolver owns provider-specific canonicalization. Easy Auth normalizes Entra (`aad`) user and group GUIDs to lowercase; opaque IDs and app role values retain their original spelling. Use that same lowercase GUID spelling in policies and configured group IDs. Remembered-person and group labels use the same exact ID comparison as authorization; case-insensitive name/email search does not grant access.
 
 A **site access policy** is a server-owned record per site name. Each site has one of four roles for a caller:
 
@@ -78,7 +80,9 @@ A principal array grants its members, provided they can view the site at all. Ow
 
 ## Path rules
 
-`paths` restricts static assets under URL prefixes. Prefixes start with `/` and may contain letters, digits, `.`, `_`, `~`, `/` and `-` (no `..` or `//`); at most 32 rules. The longest matching prefix wins, matching ignores case (Azure Files resolves paths case-insensitively), and a prefix such as `/admin/` also covers the bare `/admin`. A path rule needs `viewers`, a level or principals; `creator` is not allowed. Paths without a matching rule use only the site-level decision.
+`paths` restricts static assets under URL prefixes. Prefixes start with `/` and may contain letters, digits, `.`, `_`, `~`, `/` and `-` (no `..` or `//`); at most 32 rules. The longest matching prefix wins, and a prefix such as `/admin/` also covers the bare `/admin`. A path rule needs `viewers`, a level or principals; `creator` is not allowed. Paths without a matching rule use only the site-level decision.
+
+Matching is case-sensitive by default. The host must set `Config.PathCaseInsensitive: true` when its static storage resolves paths case-insensitively, including Azure Files. This setting governs static authorization and portal icon authorization; application file-key rules retain exact matching. `/Admin/` and `/admin/` can have distinct rules on case-sensitive storage, but are ambiguous and rejected in case-insensitive mode. Duplicate exact prefixes are also rejected. Existing ambiguous policies fail closed when read, so consolidate them before changing a host's comparison mode. Portable policy validation does not assume Azure storage.
 
 NGINX sends the decoded, normalized request path to the authorization subrequest, so encoded or dot-segment variants of a protected path are checked as that path. Path rules protect separately served files only. An admin area must be its own HTML entry point, such as `admin/index.html` in a multi-page build, with admin-only assets under the same prefix. Hash routes inside a public page cannot be protected, and shared bundles remain readable. Protect the data behind an admin page with collection, file and channel rules.
 
@@ -148,6 +152,10 @@ Claims and policy changes use `AccessStore.UpdateSiteAccess`, which serializes t
 ### Upgrading existing policies and providers
 
 Older versions also matched `user:` values against email and display-name claims. Replace those values with stable IDs in owners, editors, viewers and rule audiences, including policies in hex.json. Use the sharing picker (which stores IDs), `hex whoami`, or your identity provider's directory to obtain the IDs. A platform admin can repair policies whose owners were email/name-based. There is no automatic email-to-ID migration or authorization fallback.
+
+Core identity matching now preserves case for users, groups, roles, admin and publisher principals. Replace differently cased opaque principal values with the exact claims returned by `hex whoami`; do not lowercase generic identity-provider subjects or roles. For Easy Auth/Entra, lowercase user/group GUIDs in existing policies, configured groups, admin/publisher lists and remembered-person IDs to match the resolver's canonical GUIDs. `easyauth.CanonicalID` and `easyauth.CanonicalPrincipal` are available to Azure compositions and migration tools; role values remain exact. Core policy normalization does not rewrite provider claims.
+
+Older path matching always ignored case. Preserve that behavior explicitly with `Config.PathCaseInsensitive: true` on Azure Files and other case-insensitive static mounts. On case-sensitive storage, review prefixes against the actual asset spelling before adopting the exact default. Consolidate casefold-colliding rules before enabling case-insensitive comparison; there is no order-dependent winner for ambiguous policies.
 
 Custom access stores must implement the atomic `UpdateSiteAccess` contract. A separate read followed by an unconditional write is not sufficient; all policy writers must participate in the same serialization mechanism.
 

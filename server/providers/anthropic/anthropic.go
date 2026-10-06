@@ -121,17 +121,17 @@ func (p *Provider) Stream(ctx context.Context, request hex.AIRequest) (hex.AIStr
 	}
 	body, err := json.Marshal(p.messagesRequest(model, request))
 	if err != nil {
-		return nil, fmt.Errorf("encode Anthropic request: %w", err)
+		return nil, &hex.AINoSpendError{Err: fmt.Errorf("encode Anthropic request: %w", err)}
 	}
 	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, p.config.BaseURL+"/v1/messages", bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return nil, &hex.AINoSpendError{Err: err}
 	}
 	httpRequest.Header.Set("Content-Type", "application/json")
 	httpRequest.Header.Set("Accept", "text/event-stream")
 	httpRequest.Header.Set("anthropic-version", p.config.AnthropicVersion)
 	if err := p.config.Authorize(httpRequest); err != nil {
-		return nil, fmt.Errorf("authorize Anthropic request: %w", err)
+		return nil, &hex.AINoSpendError{Err: fmt.Errorf("authorize Anthropic request: %w", err)}
 	}
 
 	response, err := p.config.HTTPClient.Do(httpRequest)

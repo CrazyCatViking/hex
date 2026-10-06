@@ -22,6 +22,15 @@ type ConnectionConfig struct {
 	Auth     *AuthConfig
 }
 
+// Validate checks a host's complete, non-secret connection settings before
+// startup. Request handlers use the same validation when serving them.
+func (c *ConnectionConfig) Validate(siteBaseURL string) error {
+	if c == nil {
+		return fmt.Errorf("platform connection settings are not configured")
+	}
+	return validateConnection(c, siteBaseURL)
+}
+
 type connectionDocument struct {
 	Version       int            `json:"version"`
 	Name          string         `json:"name"`
@@ -51,7 +60,7 @@ func (s *Server) connectionSettings() (connectionDocument, error) {
 	if connection == nil {
 		return connectionDocument{}, fmt.Errorf("platform connection settings are not configured")
 	}
-	if err := validateConnection(connection, s.config.SiteBaseURL); err != nil {
+	if err := connection.Validate(s.config.SiteBaseURL); err != nil {
 		return connectionDocument{}, fmt.Errorf("invalid platform connection settings: %w", err)
 	}
 	if _, err := s.cliReleaseURL(); err != nil {

@@ -12,8 +12,9 @@ Each Hex server includes a portal at the main domain, for example **https://hex.
 | Build & publish | `/start` | The installer for the detected OS and three steps: install, share a file or folder, and build an app with a coding agent. |
 | Admin | `/admin`, `/admin/sites`, `/admin/users` | Platform-wide inventory, user activity, publishing history and nginx traffic, with date ranges and site/user drill-downs. Requires analytics and platform-admin access. |
 | Integration audit | `/admin/integration-audit` | Every call of audited integrations, cached answers included: when, who, from which site, the endpoint, the input and the records it showed, filterable and downloadable as CSV. Requires an integration audit store and platform-admin access; see [Auditing](integrations.md#auditing). |
+| Integrations | `/integrations`, `/integrations?site=<site>` | Registry-driven integration catalog, grants, connection and approval status. Owners request approval for a site; admins review, approve and revoke requests. Site management also exposes an Integrations tab. |
 
-The account menu in the header shows the person's name, email, their configured groups and whether they are a platform admin, and links to sign out through `/.auth/logout`.
+The account menu in the header shows the person's name, email, their configured groups and whether they are a platform admin. **Your sites** appears only when management is enabled. **Sign out** appears only when the host supplies `Config.LogoutURL`; it points to that host's logout route. Azure Easy Auth hosts can explicitly configure `/.auth/logout`. There is no provider-specific logout route assumed by the portal, and browser logout does not clear the CLI's saved session (`hex logout` does that).
 
 ## Hosting
 
@@ -28,6 +29,8 @@ The portal discovers local `rel="icon"` / `rel="shortcut icon"` links in the roo
 same-site absolute URLs work; external/data URLs are not fetched. This works for
 existing publications without republishing. PNG, ICO, SVG, JPEG, GIF and WebP
 previews are limited to 256 KiB and preserve site/path access permissions.
+
+Icon path checks use the same host-selected case mode as static authorization: exact by default, or `Config.PathCaseInsensitive: true` for case-insensitive mounts such as Azure Files. Configure the mode to match the actual static storage before serving protected assets.
 
 Icons use a small authenticated preview endpoint on the portal domain,
 `/api/hex/sites/<site>/icon`, so they work with the portal session and same-origin

@@ -25,7 +25,7 @@ type scriptedProvider struct {
 
 func (p *scriptedProvider) Models(context.Context) ([]hex.AIModel, error) {
 	return []hex.AIModel{
-		{ID: "general", Name: "General", Thinking: true, Tools: true, MaxOutputTokens: 4000, Price: &hex.AIPrice{Input: 1, Output: 5}},
+		{ID: "general", Name: "General", Thinking: true, Tools: true, ContextTokens: 8000, MaxOutputTokens: 4000, Price: &hex.AIPrice{Input: 1, Output: 5}},
 		{ID: "premium", Name: "Premium", Tools: true, Restricted: true},
 	}, nil
 }

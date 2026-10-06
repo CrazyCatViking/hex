@@ -172,11 +172,11 @@ func TestLegacySetupAndResourcePinsUseMigratedAuth(t *testing.T) {
 			if err != nil || project.Auth == nil {
 				t.Fatalf("resource pin lost sign-in app: %+v %v", project, err)
 			}
-			if override := project.withResource(strings.TrimRight(resource, "/")); override.Auth == nil {
+			if override, err := project.withResource(strings.TrimRight(resource, "/")); err != nil || override.Auth == nil {
 				t.Fatal("same API override lost sign-in app")
 			}
-			if override := project.withResource("api://different-api"); override.Auth != nil {
-				t.Fatal("different API retained sign-in app")
+			if override, err := project.withResource("api://different-api"); err == nil || !reflect.DeepEqual(override.Auth, project.Auth) {
+				t.Fatal("different API override did not fail with configured auth preserved")
 			}
 		})
 	}
@@ -234,5 +234,60 @@ func TestProfileMigrationWriteFailureLeavesOriginalStoreIntact(t *testing.T) {
 	}
 	if !bytes.Equal(before, after) {
 		t.Fatal("failed migration changed original profile store")
+	}
+}
+
+func TestGenericOIDCResourcePinPreservesProfileAuth(t *testing.T) {
+	for _, auth := range []*hex.AuthConfig{
+		{Type: "oidc", Issuer: "https://identity.example.com", ClientID: "hex-cli", Scopes: []string{"openid", "hex-api"}},
+		{Type: "oidc", Issuer: "https://identity.example.com", ClientID: testClientID, Scopes: []string{"openid", "api://different-resource/.default"}},
+		{Type: "none"},
+	} {
+		t.Run(auth.Type+"/"+auth.ClientID, func(t *testing.T) {
+			directory := t.TempDir()
+			t.Setenv("HEX_CONFIG_DIR", filepath.Join(directory, "profiles"))
+			connection := localConnection("https://hex.example.com")
+			connection.Auth = auth
+			if _, err := saveProfile(connection, "company"); err != nil {
+				t.Fatal(err)
+			}
+			if err := writeJSONFile(filepath.Join(directory, "hex.json"), Project{Name: "demo", Platform: "company", Resource: testResource}); err != nil {
+				t.Fatal(err)
+			}
+			app, _ := testApp(t, directory)
+			project, err := app.commandConfig("", true)
+			if err != nil || !reflect.DeepEqual(project.Auth, auth) || project.Resource != "" || project.ClientID != "" || project.TenantID != "" {
+				t.Fatalf("generic auth lost to legacy resource pin: %+v %v", project, err)
+			}
+			if updated, err := project.withResource(testResource); err == nil || !reflect.DeepEqual(updated.Auth, auth) {
+				t.Fatalf("generic override discarded auth or failed to reject resource: %+v %v", updated, err)
+			}
+			if authMatchesResource(auth, testResource) {
+				t.Fatal("generic OIDC scope inferred Entra auth")
+			}
+		})
+	}
+}
+
+func TestGenericOIDCResourceOverrideFailsBeforeAuthentication(t *testing.T) {
+	t.Setenv("HEX_TOKEN", "")
+	directory := t.TempDir()
+	t.Setenv("HEX_CONFIG_DIR", filepath.Join(directory, "profiles"))
+	connection := localConnection("https://hex.example.com")
+	connection.Auth = &hex.AuthConfig{Type: "oidc", Issuer: "https://identity.example.com", ClientID: "hex-cli", Scopes: []string{"openid", "hex-api"}}
+	if _, err := saveProfile(connection, "company"); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"whoami", "--resource", testResource},
+		{"access", "check", "demo", "--resource", testResource},
+		{"capabilities", "--resource", testResource},
+		{"capabilities", "--refresh", "--resource", testResource},
+	} {
+		app, _ := testApp(t, directory)
+		err := app.Execute(context.Background(), args, "test")
+		if err == nil || !strings.Contains(err.Error(), "incompatible with the configured auth scopes") {
+			t.Fatalf("%v did not reject generic OIDC resource override: %v", args, err)
+		}
 	}
 }

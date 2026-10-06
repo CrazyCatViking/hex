@@ -74,7 +74,7 @@ func TestIntegrationStoreAgainstPostgres(t *testing.T) {
 		t.Fatalf("unexpected credential %+v %v", credential, err)
 	}
 	used := time.Now().UTC().Truncate(time.Microsecond)
-	if err := database.TouchCredential(ctx, owner, "docs", used); err != nil {
+	if err := database.TouchCredential(ctx, owner, "docs", credential.Version, used); err != nil {
 		t.Fatal(err)
 	}
 	listed, err := database.ListCredentials(ctx, owner)
@@ -132,13 +132,14 @@ func TestAutomationStoreAgainstPostgres(t *testing.T) {
 
 	// Concurrent claims of the same occurrence: exactly one wins.
 	next := due.Add(24 * time.Hour)
+	revision := listed[1].Revision
 	var wins atomic.Int32
 	var group sync.WaitGroup
 	for range 8 {
 		group.Add(1)
 		go func() {
 			defer group.Done()
-			won, err := database.ClaimAutomation(ctx, site, "report", due, next)
+			won, err := database.ClaimAutomation(ctx, site, "report", revision, due, next)
 			if err != nil {
 				t.Error(err)
 			}

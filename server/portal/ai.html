@@ -142,7 +142,7 @@
   </div>
   <p class="muted">
     {{.Calls}} model calls. Costs come from each model's configured prices and
-    can differ slightly from the Azure bill.{{if .Estimated}} * includes
+    can differ slightly from the provider bill.{{if .Estimated}} * includes
     estimates for calls the provider did not report, such as streams the app
     stopped.{{end}}
   </p>
@@ -384,7 +384,7 @@
       <button
         type="button"
         class="button button-secondary button-small"
-        hx-delete="/api/hex/manage/ai/overrides?subject={{.Subject}}&month={{$.Month.Param}}"
+        hx-delete="{{.RemoveURL}}"
         hx-target="#ai-overrides"
         hx-swap="outerHTML"
       >

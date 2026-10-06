@@ -38,18 +38,19 @@ type manageListView struct {
 
 type sitePageView struct {
 	Chrome
-	Site      siteCard
-	Tab       string
-	Tabs      []siteTab
-	Facts     siteFacts
-	People    []shareEntry
-	History   []historyEntry
-	Sharing   sharingView
-	Data      bool
-	Files     bool
-	Actions   []actionSummary
-	Analytics *AnalyticsView
-	AI        *siteAIView
+	Site       siteCard
+	Tab        string
+	Tabs       []siteTab
+	Facts      siteFacts
+	People     []shareEntry
+	History    []historyEntry
+	Sharing    sharingView
+	Data       bool
+	Files      bool
+	Publishing bool
+	Actions    []actionSummary
+	Analytics  *AnalyticsView
+	AI         *siteAIView
 }
 
 // actionSummary describes one of a site's actions on its overview.
@@ -96,7 +97,6 @@ func (s *Server) registerManageRoutes() {
 	s.mux.HandleFunc("GET /manage", s.managePage)
 	s.mux.HandleFunc("GET /manage/{site}", s.manageSitePage)
 	s.mux.HandleFunc("GET /api/hex/my-sites", s.mySites)
-	s.mux.HandleFunc("GET /api/hex/manage.js", s.portalAsset)
 	s.mux.HandleFunc("PUT /api/hex/manage/sites/{site}/sharing", s.manageUpdateSharing)
 	if s.config.Publisher != nil {
 		s.mux.HandleFunc("POST /api/hex/manage/sites/{site}/unpublish", s.manageUnpublish)
@@ -222,6 +222,9 @@ func (s *Server) manageSitePage(w http.ResponseWriter, r *http.Request) {
 	if s.automationsEnabled() {
 		tabs = slices.Insert(tabs, 3, siteTab{"automations", "Automations"})
 	}
+	if s.portalIntegrationsEnabled() {
+		tabs = append(tabs, siteTab{"integrations", "Integrations"})
+	}
 	if s.aiAccountingEnabled() {
 		tabs = append(tabs, siteTab{"ai", "AI"})
 	}
@@ -229,11 +232,12 @@ func (s *Server) manageSitePage(w http.ResponseWriter, r *http.Request) {
 		tabs = append(tabs, siteTab{"analytics", "Analytics"})
 	}
 	view := sitePageView{
-		Chrome: s.chromeFor(identity, "manage"),
-		Tab:    r.URL.Query().Get("tab"),
-		Tabs:   tabs,
-		Data:   s.config.Database != nil,
-		Files:  s.config.Files != nil,
+		Chrome:     s.chromeFor(identity, "manage"),
+		Tab:        r.URL.Query().Get("tab"),
+		Tabs:       tabs,
+		Data:       s.config.Database != nil,
+		Files:      s.config.Files != nil,
+		Publishing: s.config.Publisher != nil,
 	}
 	if !slices.ContainsFunc(tabs, func(tab siteTab) bool { return tab.ID == view.Tab }) {
 		view.Tab = "overview"
@@ -402,13 +406,10 @@ func (s *Server) manageUnpublish(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "type the site name to confirm")
 		return
 	}
-	s.recordPublication(r.Context(), site)
-	if err := s.config.Publisher.DeleteSite(r.Context(), site); err != nil {
+	if err := s.removePublishedSite(r.Context(), site, identity); err != nil {
 		writeServerError(w, err)
 		return
 	}
-	slog.Info("site unpublished in the portal", "site", site, "by", identityName(identity))
-	s.recordAnalyticsEvents(r.Context(), []SiteEvent{analyticsEvent(site, "unpublished", time.Now().UTC(), "", personOf(identity))})
 	w.Header().Set("HX-Redirect", "/manage")
 	w.WriteHeader(http.StatusNoContent)
 }

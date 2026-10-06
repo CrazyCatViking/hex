@@ -18,7 +18,8 @@ import (
 
 // PeopleStore remembers the people who have signed in to the platform.
 // FindPeople matches names and emails case-insensitively; GetPeople looks
-// people up by identity ID or email.
+// people up by exact identity ID or email. Email/name search may ignore case;
+// identity IDs must retain the resolver's canonical spelling.
 type PeopleStore interface {
 	RememberPerson(ctx context.Context, person Person) error
 	FindPeople(ctx context.Context, query string, limit int) ([]Person, error)
@@ -161,7 +162,7 @@ type principalLabel struct {
 func (s *Server) describePrincipals(ctx context.Context, principals []string) []principalLabel {
 	var userKeys []string
 	for _, principal := range principals {
-		if kind, value, _ := strings.Cut(principal, ":"); kind == "user" {
+		if kind, value, _ := splitPrincipal(principal); kind == "user" {
 			userKeys = append(userKeys, value)
 		}
 	}
@@ -172,13 +173,13 @@ func (s *Server) describePrincipals(ctx context.Context, principals []string) []
 			slog.Error("look up people", "error", err)
 		}
 		for _, person := range found {
-			people[strings.ToLower(person.ID)] = person
+			people[person.ID] = person
 		}
 	}
 
 	labels := make([]principalLabel, 0, len(principals))
 	for _, principal := range principals {
-		kind, value, typed := strings.Cut(principal, ":")
+		kind, value, typed := splitPrincipal(principal)
 		label := principalLabel{Principal: principal, Kind: kind, Name: value}
 		if !typed {
 			label.Kind = "value"
@@ -186,12 +187,12 @@ func (s *Server) describePrincipals(ctx context.Context, principals []string) []
 		}
 		switch kind {
 		case "user":
-			if person, ok := people[strings.ToLower(value)]; ok {
+			if person, ok := people[value]; ok {
 				label.Name = person.Name
 				label.Detail = person.Email
 			}
 		case "group":
-			if index := slices.IndexFunc(s.config.Groups, func(group NamedGroup) bool { return strings.EqualFold(group.ID, value) }); index >= 0 {
+			if index := slices.IndexFunc(s.config.Groups, func(group NamedGroup) bool { return group.ID == value }); index >= 0 {
 				label.Name = s.config.Groups[index].Name
 				label.Detail = "group"
 			}

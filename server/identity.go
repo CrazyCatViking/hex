@@ -10,6 +10,8 @@ import (
 // Identity describes the authenticated user behind a request, as resolved
 // from the hosting layer. The framework never validates identity-provider
 // tokens itself; a resolver translates what the trusted gateway forwarded.
+// IDs are opaque, case-sensitive values of 1–256 non-whitespace printable ASCII
+// characters. Providers own any claim canonicalization; core never folds case.
 type Identity struct {
 	Provider string   `json:"provider,omitempty"`
 	ID       string   `json:"id"`
@@ -52,6 +54,10 @@ func (s *Server) requestIdentity(r *http.Request) *Identity {
 		slog.Error("resolve request identity", "path", r.URL.Path, "error", err)
 		return nil
 	}
+	if identity != nil && !identityIDPattern.MatchString(identity.ID) {
+		slog.Error("resolve request identity: invalid stable identifier", "path", r.URL.Path)
+		return nil
+	}
 	s.rememberPerson(r.Context(), identity)
 	return identity
 }
@@ -74,24 +80,17 @@ func (identity *Identity) matchesAny(principals []string) bool {
 }
 
 func (identity *Identity) matches(principal string) bool {
-	kind, value, typed := strings.Cut(principal, ":")
-	if !typed {
-		value = principal
-	}
+	kind, value, typed := splitPrincipal(principal)
 	if value == "" {
 		return false
 	}
 
-	matchesUser := strings.EqualFold(identity.ID, value)
-	matchesGroup := slices.ContainsFunc(identity.Groups, func(group string) bool {
-		return strings.EqualFold(group, value)
-	})
-	matchesRole := slices.ContainsFunc(identity.Roles, func(role string) bool {
-		return strings.EqualFold(role, value)
-	})
+	matchesUser := identity.ID == value
+	matchesGroup := slices.Contains(identity.Groups, value)
+	matchesRole := slices.Contains(identity.Roles, value)
 
 	if !typed {
-		return strings.EqualFold(identity.ID, value) || matchesGroup || matchesRole
+		return matchesUser || matchesGroup || matchesRole
 	}
 	switch kind {
 	case "user":
@@ -105,6 +104,16 @@ func (identity *Identity) matches(principal string) bool {
 	}
 }
 
+// Only the reserved prefixes identify a claim kind. Opaque untyped IDs may
+// themselves contain colons; typed values keep everything after the first one.
+func splitPrincipal(principal string) (kind, value string, typed bool) {
+	kind, value, typed = strings.Cut(principal, ":")
+	if typed && (kind == "user" || kind == "group" || kind == "role") {
+		return kind, value, true
+	}
+	return "", principal, false
+}
+
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	identity, err := s.config.Identity.ResolveIdentity(r)
 	if err != nil {
@@ -112,7 +121,7 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "identity could not be resolved")
 		return
 	}
-	if identity == nil {
+	if identity == nil || !identityIDPattern.MatchString(identity.ID) {
 		writeError(w, http.StatusUnauthorized, "not authenticated")
 		return
 	}

@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -21,7 +20,7 @@ import (
 // Connected accounts let integrations call a third-party API as the person
 // using an app, so that system's own permissions apply. The platform runs
 // the OAuth authorization code flow on its own domain, keeps each person's
-// tokens sealed with Config.CredentialKey in the IntegrationStore, and
+// tokens sealed with Config.CredentialSealer in the IntegrationStore, and
 // refreshes them itself; apps and their browsers never see the tokens.
 
 // accountRejection explains why Account refused a connection, without
@@ -74,6 +73,26 @@ const (
 // is stored in the clear so connections can be listed without opening
 // them. ListCredentials with an empty owner lists everyone's and leaves
 // Sealed empty. Missing records return ErrNotFound.
+//
+// PutCredential creates or replaces a connection and assigns fresh, globally
+// unique Generation and Version values, ignoring those supplied by the caller.
+// UpdateCredential changes only Sealed and LastUsedAt, atomically if Version
+// still matches, and assigns a fresh Version while preserving Generation and
+// connection metadata. TouchCredential and DeleteCredentialVersion also require
+// a matching Version; a successful touch assigns a fresh Version as well.
+// Conditional operations return ErrCredentialChanged for
+// both missing and replaced records; they never recreate a deleted connection.
+// LastUsedAt updates must be monotonic.
+//
+// WithCredentialLock serializes refresh callbacks for an owner/connector across
+// all servers sharing the store. It must honor cancellation while acquiring the
+// lock, release it on every exit, and pass a context usable for store operations
+// inside the callback. Callbacks must use that context, limit store operations
+// to GetCredential and the conditional credential methods, and not nest locks.
+// Successful store mutations persist even when the callback returns an error
+// (for example, removing a revoked credential before returning ErrNotConnected).
+// Explicit PutCredential/DeleteCredential and idle cleanup may run concurrently
+// with a refresh: conditional writes prevent stale refreshes from affecting them.
 type IntegrationStore interface {
 	GetIntegrationApproval(ctx context.Context, site, integration string) (IntegrationApproval, error)
 	PutIntegrationApproval(ctx context.Context, approval IntegrationApproval) error
@@ -82,11 +101,16 @@ type IntegrationStore interface {
 
 	GetCredential(ctx context.Context, owner, connector string) (CredentialRecord, error)
 	PutCredential(ctx context.Context, record CredentialRecord) error
-	TouchCredential(ctx context.Context, owner, connector string, usedAt time.Time) error
+	UpdateCredential(ctx context.Context, record CredentialRecord) error
+	TouchCredential(ctx context.Context, owner, connector, version string, usedAt time.Time) error
+	DeleteCredentialVersion(ctx context.Context, owner, connector, version string) error
+	WithCredentialLock(ctx context.Context, owner, connector string, fn func(context.Context) error) error
 	DeleteCredential(ctx context.Context, owner, connector string) error
 	ListCredentials(ctx context.Context, owner string) ([]CredentialRecord, error)
 	DeleteCredentialsUnusedSince(ctx context.Context, cutoff time.Time) (int, error)
 }
+
+var ErrCredentialChanged = errors.New("connected account changed")
 
 // CredentialRecord is one person's connection to one connector.
 type CredentialRecord struct {
@@ -96,6 +120,10 @@ type CredentialRecord struct {
 	Account     string
 	ConnectedAt time.Time
 	LastUsedAt  time.Time
+	// Generation identifies a connection, remaining stable through token refreshes.
+	Generation string
+	// Version is the store-assigned revision for conditional credential operations.
+	Version string
 }
 
 // sealedToken is what a credential's sealed bytes hold.
@@ -285,7 +313,7 @@ func (s *Server) startConnection(w http.ResponseWriter, r *http.Request) {
 		writeServerError(w, err)
 		return
 	}
-	sealed, err := s.stateSealer.Seal(r.Context(), encoded, []byte("connect-state"))
+	sealed, err := s.config.CredentialSealer.Seal(r.Context(), encoded, connectStateBinding())
 	if err != nil {
 		writeServerError(w, err)
 		return
@@ -450,7 +478,7 @@ func (s *Server) readConnectState(r *http.Request) (connectState, error) {
 	if err != nil {
 		return state, err
 	}
-	data, err := s.stateSealer.Open(r.Context(), sealed, []byte("connect-state"))
+	data, err := s.config.CredentialSealer.Open(r.Context(), sealed, connectStateBinding())
 	if err != nil {
 		return state, err
 	}
@@ -462,11 +490,15 @@ func (s *Server) readConnectState(r *http.Request) (connectState, error) {
 // account. Refreshes are serialized per account, because providers such as
 // Atlassian rotate refresh tokens and reject a superseded one.
 func (s *Server) connectionClient(ctx context.Context, connectorName, owner string) (*http.Client, error) {
+	return s.connectionClientGeneration(ctx, connectorName, owner, "")
+}
+
+func (s *Server) connectionClientGeneration(ctx context.Context, connectorName, owner, generation string) (*http.Client, error) {
 	connector, exists := s.config.Integrations.connector(connectorName)
 	if !exists {
 		return nil, fmt.Errorf("connector %s is not registered", connectorName)
 	}
-	token, err := s.connectionToken(ctx, connector, owner)
+	token, err := s.connectionTokenGeneration(ctx, connector, owner, generation)
 	if err != nil {
 		return nil, err
 	}
@@ -474,12 +506,26 @@ func (s *Server) connectionClient(ctx context.Context, connectorName, owner stri
 }
 
 func (s *Server) connectionToken(ctx context.Context, connector Connector, owner string) (*oauth2.Token, error) {
+	return s.connectionTokenGeneration(ctx, connector, owner, "")
+}
+
+func (s *Server) connectionTokenGeneration(ctx context.Context, connector Connector, owner, generation string) (*oauth2.Token, error) {
 	if !s.connectionsEnabled() {
 		return nil, errors.New("connected accounts need an integration store and a credential sealer")
 	}
-	unlock := s.lockConnection(owner + "\x00" + connector.Name)
-	defer unlock()
+	var token *oauth2.Token
+	err := s.config.IntegrationStore.WithCredentialLock(ctx, owner, connector.Name, func(ctx context.Context) error {
+		var err error
+		token, err = s.refreshConnectionToken(ctx, connector, owner, generation)
+		return err
+	})
+	if errors.Is(err, ErrCredentialChanged) {
+		return nil, ErrNotConnected
+	}
+	return token, err
+}
 
+func (s *Server) refreshConnectionToken(ctx context.Context, connector Connector, owner, generation string) (*oauth2.Token, error) {
 	record, err := s.config.IntegrationStore.GetCredential(ctx, owner, connector.Name)
 	if errors.Is(err, ErrNotFound) {
 		return nil, ErrNotConnected
@@ -487,9 +533,14 @@ func (s *Server) connectionToken(ctx context.Context, connector Connector, owner
 	if err != nil {
 		return nil, err
 	}
+	if generation != "" && record.Generation != generation {
+		return nil, ErrNotConnected
+	}
 	now := time.Now().UTC()
 	if s.connectionIdle(record, now) {
-		s.removeCredential(ctx, owner, connector.Name, "unused for too long")
+		if err := s.removeCredentialVersion(ctx, record, "unused for too long"); err != nil {
+			return nil, err
+		}
 		return nil, ErrNotConnected
 	}
 	token, err := s.openCredential(ctx, record)
@@ -497,13 +548,17 @@ func (s *Server) connectionToken(ctx context.Context, connector Connector, owner
 		return nil, err
 	}
 
-	if token.Valid() && time.Until(token.Expiry) > time.Minute {
-		s.touchCredential(ctx, record, now)
+	if token.Valid() && (token.Expiry.IsZero() || time.Until(token.Expiry) > time.Minute) {
+		if err := s.touchCredential(ctx, record, now); err != nil {
+			return nil, err
+		}
 		return token, nil
 	}
 	if token.RefreshToken == "" {
 		if token.Valid() {
-			s.touchCredential(ctx, record, now)
+			if err := s.touchCredential(ctx, record, now); err != nil {
+				return nil, err
+			}
 			return token, nil
 		}
 		return nil, ErrNotConnected
@@ -519,7 +574,9 @@ func (s *Server) connectionToken(ctx context.Context, connector Connector, owner
 	var retrieveError *oauth2.RetrieveError
 	if errors.As(err, &retrieveError) && retrieveError.Response != nil && retrieveError.Response.StatusCode < 500 {
 		slog.Warn("connected account was revoked or expired", "connector", connector.Name, "error", err)
-		s.removeCredential(ctx, owner, connector.Name, "refused by the provider")
+		if err := s.removeCredentialVersion(ctx, record, "refused by the provider"); err != nil {
+			return nil, err
+		}
 		return nil, ErrNotConnected
 	}
 	if err != nil {
@@ -527,10 +584,33 @@ func (s *Server) connectionToken(ctx context.Context, connector Connector, owner
 	}
 
 	record.LastUsedAt = now
-	if err := s.saveCredential(ctx, record, fresh); err != nil {
+	if err := s.sealCredential(ctx, &record, fresh); err != nil {
+		return nil, err
+	}
+	if err := s.config.IntegrationStore.UpdateCredential(ctx, record); err != nil {
 		return nil, err
 	}
 	return fresh, nil
+}
+
+func (s *Server) eligibleCredential(ctx context.Context, owner, connector string) (CredentialRecord, error) {
+	if !s.connectionsEnabled() {
+		return CredentialRecord{}, ErrNotConnected
+	}
+	record, err := s.config.IntegrationStore.GetCredential(ctx, owner, connector)
+	if errors.Is(err, ErrNotFound) {
+		return CredentialRecord{}, ErrNotConnected
+	}
+	if err != nil {
+		return CredentialRecord{}, err
+	}
+	if s.connectionIdle(record, time.Now()) {
+		if err := s.removeCredentialVersion(ctx, record, "unused for too long"); err != nil && !errors.Is(err, ErrCredentialChanged) {
+			return CredentialRecord{}, err
+		}
+		return CredentialRecord{}, ErrNotConnected
+	}
+	return record, nil
 }
 
 // connectionIdle reports whether a connection went unused for longer than
@@ -544,29 +624,39 @@ func (s *Server) connectionIdle(record CredentialRecord, now time.Time) bool {
 }
 
 // touchCredential records use, at most every few minutes per connection.
-func (s *Server) touchCredential(ctx context.Context, record CredentialRecord, now time.Time) {
+func (s *Server) touchCredential(ctx context.Context, record CredentialRecord, now time.Time) error {
 	if now.Sub(record.LastUsedAt) < connectionTouchInterval {
-		return
+		// Even when no touch is due, do not return a token from a replaced record.
+		current, err := s.config.IntegrationStore.GetCredential(ctx, record.Owner, record.Connector)
+		if errors.Is(err, ErrNotFound) || (err == nil && current.Version != record.Version) {
+			return ErrCredentialChanged
+		}
+		return err
 	}
-	if err := s.config.IntegrationStore.TouchCredential(ctx, record.Owner, record.Connector, now); err != nil {
-		slog.Error("record connected account use", "connector", record.Connector, "error", err)
-	}
+	return s.config.IntegrationStore.TouchCredential(ctx, record.Owner, record.Connector, record.Version, now)
 }
 
-func (s *Server) removeCredential(ctx context.Context, owner, connector, reason string) {
+func (s *Server) removeCredential(ctx context.Context, owner, connector, reason string) error {
 	err := s.config.IntegrationStore.DeleteCredential(ctx, owner, connector)
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		slog.Error("remove connected account", "connector", connector, "error", err)
-		return
+		return err
 	}
 	slog.Info("connected account removed", "connector", connector, "owner", owner, "reason", reason)
+	return nil
 }
 
-func (s *Server) lockConnection(key string) func() {
-	value, _ := s.connectionLocks.LoadOrStore(key, &sync.Mutex{})
-	mutex := value.(*sync.Mutex)
-	mutex.Lock()
-	return mutex.Unlock
+func (s *Server) removeCredentialVersion(ctx context.Context, record CredentialRecord, reason string) error {
+	err := s.config.IntegrationStore.DeleteCredentialVersion(ctx, record.Owner, record.Connector, record.Version)
+	if err != nil {
+		return err
+	}
+	slog.Info("connected account removed", "connector", record.Connector, "owner", record.Owner, "reason", reason)
+	return nil
+}
+
+func connectStateBinding() []byte {
+	return []byte("hex\x00oauth-connect-state\x00v1")
 }
 
 func credentialBinding(owner, connector string) []byte {
@@ -586,6 +676,13 @@ func (s *Server) openCredential(ctx context.Context, record CredentialRecord) (*
 }
 
 func (s *Server) saveCredential(ctx context.Context, record CredentialRecord, token *oauth2.Token) error {
+	if err := s.sealCredential(ctx, &record, token); err != nil {
+		return err
+	}
+	return s.config.IntegrationStore.PutCredential(ctx, record)
+}
+
+func (s *Server) sealCredential(ctx context.Context, record *CredentialRecord, token *oauth2.Token) error {
 	data, err := json.Marshal(sealedToken{Token: *token})
 	if err != nil {
 		return err
@@ -594,7 +691,7 @@ func (s *Server) saveCredential(ctx context.Context, record CredentialRecord, to
 	if err != nil {
 		return fmt.Errorf("seal %s credential: %w", record.Connector, err)
 	}
-	return s.config.IntegrationStore.PutCredential(ctx, record)
+	return nil
 }
 
 // cleanUpConnections removes connections unused for longer than the idle

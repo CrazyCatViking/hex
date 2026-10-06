@@ -155,11 +155,11 @@ func keyHasPrefix(key, prefix string) bool {
 // pathAllowed applies the longest matching path rule to a static asset path.
 // A rule for /admin/ also covers /admin itself, which NGINX would otherwise
 // resolve to /admin/index.html after this check.
-func pathAllowed(role siteRole, identity *Identity, access SiteAccess, path string) bool {
-	path = strings.ToLower(path)
+func (s *Server) pathAllowed(role siteRole, identity *Identity, access SiteAccess, path string) bool {
+	path = s.pathComparisonKey(path)
 	var matched *PathRule
 	for i := range access.Paths {
-		prefix := strings.ToLower(access.Paths[i].Prefix)
+		prefix := s.pathComparisonKey(access.Paths[i].Prefix)
 		covers := strings.HasPrefix(path, prefix) || path+"/" == prefix
 		if covers && (matched == nil || len(prefix) > len(matched.Prefix)) {
 			matched = &access.Paths[i]
@@ -169,6 +169,13 @@ func pathAllowed(role siteRole, identity *Identity, access SiteAccess, path stri
 		return true
 	}
 	return audienceGrant(role, identity, matched.Viewers, LevelViewers) == grantAll
+}
+
+func (s *Server) pathComparisonKey(path string) string {
+	if s.config.PathCaseInsensitive {
+		return strings.ToLower(path)
+	}
+	return path
 }
 
 // siteAuthorization is the resolved view of one caller on one site.
@@ -234,6 +241,9 @@ func (s *Server) sitePolicy(ctx context.Context, site string) (SiteAccess, bool,
 		return SiteAccess{}, false, nil
 	}
 	if err != nil {
+		return SiteAccess{}, false, err
+	}
+	if err := s.validatePathPrefixes(access.Paths); err != nil {
 		return SiteAccess{}, false, err
 	}
 	return NormalizeSiteAccess(access), true, nil
@@ -307,7 +317,7 @@ func (s *Server) staticAuthz(w http.ResponseWriter, r *http.Request) {
 		path = "/"
 	}
 	allowed := authorization.role != roleNone &&
-		pathAllowed(authorization.role, authorization.identity, authorization.access, path)
+		s.pathAllowed(authorization.role, authorization.identity, authorization.access, path)
 	if !allowed {
 		writeError(w, http.StatusForbidden, "access to this page is restricted")
 		return

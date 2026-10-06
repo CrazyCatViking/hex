@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
 	"strings"
 	"testing"
 
 	hex "github.com/crazycatviking/hex/server"
+	"github.com/crazycatviking/hex/server/providers/postgres"
 )
 
 func localSettings(t *testing.T) {
@@ -165,5 +167,32 @@ func TestDisabledServicesDoNotUseAmbientConnections(t *testing.T) {
 	}
 	if err := environment.Close(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAnalyticsDatabaseBacksDurablePlatformStores(t *testing.T) {
+	connection := os.Getenv("HEX_TEST_POSTGRES_URL")
+	if connection == "" {
+		t.Skip("set HEX_TEST_POSTGRES_URL")
+	}
+	localSettings(t)
+	t.Setenv("HEX_DATABASE_PROVIDER", "memory")
+	t.Setenv("HEX_ANALYTICS_PROVIDER", "postgres")
+	t.Setenv("HEX_ANALYTICS_DATABASE_URL", connection)
+	environment, err := Open(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := environment.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	durable, ok := environment.Config.Analytics.(*postgres.Database)
+	if !ok {
+		t.Fatal("durable analytics was not selected")
+	}
+	if environment.Config.IntegrationStore != durable || environment.Config.IntegrationAudit != durable || environment.Config.Automations != durable || environment.Config.AIUsage != durable || environment.Config.Access != durable || environment.Config.People != durable {
+		t.Fatal("ephemeral documents must not force platform stores into memory")
 	}
 }

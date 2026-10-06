@@ -423,6 +423,7 @@ type integrationCaller struct {
 	identity   *Identity
 	role       siteRole
 	automation string
+	dryRun     bool
 }
 
 func (c integrationCaller) isAutomation() bool {

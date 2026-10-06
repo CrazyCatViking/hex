@@ -36,6 +36,7 @@ func Open(ctx context.Context) (*Environment, error) {
 		Config: hex.Config{
 			SiteBaseURL:   value("HEX_SITE_BASE_URL", "http://localhost:8080"),
 			CLIReleaseURL: os.Getenv("HEX_CLI_RELEASE_URL"),
+			LogoutURL:     os.Getenv("HEX_LOGOUT_URL"),
 		},
 	}
 	if err := environment.openProviders(ctx, settings); err != nil {
@@ -194,7 +195,7 @@ func (e *Environment) openProviders(ctx context.Context, settings settings) erro
 			database.Close()
 			return nil
 		})
-		if err := database.Migrate(startup); err != nil {
+		if err := database.MigrateDocuments(startup); err != nil {
 			return fmt.Errorf("initialize local PostgreSQL: %w", err)
 		}
 		e.Config.Database = database
@@ -210,6 +211,9 @@ func (e *Environment) openProviders(ctx context.Context, settings settings) erro
 	case "postgres":
 		connection := value("HEX_ANALYTICS_DATABASE_URL", os.Getenv("DATABASE_URL"))
 		if database, ok := e.Config.Database.(*postgres.Database); ok && connection == os.Getenv("DATABASE_URL") {
+			if err := database.MigrateAnalytics(ctx); err != nil {
+				return err
+			}
 			e.Config.Analytics = database
 		} else {
 			startup, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -219,7 +223,7 @@ func (e *Environment) openProviders(ctx context.Context, settings settings) erro
 				return fmt.Errorf("open local analytics: %w", err)
 			}
 			e.closers = append(e.closers, func() error { database.Close(); return nil })
-			if err := database.Migrate(startup); err != nil {
+			if err := database.MigrateAnalytics(startup); err != nil {
 				return err
 			}
 			e.Config.Analytics = database
@@ -234,7 +238,7 @@ func (e *Environment) openProviders(ctx context.Context, settings settings) erro
 		e.closers = append(e.closers, collector.Close)
 	}
 	e.configureIdentity(settings)
-	return e.configurePlatformFeatures()
+	return e.configurePlatformFeatures(ctx)
 }
 
 // configurePlatformFeatures prepares integrations, connected accounts and
@@ -242,7 +246,7 @@ func (e *Environment) openProviders(ctx context.Context, settings settings) erro
 // Config.Integrations and may configure Config.AI. Locally every grant is
 // open unless HEX_INTEGRATION_GRANTS says otherwise, and without
 // HEX_CREDENTIAL_KEY connected accounts last until the server restarts.
-func (e *Environment) configurePlatformFeatures() error {
+func (e *Environment) configurePlatformFeatures(ctx context.Context) error {
 	e.Config.Integrations = new(hex.IntegrationRegistry)
 	grants, err := hex.ParseIntegrationGrants(value("HEX_INTEGRATION_GRANTS", `{"*":["*"]}`))
 	if err != nil {
@@ -264,7 +268,14 @@ func (e *Environment) configurePlatformFeatures() error {
 		e.Config.CredentialKey = key
 	}
 
-	if database, ok := e.Config.Database.(*postgres.Database); ok {
+	database, _ := e.Config.Database.(*postgres.Database)
+	if database == nil {
+		database, _ = e.Config.Analytics.(*postgres.Database)
+	}
+	if database != nil {
+		if err := database.MigratePlatform(ctx); err != nil {
+			return fmt.Errorf("initialize platform stores: %w", err)
+		}
 		e.Config.IntegrationStore = database
 		e.Config.IntegrationAudit = database
 		e.Config.Automations = database

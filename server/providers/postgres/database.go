@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
+	"time"
 
 	hex "github.com/crazycatviking/hex/server"
 	"github.com/jackc/pgx/v5"
@@ -13,7 +15,14 @@ import (
 )
 
 type Database struct {
-	pool *pgxpool.Pool
+	pool           *pgxpool.Pool
+	trafficCacheMu sync.Mutex
+	trafficCache   map[string]cachedSiteTraffic
+}
+
+type cachedSiteTraffic struct {
+	row     hex.AnalyticsRow
+	expires time.Time
 }
 
 func New(ctx context.Context, connectionString string) (*Database, error) {
@@ -35,6 +44,52 @@ func (d *Database) Close() {
 }
 
 func (d *Database) Migrate(ctx context.Context) error {
+	return d.migrate(ctx, d.migrateDocuments, d.migratePeople, d.migrateAnalytics,
+		d.migrateSitePolicies, d.migrateIntegrations, d.migrateAutomations,
+		d.migrateAIUsage, d.migrateIntegrationAudit)
+}
+
+// MigratePlatform prepares the durable platform stores, independently of app documents.
+func (d *Database) MigratePlatform(ctx context.Context) error {
+	return d.migrate(ctx, d.migratePeople, d.migrateSitePolicies, d.migrateIntegrations,
+		d.migrateAutomations, d.migrateAIUsage, d.migrateIntegrationAudit)
+}
+
+// All public migration entry points share this database-wide lock. PostgreSQL's
+// IF NOT EXISTS does not serialize concurrent first-time CREATE TABLE/INDEX.
+// Compositions call internal migrations so they acquire the global lock once.
+func (d *Database) migrate(ctx context.Context, migrations ...func(context.Context) error) error {
+	// Keep the lock outside the runtime pool: the internal migrations may open
+	// transactions, and must work even when the pool has just one connection.
+	connection, err := pgx.ConnectConfig(ctx, d.pool.Config().ConnConfig.Copy())
+	if err != nil {
+		return fmt.Errorf("connect for schema migration lock: %w", err)
+	}
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		// Closing this dedicated session releases its advisory lock, even after
+		// cancellation or a failed migration. Never return a locked pooled session.
+		if err := connection.Close(cleanup); err != nil {
+			slog.Error("close schema migration lock connection", "error", err)
+		}
+	}()
+	if _, err := connection.Exec(ctx, `SELECT pg_advisory_lock(hashtextextended('hex_schema_migration', 0))`); err != nil {
+		return fmt.Errorf("lock schema migrations: %w", err)
+	}
+	for _, migrate := range migrations {
+		if err := migrate(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (d *Database) MigrateDocuments(ctx context.Context) error {
+	return d.migrate(ctx, d.migrateDocuments)
+}
+
+func (d *Database) migrateDocuments(ctx context.Context) error {
 	const documents = `
 		CREATE TABLE IF NOT EXISTS hex_documents (
 			site text NOT NULL,
@@ -63,7 +118,14 @@ func (d *Database) Migrate(ctx context.Context) error {
 	if _, err := d.pool.Exec(ctx, creatorIndex); err != nil {
 		return fmt.Errorf("index document creators: %w", err)
 	}
+	return nil
+}
 
+func (d *Database) MigratePeople(ctx context.Context) error {
+	return d.migrate(ctx, d.migratePeople)
+}
+
+func (d *Database) migratePeople(ctx context.Context) error {
 	const people = `
 		CREATE TABLE IF NOT EXISTS hex_people (
 			id text PRIMARY KEY,
@@ -76,22 +138,28 @@ func (d *Database) Migrate(ctx context.Context) error {
 		return fmt.Errorf("create people table: %w", err)
 	}
 
-	if err := d.migrateAnalytics(ctx); err != nil {
-		return err
-	}
-	if err := d.migrateIntegrations(ctx); err != nil {
-		return err
-	}
-	if err := d.migrateAutomations(ctx); err != nil {
-		return err
-	}
-	if err := d.migrateAIUsage(ctx); err != nil {
-		return err
-	}
-	if err := d.migrateIntegrationAudit(ctx); err != nil {
-		return err
-	}
-	return d.migrateSitePolicies(ctx)
+	return nil
+}
+
+// MigrateAnalytics creates only analytics tables and imports an existing people
+// directory when present, without requiring that store on this connection.
+func (d *Database) MigrateAnalytics(ctx context.Context) error {
+	return d.migrate(ctx, d.migrateAnalytics)
+}
+func (d *Database) MigrateAccess(ctx context.Context) error {
+	return d.migrate(ctx, d.migrateSitePolicies)
+}
+func (d *Database) MigrateIntegrations(ctx context.Context) error {
+	return d.migrate(ctx, d.migrateIntegrations)
+}
+func (d *Database) MigrateAutomations(ctx context.Context) error {
+	return d.migrate(ctx, d.migrateAutomations)
+}
+func (d *Database) MigrateAIUsage(ctx context.Context) error {
+	return d.migrate(ctx, d.migrateAIUsage)
+}
+func (d *Database) MigrateIntegrationAudit(ctx context.Context) error {
+	return d.migrate(ctx, d.migrateIntegrationAudit)
 }
 
 // migrateSitePolicies creates the policy table and converts entries from the

@@ -24,7 +24,7 @@ type stream struct {
 	text         strings.Builder
 	calls        map[int]*callBuilder
 	finishReason string
-	usage        hex.AIUsage
+	usage        *hex.AIUsage
 	finished     bool
 }
 
@@ -89,8 +89,8 @@ type chunk struct {
 		FinishReason *string `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *struct {
-		PromptTokens        int `json:"prompt_tokens"`
-		CompletionTokens    int `json:"completion_tokens"`
+		PromptTokens        *int `json:"prompt_tokens"`
+		CompletionTokens    *int `json:"completion_tokens"`
 		PromptTokensDetails *struct {
 			CachedTokens int `json:"cached_tokens"`
 		} `json:"prompt_tokens_details"`
@@ -117,15 +117,16 @@ func (s *stream) handle(data string) error {
 	if parsed.Error != nil {
 		return fmt.Errorf("chat completion stream error: %s", parsed.Error.Message)
 	}
-	if parsed.Usage != nil {
+	if parsed.Usage != nil && parsed.Usage.PromptTokens != nil && parsed.Usage.CompletionTokens != nil {
 		// Prompt tokens include the cached ones, which are priced separately.
+		prompt, output := *parsed.Usage.PromptTokens, *parsed.Usage.CompletionTokens
 		cached := 0
 		if parsed.Usage.PromptTokensDetails != nil {
-			cached = min(parsed.Usage.PromptTokensDetails.CachedTokens, parsed.Usage.PromptTokens)
+			cached = min(parsed.Usage.PromptTokensDetails.CachedTokens, prompt)
 		}
-		s.usage = hex.AIUsage{
-			InputTokens: parsed.Usage.PromptTokens - cached, CachedInputTokens: cached,
-			OutputTokens: parsed.Usage.CompletionTokens,
+		s.usage = &hex.AIUsage{
+			InputTokens: prompt - cached, CachedInputTokens: cached,
+			OutputTokens: output,
 		}
 	}
 	if len(parsed.Choices) == 0 {
@@ -190,10 +191,9 @@ func (s *stream) finish() {
 		// Some services report "stop" even when the turn ends in tool calls.
 		stop = hex.StopToolUse
 	}
-	usage := s.usage
 	s.pending = append(s.pending,
 		hex.AIEvent{Type: hex.EventMessage, Message: &message},
-		hex.AIEvent{Type: hex.EventDone, StopReason: stop, Usage: &usage},
+		hex.AIEvent{Type: hex.EventDone, StopReason: stop, Usage: s.usage},
 	)
 }
 

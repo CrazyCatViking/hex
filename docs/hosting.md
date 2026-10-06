@@ -15,6 +15,12 @@ Sites, uploads, database and realtime are independent capabilities. An API-only 
 
 The Azure example implements this contract with Container Apps/Entra, NGINX, Azure Files, Blob Storage and PostgreSQL. None of those products is required by `hex.Config`.
 
+The host must explicitly align `Config.PathCaseInsensitive` with the static server's storage lookup: the default `false` compares exact path spelling; Azure Files requires `true` to protect all case variants of a file. This is a storage property, not an identity-provider property. The reference Azure Files composition must preserve the former case-insensitive behavior, including read-only Azure Files mounts when publishing is disabled. Casefold-colliding path prefixes are rejected only in that host context; portable policies may contain case-distinct prefixes for case-sensitive storage. See [path rules and migration](access-control.md#path-rules).
+
+Identity resolvers return canonical, policy-safe opaque IDs (1–256 non-whitespace printable ASCII characters). Core compares user, group and role values exactly. Provider-specific normalization belongs in the resolver and matching host configuration: Easy Auth canonicalizes Entra user/group GUIDs, while generic OIDC subjects and app roles keep case. An unknown colon prefix in an untyped configured ID remains part of that ID.
+
+Browser logout is also host-owned. Set `Config.LogoutURL` to the gateway's logout URL to render **Sign out** in the account menu; an empty value omits the link. The Azure composition can explicitly use `/.auth/logout`; other gateways supply their own route. Logout is independent of the CLI's saved OIDC session.
+
 ## Reference executable
 
 For local testing of a consuming server, call the optional [Go local configuration helper](local-development.md) directly. Application uploads, documents and realtime default to in-memory providers; only published site assets remain on disk. It requires no mode flag or special launcher. `hex dev` optionally orchestrates NGINX and integration-test services. The reference executable's explicit provider selection below is separate and does not switch configurations based on a mode flag.
@@ -40,6 +46,8 @@ Other reference executable settings:
 | `HEX_ADDR` | Listener; defaults to `127.0.0.1:8080`. The container image defaults to loopback port 8081. |
 | `HEX_SITES_DIR` | Filesystem root for site files; defaults to `.hex-data/sites`. |
 | `HEX_SITE_BASE_URL` | Parent site origin used by discovery, default `http://localhost:8080`. For example `https://hex.example.com` yields `https://demo.hex.example.com/`. |
+| `HEX_SITE_PATH_CASE_INSENSITIVE` | Explicit boolean path-comparison override. Defaults to true for Azure Files publishing or a filesystem mount with `AZURE_FILES_SHARE_URL`, false otherwise. Set true for read-only case-insensitive mounts even without that URL. |
+| `HEX_LOGOUT_URL` | Optional host-owned browser logout URL. Defaults to `/.auth/logout` only with the Easy Auth identity selection; other hosts omit sign-out unless configured. |
 | `HEX_PUBLIC_URL` | Enables the reference executable's connection-settings download and declares its canonical gateway origin. |
 | `HEX_PLATFORM_NAME` | Human-readable connection name, default `Hex` (`Local Hex` in the local helper). |
 | `AZURE_FILES_SHARE_URL` | Share URL for the `azurefiles` publisher, such as `https://ACCOUNT.file.core.windows.net/sites`. The server identity needs Storage File Data Privileged Contributor and Storage File Delegator on the account. |

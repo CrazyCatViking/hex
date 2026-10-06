@@ -25,12 +25,13 @@ type SiteFile struct {
 
 // UploadTarget tells the publisher where to send one file. Protocol "hex"
 // is a plain PUT of the file body to URL, authenticated like other API calls;
-// "azure-files" is a pre-signed Azure Files URL that accepts Create File and
-// Put Range requests.
+// "http" is a signed HTTP PUT with optional storage headers and no Hex
+// credentials; "azure-files" accepts Azure Create File and Put Range requests.
 type UploadTarget struct {
-	Path     string `json:"path"`
-	Protocol string `json:"protocol"`
-	URL      string `json:"url"`
+	Path     string            `json:"path"`
+	Protocol string            `json:"protocol"`
+	URL      string            `json:"url"`
+	Headers  map[string]string `json:"headers,omitempty"`
 }
 
 // SitePublisher writes published site files on behalf of authorized
@@ -60,9 +61,10 @@ const (
 )
 
 type publishRequest struct {
-	Files    []SiteFile    `json:"files"`
-	Metadata *SiteMetadata `json:"metadata,omitempty"`
-	Access   *SiteAccess   `json:"access,omitempty"`
+	Files                    []SiteFile    `json:"files"`
+	Metadata                 *SiteMetadata `json:"metadata,omitempty"`
+	Access                   *SiteAccess   `json:"access,omitempty"`
+	SupportedUploadProtocols []string      `json:"supportedUploadProtocols,omitempty"`
 	// Actions are the app's declared actions; omitting them removes
 	// earlier ones.
 	Actions []DeclaredAction `json:"actions,omitempty"`
@@ -92,7 +94,7 @@ func (s *Server) startPublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if request.Access != nil {
-		if err := validateSiteAccess(*request.Access); err != nil {
+		if err := s.validateSiteAccess(*request.Access); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -116,7 +118,7 @@ func (s *Server) startPublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	uploads, err := s.uploadTargets(r.Context(), site, changed)
+	uploads, err := s.uploadTargets(r.Context(), site, changed, request.SupportedUploadProtocols)
 	if err != nil {
 		writeServerError(w, err)
 		return
@@ -216,7 +218,7 @@ func (s *Server) applyPublishAccess(w http.ResponseWriter, r *http.Request, site
 	if requested == nil {
 		return nil, true
 	}
-	if err := validateSiteAccess(*requested); err != nil {
+	if err := s.validateSiteAccess(*requested); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return nil, false
 	}
@@ -244,20 +246,29 @@ func (s *Server) unpublishSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.recordPublication(r.Context(), site)
-	if err := s.config.Publisher.DeleteSite(r.Context(), site); err != nil {
+	if err := s.removePublishedSite(r.Context(), site, identity); err != nil {
 		writeServerError(w, err)
 		return
 	}
-	// An unpublished site must not keep acting on a schedule.
-	if err := s.replaceAutomations(r.Context(), site, nil, identity); err != nil {
-		writeServerError(w, err)
-		return
-	}
-
-	slog.Info("site unpublished", "site", site, "publisher", identityName(identity))
-	s.recordAnalyticsEvents(r.Context(), []SiteEvent{analyticsEvent(site, "unpublished", time.Now().UTC(), "", personOf(identity))})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// removePublishedSite is shared by the API and portal after authorization.
+func (s *Server) removePublishedSite(ctx context.Context, site string, identity *Identity) error {
+	if err := s.recoverPublicationHistory(ctx, site); err != nil {
+		return err
+	}
+	// Stop future scheduling before deleting assets. Failed deletion is
+	// retryable; deleted assets must never leave a future schedule behind.
+	if err := s.replaceAutomations(ctx, site, nil, identity); err != nil {
+		return err
+	}
+	if err := s.config.Publisher.DeleteSite(ctx, site); err != nil {
+		return err
+	}
+	slog.Info("site unpublished", "site", site, "publisher", identityName(identity))
+	s.recordAnalyticsEvents(ctx, []SiteEvent{analyticsEvent(site, "unpublished", time.Now().UTC(), "", personOf(identity))})
+	return nil
 }
 
 // publishCaller validates the site name and authorizes the caller to
@@ -444,20 +455,39 @@ func (s *Server) changedFiles(ctx context.Context, site string, files []SiteFile
 	return changed, unchanged, nil
 }
 
-func (s *Server) uploadTargets(ctx context.Context, site string, files []SiteFile) ([]UploadTarget, error) {
+func (s *Server) uploadTargets(ctx context.Context, site string, files []SiteFile, supported []string) ([]UploadTarget, error) {
+	// Clients predating negotiation understand the original two transports.
+	if supported == nil {
+		supported = []string{"hex", "azure-files"}
+	}
 	if uploader, ok := s.config.Publisher.(DirectUploader); ok {
-		return uploader.UploadTargets(ctx, site, files)
+		targets, err := uploader.UploadTargets(ctx, site, files)
+		if err != nil {
+			return nil, err
+		}
+		for i, target := range targets {
+			if !slices.Contains(supported, target.Protocol) {
+				if !slices.Contains(supported, "hex") {
+					return nil, fmt.Errorf("no supported upload transport for %s", target.Path)
+				}
+				targets[i] = hexUploadTarget(site, target.Path)
+			}
+		}
+		return targets, nil
+	}
+	if len(files) > 0 && !slices.Contains(supported, "hex") {
+		return nil, fmt.Errorf("this publisher requires the hex upload transport")
 	}
 
 	targets := make([]UploadTarget, 0, len(files))
 	for _, file := range files {
-		targets = append(targets, UploadTarget{
-			Path:     file.Path,
-			Protocol: "hex",
-			URL:      "/api/hex/sites/" + site + "/publish/files/" + escapePath(file.Path),
-		})
+		targets = append(targets, hexUploadTarget(site, file.Path))
 	}
 	return targets, nil
+}
+
+func hexUploadTarget(site, path string) UploadTarget {
+	return UploadTarget{Path: path, Protocol: "hex", URL: "/api/hex/sites/" + site + "/publish/files/" + escapePath(path)}
 }
 
 func escapePath(path string) string {

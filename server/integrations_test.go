@@ -191,6 +191,33 @@ func TestIntegrationGrantValidation(t *testing.T) {
 	}
 }
 
+func TestIntegrationCacheIsScopedToSite(t *testing.T) {
+	var calls atomic.Int32
+	server, access, store := setupIntegrations(t, crmIntegration(&calls))
+	for _, site := range []string{"demo", "other"} {
+		if err := access.PutSiteAccess(context.Background(), site, hex.SiteAccess{Owners: []string{"user:seller"}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.PutIntegrationApproval(context.Background(), hex.IntegrationApproval{
+			Site: site, Integration: "crm", Status: hex.ApprovalApproved,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		path := "/api/sites/" + site + "/integrations/crm/deals"
+		response := requestAs(t, server, roleHeaders("seller", "Data.Sales"), "POST", path, nil, 200)
+		if !strings.Contains(response.Body.String(), `"site":"`+site+`"`) || response.Header().Get("X-Hex-Cache") == "hit" {
+			t.Fatalf("site %s received another site's cache: %s", site, response.Body.String())
+		}
+		cached := requestAs(t, server, roleHeaders("seller", "Data.Sales"), "POST", path, nil, 200)
+		if cached.Header().Get("X-Hex-Cache") != "hit" {
+			t.Fatalf("site %s did not reuse its own cache", site)
+		}
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("expected one handler call per site, got %d", calls.Load())
+	}
+}
+
 // fakeAuthorizationServer issues one code and refreshes tokens, recording
 // the PKCE challenge it was given.
 type fakeAuthorizationServer struct {

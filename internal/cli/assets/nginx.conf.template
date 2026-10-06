@@ -20,12 +20,17 @@ http {
         '"destination":"$http_sec_fetch_dest","contentType":"$sent_http_content_type",'
         '"api":"$hex_api_request"}';
 
-    map $request_uri $hex_api_request {
+    # Classify the final decoded/normalized route, including index redirects.
+    # A raw request URI can disguise an API as /%61pi/ or /x/../api/.
+    # Re-evaluate after rewrites and subrequests rather than caching their route.
+    map $uri $hex_api_request {
+        volatile;
         default 0;
         ~^/api/ 1;
     }
 
     map $hex_api_request $hex_analytics_user {
+        volatile;
         default $hex_static_user;
         1 $upstream_http_x_hex_analytics_user;
     }

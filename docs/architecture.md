@@ -125,13 +125,19 @@ Providers must be safe for concurrent requests and return `hex.ErrNotFound` for 
 
 ### Site publishers
 
-`SitePublisher` lists, reads, writes and deletes files of one site, with paths relative to the site directory, and deletes whole sites. `ListSiteFiles` returns every regular file with its exact size, including the server-owned dotfiles. A publisher that also implements `DirectUploader` returns upload targets (for example pre-signed URLs) for publishers instead of receiving their file bodies through the server; the server still writes its records with `WriteSiteFile`. The server owns authorization, validation, change detection and the `.hex-*` records; providers only perform storage operations. `local.Store` and `azurefiles.Publisher` are the included implementations.
+`SitePublisher` lists, reads, writes and deletes files of one site, with paths relative to the site directory, and deletes whole sites. `ListSiteFiles` returns every regular file with its exact size, including the server-owned dotfiles. A publisher that also implements `DirectUploader` returns upload targets (for example pre-signed URLs) for publishers instead of receiving their file bodies through the server; the server still writes its records with `WriteSiteFile`. Targets using `http` are signed HTTPS PUTs with optional storage headers; clients never forward Hex credentials or follow redirects. Clients advertise `supportedUploadProtocols` and unsupported targets fall back to server-mediated `hex` writes. Clients omitting negotiation retain the original `hex`/`azure-files` transport set. The server owns authorization, validation, change detection and the `.hex-*` records; providers only perform storage operations. `local.Store` and `azurefiles.Publisher` are the included implementations.
 
 ### Database
 
 Documents are keyed by `(site, collection, id)`. `Put(ctx, site, collection, id, data, WriteOptions)` replaces or inserts one JSON object and returns the stored document. `WriteOptions.Creator` is recorded as `createdBy` on insert and never changed; with `CreatorOnly`, replacing or deleting another creator's document returns `hex.ErrForbidden`. `List(ctx, site, collection, ListOptions)` uses exclusive `After`, ascending bytewise ID ordering, a `Limit` of 1–100 and an optional `CreatedBy` filter. Empty results are `[]`. Random generated IDs do not encode creation time. Put timestamps in document data if the application needs them.
 
-The PostgreSQL provider exposes `Migrate`; the reference executable calls it on startup to create `hex_documents` (with its `created_by` column) and `hex_site_policies`, converting a legacy `hex_site_access` table. Embedders can run migration separately and give runtime connections reduced privileges.
+The PostgreSQL provider exposes scoped migrations for each selected store. `MigrateDocuments` creates only `hex_documents` (with its `created_by` column); `MigrateAccess` creates `hex_site_policies` and converts a legacy `hex_site_access` table. `MigratePlatform` prepares the platform stores without app documents, and `Migrate` remains a full-schema convenience. Reference executables compose the migrations for their configured stores. Embedders can run migration separately and give runtime connections reduced privileges.
+
+### Analytics
+
+`AnalyticsStore` records authenticated people, idempotent publication events and daily traffic independently of app documents. `MigrateAnalytics` creates only `hex_analytics_*` tables, optionally importing an existing people directory without requiring that store. Optional `AnalyticsSummaryReader` and `AnalyticsVisitorReader` interfaces keep headline/comparison queries narrow and visitor search/pagination in storage. `SiteTrafficReader` supplies authorized bulk lifetime totals without identities; built-in stores maintain lifetime aggregates or cache them with at most one-minute staleness. See [Platform analytics](analytics.md).
+
+Publication history recovery reads server-owned metadata and all available history through read-only interfaces (`SiteMetadataReader` and `SiteRecordReader`). Stable event IDs make importing and retrying safe. Recovery must succeed before removing site records; dashboard visits are not a prerequisite for preserving publication history.
 
 ### Identity and site access
 
@@ -143,7 +149,11 @@ The PostgreSQL provider exposes `Migrate`; the reference executable calls it on 
 
 ### Integrations and automations
 
-`IntegrationStore` keeps integration approvals per `(site, integration)` and sealed connected-account credentials per `(owner, connector)`; credentials are opaque bytes the server encrypts. `AutomationStore` keeps each site's automations with their next run and the latest runs; `ClaimAutomation` must atomically move `nextRun` from the expected value to the next one and report whether the caller won, which is how instances avoid running an occurrence twice. PostgreSQL stores them in `hex_integration_approvals`, `hex_integration_credentials`, `hex_automations` and `hex_automation_runs`.
+`IntegrationStore` keeps integration approvals per `(site, integration)` and sealed connected-account credentials per `(owner, connector)`. Credentials are opaque encrypted bytes with store-assigned generation and version identifiers. Refreshes serialize across instances; conditional updates and deletes cannot overwrite a reconnect or restore a disconnected account. OAuth state uses the host's shared credential sealer with distinct associated data, so callbacks can reach a different instance. See [custom-store upgrades](integrations.md#custom-store-upgrade-contract).
+
+`AutomationStore` keeps each site's automations with their next run, a store-assigned revision and the latest runs. Replacement must atomically preserve the current next run for unchanged schedules, serialized with claims. `ClaimAutomation` compares both the definition revision and expected next run before advancing it; stale definitions cannot claim edited or recreated automations. Automations do not require a publisher; publications can deploy definitions, and the owner API can manage them independently. PostgreSQL stores them in `hex_integration_approvals`, `hex_integration_credentials`, `hex_automations` and `hex_automation_runs`. See [scheduler contracts](automations.md#scheduling).
+
+`AIUsageStore` atomically admits each call with a durable reservation and settles its usage under the same record ID. Failed settlement retains the hold, and retries must be idempotent. `AIBudgetSpend` includes all outstanding reservations even across month boundaries; `ListAIReservations` supports operator reconciliation after restart. Custom implementations must serialize admission and settlement across instances. See [AI accounting](ai.md#usage-cost-and-budgets).
 
 ### Realtime
 

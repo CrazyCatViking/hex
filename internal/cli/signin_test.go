@@ -212,8 +212,8 @@ func TestProfilesCarryTheSignInApp(t *testing.T) {
 	if err != nil || project.Auth == nil || project.Auth.ClientID != testClientID || project.Auth.Issuer != "https://login.microsoftonline.com/"+testTenantID+"/v2.0" {
 		t.Fatalf("sign-in app not resolved: %+v %v", project, err)
 	}
-	if other := project.withResource("api://other"); other.Auth != nil || other.ClientID != "" {
-		t.Fatal("the sign-in app was used for a different resource")
+	if other, err := project.withResource("api://other"); err == nil || other.Auth != project.Auth {
+		t.Fatal("different resource override did not fail with configured auth preserved")
 	}
 
 	for _, change := range []func(*Connection){

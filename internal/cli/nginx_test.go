@@ -97,7 +97,11 @@ func TestNginxLocalRuntimePaths(t *testing.T) {
 }
 
 func TestNginxCompletedRequestAnalytics(t *testing.T) {
-	if _, err := exec.LookPath("nginx"); err != nil {
+	binary := os.Getenv("NGINX_BIN")
+	if binary == "" {
+		binary = "nginx"
+	}
+	if _, err := exec.LookPath(binary); err != nil {
 		t.Skip("NGINX unavailable")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -116,7 +120,7 @@ func TestNginxCompletedRequestAnalytics(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer sites.Close()
-	for path, content := range map[string]string{"index.html": "<title>Analytics</title>", "app.js": "console.log('asset')"} {
+	for path, content := range map[string]string{"index.html": "<title>Analytics</title>", "app.js": "console.log('asset')", "folder/index.html": "<title>Folder</title>"} {
 		if err := sites.WriteSiteFile(ctx, "demo", path, int64(len(content)), strings.NewReader(content)); err != nil {
 			t.Fatal(err)
 		}
@@ -127,9 +131,18 @@ func TestNginxCompletedRequestAnalytics(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer collector.Close()
-	backend := httptest.NewServer(hex.New(hex.Config{
+	hexHandler := hex.New(hex.Config{
 		Sites: sites, Identity: hex.StaticIdentity{Identity: hex.Identity{ID: "verified-user"}},
 		Analytics: analytics, Files: memory.NewStore(),
+	})
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "test-api") {
+			w.Header().Set("X-Hex-Analytics-User", "dmVyaWZpZWQtdXNlcg")
+			w.Header().Set("Content-Type", "text/html")
+			io.WriteString(w, "<title>API response</title>")
+			return
+		}
+		hexHandler.ServeHTTP(w, r)
 	}))
 	defer backend.Close()
 	app, err := New(strings.NewReader(""), io.Discard, os.Stderr)
@@ -140,19 +153,52 @@ func TestNginxCompletedRequestAnalytics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer nginx.stop()
 	base := fmt.Sprintf("http://127.0.0.1:%d", port)
+	if err := waitForHTTP(ctx, base+"/healthz", nginx); err != nil {
+		nginx.stop()
+		t.Fatal(err)
+	}
+	if err := nginx.stop(); err != nil {
+		t.Fatal(err)
+	}
+	// Force early evaluation, then change request context. Cached map results
+	// would misclassify rewritten APIs or lose the static auth-subrequest user.
+	configPath := filepath.Join(directory, "nginx.conf")
+	config, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	modified := strings.Replace(string(config), "location = /.hex/authz {", `location = /.hex/authz {
+            set $early_subrequest_analytics "$hex_api_request:$hex_analytics_user";`, 1)
+	modified = strings.Replace(modified, "location /api/ {", `location = /rewrite-api {
+            set $early_rewrite_analytics "$hex_api_request:$hex_analytics_user";
+            rewrite ^ /api/test-api last;
+        }
+        location = /internal-api {
+            set $early_internal_analytics "$hex_api_request:$hex_analytics_user";
+            try_files /missing /api/test-api;
+        }
+        location /api/ {`, 1)
+	if err := os.WriteFile(configPath, []byte(modified), 0600); err != nil {
+		t.Fatal(err)
+	}
+	nginx, err = app.startProcess(binary, app.Dir, nil, "-p", directory+string(filepath.Separator), "-c", configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer nginx.stop()
 	if err := waitForHTTP(ctx, base+"/healthz", nginx); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{"/", "/app.js", "/missing.html", "/api/sites/demo/files"} {
+	paths := []string{"/", "/folder/", "/app.js", "/missing.html", "/api/sites/demo/files", "/%61pi/test-api", "/static/../api/test-api", "//api//test-api", "/api%2ftest-api", "/rewrite-api", "/internal-api"}
+	for _, path := range paths {
 		request, err := http.NewRequestWithContext(ctx, "GET", base+path, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 		request.Host = "demo.localhost"
 		request.Header.Set("X-Hex-Analytics-User", "Zm9yZ2VkLXVzZXI")
-		if path == "/" || path == "/missing.html" {
+		if path != "/app.js" {
 			request.Header.Set("Sec-Fetch-Dest", "document")
 		}
 		response, err := http.DefaultClient.Do(request)
@@ -174,12 +220,12 @@ func TestNginxCompletedRequestAnalytics(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if report.Traffic.Requests >= 4 || time.Now().After(deadline) {
+		if report.Traffic.Requests >= int64(len(paths)) || time.Now().After(deadline) {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if report.Traffic.Requests != 4 || report.Traffic.PageViews != 1 || report.Traffic.Errors != 1 || report.Traffic.Visitors != 1 || len(report.Users) != 1 || report.Users[0].Key != "verified-user" {
+	if report.Traffic.Requests != int64(len(paths)) || report.Traffic.PageViews != 2 || report.Traffic.Errors != 1 || report.Traffic.Visitors != 1 || len(report.Users) != 1 || report.Users[0].Key != "verified-user" {
 		t.Fatalf("completed logs are wrong: %+v; collector %+v", report, collector.Status())
 	}
 }

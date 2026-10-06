@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -45,9 +46,10 @@ func nullableTime(value time.Time) *time.Time {
 	return &value
 }
 
-// ReplaceSiteAutomations swaps the site's whole set in one transaction.
+// ReplaceSiteAutomations swaps the site's whole set while holding the same
+// site lock as claims, preserving current run times for unchanged schedules.
 func (d *Database) ReplaceSiteAutomations(ctx context.Context, site string, automations []hex.ScheduledAutomation) error {
-	transaction, err := d.pool.Begin(ctx)
+	transaction, err := d.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return fmt.Errorf("begin automation update: %w", err)
 	}
@@ -57,10 +59,30 @@ func (d *Database) ReplaceSiteAutomations(ctx context.Context, site string, auto
 		}
 	}()
 
+	if err := lockAutomationSite(ctx, transaction, site); err != nil {
+		return err
+	}
+	rows, err := transaction.Query(ctx, `SELECT entry, next_run FROM hex_automations WHERE site = $1 FOR UPDATE`, site)
+	if err != nil {
+		return fmt.Errorf("read automations for replacement: %w", err)
+	}
+	stored, err := scanAutomations(rows)
+	if err != nil {
+		return err
+	}
+	current := make(map[string]hex.ScheduledAutomation, len(stored))
+	for _, entry := range stored {
+		current[entry.Automation.Name] = entry
+	}
 	if _, err := transaction.Exec(ctx, `DELETE FROM hex_automations WHERE site = $1`, site); err != nil {
 		return fmt.Errorf("remove automations: %w", err)
 	}
 	for _, automation := range automations {
+		automation.Site = site
+		automation.Revision = rand.Text()
+		if previous, exists := current[automation.Automation.Name]; exists && hex.SameAutomationSchedule(previous.Automation, automation.Automation) {
+			automation.NextRun = previous.NextRun
+		}
 		entry, err := json.Marshal(automation)
 		if err != nil {
 			return err
@@ -70,7 +92,10 @@ func (d *Database) ReplaceSiteAutomations(ctx context.Context, site string, auto
 			return fmt.Errorf("save automation %s: %w", automation.Automation.Name, err)
 		}
 	}
-	return transaction.Commit(ctx)
+	if err := transaction.Commit(ctx); err != nil {
+		return fmt.Errorf("commit automation update: %w", err)
+	}
+	return nil
 }
 
 func (d *Database) queryAutomations(ctx context.Context, query string, arguments ...any) ([]hex.ScheduledAutomation, error) {
@@ -78,6 +103,10 @@ func (d *Database) queryAutomations(ctx context.Context, query string, arguments
 	if err != nil {
 		return nil, fmt.Errorf("list automations: %w", err)
 	}
+	return scanAutomations(rows)
+}
+
+func scanAutomations(rows pgx.Rows) ([]hex.ScheduledAutomation, error) {
 	defer rows.Close()
 
 	automations := make([]hex.ScheduledAutomation, 0)
@@ -111,14 +140,42 @@ func (d *Database) DueAutomations(ctx context.Context, now time.Time, limit int)
 		`SELECT entry, next_run FROM hex_automations WHERE next_run <= $1 ORDER BY next_run LIMIT $2`, now, limit)
 }
 
-func (d *Database) ClaimAutomation(ctx context.Context, site, name string, expected, next time.Time) (bool, error) {
-	result, err := d.pool.Exec(ctx,
-		`UPDATE hex_automations SET next_run = $4 WHERE site = $1 AND name = $2 AND next_run = $3`,
-		site, name, expected, nullableTime(next))
+func (d *Database) ClaimAutomation(ctx context.Context, site, name, revision string, expected, next time.Time) (bool, error) {
+	if expected.IsZero() {
+		return false, nil
+	}
+	transaction, err := d.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return false, fmt.Errorf("begin automation claim: %w", err)
+	}
+	defer func() {
+		if err := transaction.Rollback(ctx); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
+			slog.Error("roll back automation claim", "error", err)
+		}
+	}()
+	if err := lockAutomationSite(ctx, transaction, site); err != nil {
+		return false, err
+	}
+	result, err := transaction.Exec(ctx,
+		`UPDATE hex_automations SET next_run = $5
+		 WHERE site = $1 AND name = $2 AND next_run = $3 AND COALESCE(entry->>'revision', '') = $4`,
+		site, name, expected, revision, nullableTime(next))
 	if err != nil {
 		return false, fmt.Errorf("claim automation: %w", err)
 	}
+	if err := transaction.Commit(ctx); err != nil {
+		return false, fmt.Errorf("commit automation claim: %w", err)
+	}
 	return result.RowsAffected() == 1, nil
+}
+
+func lockAutomationSite(ctx context.Context, transaction pgx.Tx, site string) error {
+	// The site lock covers whole-set replacement and absent names; row locks
+	// alone cannot serialize deletion/recreation or an initially empty site.
+	if _, err := transaction.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('hex-automations:' || $1, 0))`, site); err != nil {
+		return fmt.Errorf("lock automations for %s: %w", site, err)
+	}
+	return nil
 }
 
 func (d *Database) RecordAutomationRun(ctx context.Context, run hex.AutomationRun) error {

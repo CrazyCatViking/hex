@@ -73,8 +73,15 @@ export interface AIRequest {
 export type AIStopReason = "end_turn" | "max_tokens" | "tool_use" | "refusal";
 
 export interface AIUsage {
+  /** Uncached input tokens; cache reads and writes are counted separately. */
   inputTokens: number;
   outputTokens: number;
+  /** Input tokens served from the provider's prompt cache. */
+  cachedInputTokens?: number;
+  /** Input tokens written to the provider's prompt cache. */
+  cacheWriteTokens?: number;
+  /** At least some of the usage was estimated rather than provider-reported. */
+  estimated?: boolean;
 }
 
 /**
@@ -379,6 +386,17 @@ export function createAI(request: Requester, root: string) {
         const { done, added } = await streamTurn(sendOptions);
         usage.inputTokens += done.usage?.inputTokens ?? 0;
         usage.outputTokens += done.usage?.outputTokens ?? 0;
+        if (done.usage?.cachedInputTokens !== undefined) {
+          usage.cachedInputTokens =
+            (usage.cachedInputTokens ?? 0) + done.usage.cachedInputTokens;
+        }
+        if (done.usage?.cacheWriteTokens !== undefined) {
+          usage.cacheWriteTokens =
+            (usage.cacheWriteTokens ?? 0) + done.usage.cacheWriteTokens;
+        }
+        if (done.usage?.estimated !== undefined) {
+          usage.estimated = (usage.estimated ?? false) || done.usage.estimated;
+        }
         stopReason = done.stopReason;
         if (stopReason !== "tool_use") {
           break;

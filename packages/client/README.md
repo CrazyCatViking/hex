@@ -115,6 +115,14 @@ console.log(turn.stopReason, turn.usage, chat.messages);
 
 Thinking blocks in `messages` carry a signature. Send them back unchanged, as `conversation()` does.
 
+Usage is available on `stream.done()`, completions, and conversation turns as
+`inputTokens` and `outputTokens`, with optional `cachedInputTokens` (cache reads),
+`cacheWriteTokens` (cache writes), and `estimated`. Conversation turns sum all
+token fields across their tool rounds and set `estimated` if any round was
+estimated. `inputTokens` counts uncached input; cache reads and writes are
+reported separately. Total input usage is the sum of `inputTokens`,
+`cachedInputTokens`, and `cacheWriteTokens`, treating absent cache fields as zero.
+
 See the [Hex documentation](https://github.com/crazycatviking/hex) and the skill installed by `hex init` or `hex skills` for API examples.
 
 ## Package from a checkout

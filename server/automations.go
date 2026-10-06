@@ -81,10 +81,12 @@ type AutomationSave struct {
 }
 
 // ScheduledAutomation is a stored automation with its next scheduled run;
-// a zero NextRun means it only runs when triggered.
+// a zero NextRun means it only runs when triggered. Revision is an opaque,
+// store-assigned token for this replacement, not a schedule or content hash.
 type ScheduledAutomation struct {
 	Site       string     `json:"site"`
 	Automation Automation `json:"automation"`
+	Revision   string     `json:"revision"`
 	NextRun    time.Time  `json:"nextRun,omitzero"`
 	UpdatedAt  time.Time  `json:"updatedAt"`
 	UpdatedBy  *Person    `json:"updatedBy,omitempty"`
@@ -131,15 +133,20 @@ const (
 )
 
 // AutomationStore keeps each site's automations, schedules and run history.
-// ClaimAutomation atomically moves an automation's NextRun from expected to
-// next and reports whether this caller won, so only one instance runs each
-// scheduled occurrence. Stores keep at least the latest 50 runs per
-// automation.
+// ReplaceSiteAutomations atomically replaces a site's entire set, assigning
+// fresh, non-reusable revisions and preserving the current stored NextRun for
+// unchanged schedules (SameAutomationSchedule), including a zero NextRun.
+// Incoming NextRun values are proposals for new or changed schedules only.
+// Replacement must serialize with claims, even for absent site/name rows.
+// ClaimAutomation compares both revision and NextRun and atomically advances
+// NextRun, so stale definitions cannot claim a newer deployment's occurrence.
+// Returned definitions must be detached snapshots. Stores keep at least the
+// latest 50 runs per automation.
 type AutomationStore interface {
 	ReplaceSiteAutomations(ctx context.Context, site string, automations []ScheduledAutomation) error
 	ListSiteAutomations(ctx context.Context, site string) ([]ScheduledAutomation, error)
 	DueAutomations(ctx context.Context, now time.Time, limit int) ([]ScheduledAutomation, error)
-	ClaimAutomation(ctx context.Context, site, name string, expected, next time.Time) (bool, error)
+	ClaimAutomation(ctx context.Context, site, name, revision string, expected, next time.Time) (bool, error)
 	RecordAutomationRun(ctx context.Context, run AutomationRun) error
 	ListAutomationRuns(ctx context.Context, site, name string, limit int) ([]AutomationRun, error)
 	GetAutomationRun(ctx context.Context, site, id string) (AutomationRun, error)
@@ -159,7 +166,7 @@ const (
 var cronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 
 func (s *Server) automationsEnabled() bool {
-	return s.config.Automations != nil && s.config.Publisher != nil
+	return s.config.Automations != nil
 }
 
 // ValidateAutomations checks a site's set of automations.
@@ -354,18 +361,14 @@ func nextRun(automation Automation, now time.Time) time.Time {
 	return schedule.Next(now.In(location)).UTC()
 }
 
-// replaceAutomations stores a site's new set, keeping the next run of
-// automations whose schedule did not change.
+// replaceAutomations proposes a site's new set. The store preserves unchanged
+// schedules from its current state atomically with concurrent claims.
 func (s *Server) replaceAutomations(ctx context.Context, site string, automations []Automation, identity *Identity) error {
 	if len(automations) > 0 && !s.automationsEnabled() {
 		return errors.New("this platform has no automation store, so it cannot run automations")
 	}
 	if !s.automationsEnabled() {
 		return nil
-	}
-	existing, err := s.config.Automations.ListSiteAutomations(ctx, site)
-	if err != nil {
-		return err
 	}
 	now := time.Now().UTC()
 	scheduled := make([]ScheduledAutomation, 0, len(automations))
@@ -374,18 +377,15 @@ func (s *Server) replaceAutomations(ctx context.Context, site string, automation
 			Site: site, Automation: automation, NextRun: nextRun(automation, now),
 			UpdatedAt: now, UpdatedBy: personOf(identity),
 		}
-		index := slices.IndexFunc(existing, func(previous ScheduledAutomation) bool {
-			return previous.Automation.Name == automation.Name
-		})
-		if index >= 0 && sameSchedule(existing[index].Automation, automation) && !existing[index].NextRun.IsZero() {
-			entry.NextRun = existing[index].NextRun
-		}
 		scheduled = append(scheduled, entry)
 	}
 	return s.config.Automations.ReplaceSiteAutomations(ctx, site, scheduled)
 }
 
-func sameSchedule(a, b Automation) bool {
+// SameAutomationSchedule compares the fields that determine scheduled times.
+// Definition changes outside these fields preserve the current NextRun, but
+// replacement still assigns a fresh revision to invalidate stale snapshots.
+func SameAutomationSchedule(a, b Automation) bool {
 	return a.Schedule == b.Schedule && a.Timezone == b.Timezone && a.Disabled == b.Disabled
 }
 
@@ -410,7 +410,7 @@ func (s *Server) runAutomation(ctx context.Context, site string, automation Auto
 	steps := make(map[string]any)
 	runner := &automationRunner{
 		server: s, site: site, automation: automation, run: run,
-		caller: integrationCaller{site: site, automation: automation.Name, role: roleOwner},
+		caller: integrationCaller{site: site, automation: automation.Name, role: roleOwner, dryRun: run.DryRun},
 		data: map[string]any{
 			"site":       site,
 			"automation": automation.Name,
@@ -592,10 +592,10 @@ func (r *automationRunner) actionStep(ctx context.Context, step AutomationStep, 
 	if err != nil {
 		return nil, "", err
 	}
-	if err := validateActionJSON(action.input, input); err != nil {
-		return nil, "", fmt.Errorf("invalid input for action %s: %w", step.Action, err)
-	}
 	if r.run.DryRun {
+		if err := action.validateInput(input); err != nil {
+			return nil, "", fmt.Errorf("invalid input for action %s: %w", step.Action, err)
+		}
 		return map[string]any{"wouldRun": step.Action, "input": json.RawMessage(input)}, StepDryRun, nil
 	}
 
@@ -604,8 +604,12 @@ func (r *automationRunner) actionStep(ctx context.Context, step AutomationStep, 
 		return nil, "", err
 	}
 	caller := ActionContext{Site: r.site, Identity: authorization.identity, Role: roleNames[roleOwner], authorization: authorization}
-	output, err := action.handler(ctx, caller, input)
+	output, err := action.execute(ctx, caller, input)
 	if err != nil {
+		var inputError *actionInputError
+		if errors.As(err, &inputError) {
+			return nil, "", fmt.Errorf("invalid input for action %s: %w", step.Action, err)
+		}
 		return nil, "", automationError(err)
 	}
 	return output, "", nil

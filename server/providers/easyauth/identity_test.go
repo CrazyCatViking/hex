@@ -117,3 +117,38 @@ func TestResolveIdentityEmail(t *testing.T) {
 		t.Fatalf("a non-email value was used: %q", email)
 	}
 }
+
+func TestGUIDCanonicalizationIsEntraSpecific(t *testing.T) {
+	upper := "11111111-AAAA-4BBB-8CCC-222222222222"
+	lower := "11111111-aaaa-4bbb-8ccc-222222222222"
+	for _, provider := range []string{"aad", "oidc"} {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.Header.Set("X-Ms-Client-Principal-Id", upper)
+		r.Header.Set("X-Ms-Client-Principal", encodePrincipal(t, map[string]any{
+			"auth_typ": provider,
+			"claims": []map[string]string{
+				{"typ": "groups", "val": upper}, {"typ": "groups", "val": "Opaque:AbC|1"},
+				{"typ": "roles", "val": "Hex.Admin"}, {"typ": "roles", "val": upper},
+			},
+		}))
+		identity, err := (Resolver{}).ResolveIdentity(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := upper
+		if provider == "aad" {
+			want = lower
+		}
+		if identity.ID != want || identity.Groups[0] != want || identity.Groups[1] != "Opaque:AbC|1" || identity.Roles[0] != "Hex.Admin" || identity.Roles[1] != upper {
+			t.Fatalf("provider %s changed opaque claims or failed GUID normalization: %+v", provider, identity)
+		}
+	}
+	for _, test := range []struct{ principal, want string }{
+		{upper, lower}, {"user:" + upper, "user:" + lower}, {"group:" + upper, "group:" + lower},
+		{"role:" + upper, "role:" + upper}, {"group:Opaque:AbC|1", "group:Opaque:AbC|1"},
+	} {
+		if got := CanonicalPrincipal(test.principal); got != test.want {
+			t.Errorf("canonical principal %q: got %q, want %q", test.principal, got, test.want)
+		}
+	}
+}

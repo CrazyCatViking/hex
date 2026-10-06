@@ -29,12 +29,14 @@ const (
 // Chrome is what every portal page shows around its content: the platform,
 // the active section and the signed-in viewer.
 type Chrome struct {
-	Platform    string
-	Active      string
-	Viewer      *viewerView
-	Manage      bool
-	Analytics   bool
-	Connections bool
+	Platform     string
+	Active       string
+	Viewer       *viewerView
+	Manage       bool
+	Analytics    bool
+	Connections  bool
+	Integrations bool
+	LogoutURL    string
 	// AdminLink is where the Admin navigation leads platform admins: the
 	// analytics overview, or the AI page when only AI is enabled.
 	AdminLink string
@@ -136,11 +138,12 @@ func (s *Server) chromeFor(identity *Identity, active string) Chrome {
 	view := Chrome{
 		Platform: s.platformName(), Active: active, Manage: s.manageEnabled() && identity != nil,
 		Analytics: s.config.Analytics != nil, Connections: s.connectionsEnabled() && identity != nil,
+		Integrations: s.portalIntegrationsEnabled() && identity != nil, LogoutURL: s.config.LogoutURL,
 	}
 	switch {
 	case s.config.Analytics != nil && s.config.Identity != nil:
 		view.AdminLink = "/admin"
-	case s.aiAccountingEnabled() && s.manageEnabled():
+	case s.aiAccountingEnabled() && s.config.Identity != nil:
 		view.AdminLink = "/admin/ai"
 	case s.integrationAuditEnabled():
 		view.AdminLink = "/admin/integration-audit"

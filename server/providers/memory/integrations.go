@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"crypto/rand"
 	"slices"
 	"strings"
 	"sync"
@@ -13,9 +14,10 @@ import (
 // IntegrationStore keeps integration approvals and connected-account
 // credentials in process memory, for local development and tests.
 type IntegrationStore struct {
-	mu          sync.RWMutex
-	approvals   map[string]hex.IntegrationApproval
-	credentials map[string]hex.CredentialRecord
+	mu           sync.RWMutex
+	approvals    map[string]hex.IntegrationApproval
+	credentials  map[string]hex.CredentialRecord
+	refreshLocks sync.Map
 }
 
 func NewIntegrationStore() *IntegrationStore {
@@ -103,11 +105,48 @@ func (s *IntegrationStore) PutCredential(ctx context.Context, record hex.Credent
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	record.Sealed = slices.Clone(record.Sealed)
+	record.Generation = rand.Text()
+	record.Version = rand.Text()
 	s.credentials[pairKey(record.Owner, record.Connector)] = record
 	return nil
 }
 
-func (s *IntegrationStore) TouchCredential(ctx context.Context, owner, connector string, usedAt time.Time) error {
+func (s *IntegrationStore) UpdateCredential(ctx context.Context, record hex.CredentialRecord) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := pairKey(record.Owner, record.Connector)
+	current, exists := s.credentials[key]
+	if !exists || current.Version != record.Version {
+		return hex.ErrCredentialChanged
+	}
+	current.Sealed = slices.Clone(record.Sealed)
+	current.Version = rand.Text()
+	if record.LastUsedAt.After(current.LastUsedAt) {
+		current.LastUsedAt = record.LastUsedAt
+	}
+	s.credentials[key] = current
+	return nil
+}
+
+func (s *IntegrationStore) WithCredentialLock(ctx context.Context, owner, connector string, fn func(context.Context) error) error {
+	value, _ := s.refreshLocks.LoadOrStore(pairKey(owner, connector), make(chan struct{}, 1))
+	lock := value.(chan struct{})
+	select {
+	case lock <- struct{}{}:
+		defer func() { <-lock }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return fn(ctx)
+}
+
+func (s *IntegrationStore) TouchCredential(ctx context.Context, owner, connector, version string, usedAt time.Time) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -115,11 +154,29 @@ func (s *IntegrationStore) TouchCredential(ctx context.Context, owner, connector
 	defer s.mu.Unlock()
 	key := pairKey(owner, connector)
 	record, exists := s.credentials[key]
-	if !exists {
-		return hex.ErrNotFound
+	if !exists || record.Version != version {
+		return hex.ErrCredentialChanged
 	}
-	record.LastUsedAt = usedAt
+	if usedAt.After(record.LastUsedAt) {
+		record.LastUsedAt = usedAt
+	}
+	record.Version = rand.Text()
 	s.credentials[key] = record
+	return nil
+}
+
+func (s *IntegrationStore) DeleteCredentialVersion(ctx context.Context, owner, connector, version string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := pairKey(owner, connector)
+	record, exists := s.credentials[key]
+	if !exists || record.Version != version {
+		return hex.ErrCredentialChanged
+	}
+	delete(s.credentials, key)
 	return nil
 }
 

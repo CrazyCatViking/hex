@@ -31,9 +31,8 @@ type SiteAccess struct {
 	Channels    map[string]DataRule `json:"channels,omitempty"`
 }
 
-// PathRule limits the static assets under Prefix to Viewers. Prefixes are
-// matched case-insensitively because Azure Files, which backs published
-// sites, resolves paths case-insensitively.
+// PathRule limits the static assets under Prefix to Viewers. Matching follows
+// Config.PathCaseInsensitive, which must agree with the host's static storage.
 type PathRule struct {
 	Prefix  string   `json:"prefix"`
 	Viewers Audience `json:"viewers"`
@@ -105,7 +104,8 @@ type AccessStore interface {
 type AccessUpdate func(current SiteAccess, exists bool) (*SiteAccess, error)
 
 var (
-	principalPattern  = regexp.MustCompile(`^(user|group|role):[A-Za-z0-9][A-Za-z0-9@._-]{0,127}$`)
+	identityIDPattern = regexp.MustCompile(`^[!-~]{1,256}$`)
+	principalPattern  = regexp.MustCompile(`^(user|group|role):[!-~]{1,256}$`)
 	pathPrefixPattern = regexp.MustCompile(`^/[A-Za-z0-9._~/-]{0,255}$`)
 )
 
@@ -192,6 +192,27 @@ func validateSiteAccess(access SiteAccess) error {
 		return err
 	}
 	return validateRules("channel", access.Channels, validCollectionName, false)
+}
+
+// validateSiteAccess adds host-specific checks to portable policy validation.
+// Case-distinct prefixes are valid on case-sensitive static storage.
+func (s *Server) validateSiteAccess(access SiteAccess) error {
+	if err := validateSiteAccess(access); err != nil {
+		return err
+	}
+	return s.validatePathPrefixes(access.Paths)
+}
+
+func (s *Server) validatePathPrefixes(rules []PathRule) error {
+	seen := make(map[string]string, len(rules))
+	for _, rule := range rules {
+		key := s.pathComparisonKey(rule.Prefix)
+		if previous, exists := seen[key]; exists {
+			return fmt.Errorf("ambiguous path prefixes %q and %q for the configured static storage", previous, rule.Prefix)
+		}
+		seen[key] = rule.Prefix
+	}
+	return nil
 }
 
 func validatePrincipals(field string, principals []string) error {
@@ -306,7 +327,7 @@ func (s *Server) putSiteAccess(w http.ResponseWriter, r *http.Request) {
 // result must keep the caller able to manage it. A non-zero status describes
 // a client error; zero means err is a server failure.
 func (s *Server) replaceSiteAccess(ctx context.Context, identity *Identity, site string, requested SiteAccess) (SiteAccess, int, error) {
-	if err := validateSiteAccess(requested); err != nil {
+	if err := s.validateSiteAccess(requested); err != nil {
 		return SiteAccess{}, http.StatusBadRequest, err
 	}
 

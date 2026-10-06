@@ -2,8 +2,10 @@ package hex
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
 	"net/http"
@@ -90,6 +92,34 @@ func newSpendMeter(spent int64, limit *int64) spendMeter {
 		meter.Status = fmt.Sprintf("%d%% used", int(share))
 	}
 	return meter
+}
+
+func newAIBudgetMeter(spend AIUsageSpend, limit *int64) spendMeter {
+	meter := newSpendMeter(spend.SettledMicros+spend.ReservedMicros, limit)
+	if spend.Reservations > 0 {
+		meter.Spent = FormatDollars(spend.SettledMicros) + " + " + FormatDollars(spend.ReservedMicros) + " reserved"
+		pending := fmt.Sprintf("%d pending calls", spend.Reservations)
+		if spend.Reservations == 1 {
+			pending = "1 pending call"
+		}
+		if meter.Status == "" {
+			meter.Status = pending
+			// Unlimited meters do not render a separate status line.
+			meter.Spent += " (" + pending + ")"
+		} else {
+			meter.Status += " (" + pending + ")"
+		}
+	}
+	return meter
+}
+
+func (s *Server) aiMonthSpend(ctx context.Context, month aiMonth, site string, now time.Time) (AIUsageSpend, error) {
+	spend, err := s.config.AIUsage.AIBudgetSpend(ctx, AIUsageFilter{Since: month.Since, Until: month.Until, Site: site})
+	if month.Param != now.UTC().Format("2006-01") {
+		// Holds constrain current admission, not historical spending reports.
+		spend.ReservedMicros, spend.Reservations = 0, 0
+	}
+	return spend, err
 }
 
 // spendRow is one line of a breakdown, with its share of the largest line.
@@ -254,19 +284,23 @@ func (s *Server) loadSiteAI(ctx context.Context, site string, identity *Identity
 		return siteAIView{}, err
 	}
 	filter := AIUsageFilter{Since: month.Since, Until: month.Until, Site: site}
-	spent, err := s.config.AIUsage.SumAICost(ctx, filter)
+	spend, err := s.aiMonthSpend(ctx, month, site, now)
 	if err != nil {
 		return siteAIView{}, err
 	}
 	limit, own := budgets.siteLimit(site)
 	view := siteAIView{
-		Site: site, Month: month, Meter: newSpendMeter(spent, limit),
+		Site: site, Month: month, Meter: newAIBudgetMeter(spend, limit),
 		Disabled: budgets.sites[site].Disabled, Admin: s.isAdmin(identity),
 		TabLink: "/manage/" + site + "?tab=ai",
 	}
 	restricted, err := s.restrictedModels(ctx)
 	if err != nil {
-		return siteAIView{}, err
+		slogAIError("list restricted AI models for spending page", err)
+		view.ErrorText = "Model availability could not be loaded; spending and budgets are still available."
+		for _, id := range budgets.sites[site].Models {
+			view.Restricted = append(view.Restricted, siteAIModel{ID: id, Name: id, Enabled: true})
+		}
 	}
 	for _, model := range restricted {
 		view.Restricted = append(view.Restricted, siteAIModel{
@@ -322,15 +356,35 @@ func (s *Server) manageSiteAIBudget(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid form")
 		return
 	}
-	restricted, err := s.restrictedModels(r.Context())
-	if err != nil {
-		writeServerError(w, err)
-		return
-	}
 	var enabled []string
-	for _, model := range restricted {
-		if r.PostFormValue("model."+model.ID) == "on" {
-			enabled = append(enabled, model.ID)
+	for field, values := range r.PostForm {
+		if id, isModel := strings.CutPrefix(field, "model."); isModel && slices.Contains(values, "on") {
+			enabled = append(enabled, id)
+		}
+	}
+	if len(enabled) > 0 {
+		restricted, err := s.restrictedModels(r.Context())
+		if err != nil {
+			if r.PostFormValue("enabled") == "on" {
+				writeServerError(w, err)
+				return
+			}
+			// Turning AI off must work during a provider outage. Keep the
+			// previously validated model selection rather than enabling new IDs.
+			budgets, loadErr := s.loadAIBudgets(r.Context())
+			if loadErr != nil {
+				writeServerError(w, loadErr)
+				return
+			}
+			enabled = budgets.sites[site].Models
+		} else {
+			var validated []string
+			for _, model := range restricted {
+				if slices.Contains(enabled, model.ID) {
+					validated = append(validated, model.ID)
+				}
+			}
+			enabled = validated
 		}
 	}
 	limit, parseErr := parseDollars(r.PostFormValue("limit"))
@@ -403,20 +457,75 @@ type adminAISite struct {
 }
 
 type aiOverride struct {
-	Subject string
-	Label   string
-	Limit   string
+	Subject   string
+	Label     string
+	Limit     string
+	RemoveURL string
 }
 
 func (s *Server) registerAIPortalRoutes() {
-	if !s.aiAccountingEnabled() || !s.manageEnabled() {
+	if !s.aiAccountingEnabled() || s.config.Identity == nil {
 		return
 	}
 	s.mux.HandleFunc("GET /admin/ai", s.adminAIPage)
 	s.mux.HandleFunc("PUT /api/hex/manage/ai/budgets", s.manageAIDefaults)
 	s.mux.HandleFunc("POST /api/hex/manage/ai/overrides", s.manageAddAIOverride)
 	s.mux.HandleFunc("DELETE /api/hex/manage/ai/overrides", s.manageRemoveAIOverride)
-	s.mux.HandleFunc("PUT /api/hex/manage/sites/{site}/ai/budget", s.manageSiteAIBudget)
+	s.mux.HandleFunc("GET /api/hex/manage/ai/reservations", s.manageAIReservations)
+	s.mux.HandleFunc("PUT /api/hex/manage/ai/settlements/{id}", s.manageAISettlement)
+	if s.manageEnabled() {
+		s.mux.HandleFunc("PUT /api/hex/manage/sites/{site}/ai/budget", s.manageSiteAIBudget)
+	}
+}
+
+func (s *Server) manageAIReservations(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.adminCaller(w, r); !ok {
+		return
+	}
+	filter := AIUsageFilter{Site: r.URL.Query().Get("site"), Caller: r.URL.Query().Get("caller")}
+	held, err := s.config.AIUsage.ListAIReservations(r.Context(), filter)
+	if err != nil {
+		writeServerError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, held)
+}
+
+// manageAISettlement accepts a complete verified record so retries work even
+// after its hold has been replaced, without depending on a live model catalog.
+func (s *Server) manageAISettlement(w http.ResponseWriter, r *http.Request) {
+	identity, ok := s.adminCaller(w, r)
+	if !ok {
+		return
+	}
+	var record AIUsageRecord
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&record); err != nil {
+		writeError(w, http.StatusBadRequest, "expected an AI usage record: "+err.Error())
+		return
+	}
+	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "expected one AI usage record")
+		return
+	}
+	usage := record.Usage
+	if record.ID != r.PathValue("id") || record.ID == "" || record.At.IsZero() || record.CostMicros < 0 ||
+		usage.InputTokens < 0 || usage.CachedInputTokens < 0 || usage.CacheWriteTokens < 0 || usage.OutputTokens < 0 ||
+		(!record.Priced && record.CostMicros != 0) {
+		writeError(w, http.StatusBadRequest, "invalid AI settlement identity, usage or cost")
+		return
+	}
+	if err := s.config.AIUsage.SettleAIUsage(r.Context(), record); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			writeError(w, http.StatusNotFound, "no matching AI reservation")
+		} else {
+			writeServerError(w, err)
+		}
+		return
+	}
+	slog.Info("AI reservation reconciled", "id", record.ID, "site", record.Site, "costMicros", record.CostMicros, "by", identityName(identity))
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) loadAdminAI(ctx context.Context, identity *Identity, values url.Values) (adminAIView, error) {
@@ -430,12 +539,12 @@ func (s *Server) loadAdminAI(ctx context.Context, identity *Identity, values url
 		return adminAIView{}, err
 	}
 	filter := AIUsageFilter{Since: month.Since, Until: month.Until}
-	spent, err := s.config.AIUsage.SumAICost(ctx, filter)
+	spend, err := s.aiMonthSpend(ctx, month, "", now)
 	if err != nil {
 		return adminAIView{}, err
 	}
 	view := adminAIView{
-		Chrome: s.chromeFor(identity, "admin"), Month: month, Meter: newSpendMeter(spent, budgets.platform),
+		Chrome: s.chromeFor(identity, "admin"), Month: month, Meter: newAIBudgetMeter(spend, budgets.platform),
 		Platform: limitInput(budgets.platform), SiteDefault: limitInput(budgets.siteDefault),
 		PersonDefault: limitInput(budgets.personDefault), Analytics: s.config.Analytics != nil,
 		Audit: s.integrationAuditEnabled(),
@@ -452,13 +561,39 @@ func (s *Server) loadAdminAI(ctx context.Context, identity *Identity, values url
 	}
 	listed := make(map[string]bool)
 	for _, total := range sites {
-		site := s.adminAISite(total.Key, total.CostMicros, budgets)
+		spend, err := s.aiMonthSpend(ctx, month, total.Key, now)
+		if err != nil {
+			return adminAIView{}, err
+		}
+		site := s.adminAISite(total.Key, spend, budgets)
 		view.Sites = append(view.Sites, site)
 		listed[total.Key] = true
 	}
 	for name := range budgets.sites {
 		if !listed[name] {
-			view.Sites = append(view.Sites, s.adminAISite(name, 0, budgets))
+			spend, err := s.aiMonthSpend(ctx, month, name, now)
+			if err != nil {
+				return adminAIView{}, err
+			}
+			view.Sites = append(view.Sites, s.adminAISite(name, spend, budgets))
+			listed[name] = true
+		}
+	}
+	if month.Param == now.UTC().Format("2006-01") {
+		held, err := s.config.AIUsage.ListAIReservations(ctx, AIUsageFilter{})
+		if err != nil {
+			return adminAIView{}, err
+		}
+		for _, reservation := range held {
+			if listed[reservation.Site] {
+				continue
+			}
+			spend, err := s.aiMonthSpend(ctx, month, reservation.Site, now)
+			if err != nil {
+				return adminAIView{}, err
+			}
+			view.Sites = append(view.Sites, s.adminAISite(reservation.Site, spend, budgets))
+			listed[reservation.Site] = true
 		}
 	}
 	// Sites with spending come first, most expensive first, as returned;
@@ -467,6 +602,7 @@ func (s *Server) loadAdminAI(ctx context.Context, identity *Identity, values url
 	for _, budget := range budgets.people {
 		view.Overrides = append(view.Overrides, aiOverride{
 			Subject: budget.Subject, Label: s.principalName(ctx, budget.Subject), Limit: FormatDollars(valueOr(budget.LimitMicros)),
+			RemoveURL: "/api/hex/manage/ai/overrides?" + url.Values{"subject": {budget.Subject}, "month": {month.Param}}.Encode(),
 		})
 	}
 
@@ -499,10 +635,10 @@ func valueOr(limit *int64) int64 {
 	return *limit
 }
 
-func (s *Server) adminAISite(name string, spent int64, budgets aiBudgets) adminAISite {
+func (s *Server) adminAISite(name string, spend AIUsageSpend, budgets aiBudgets) adminAISite {
 	limit, own := budgets.siteLimit(name)
 	return adminAISite{
-		Name: name, Meter: newSpendMeter(spent, limit), Own: own,
+		Name: name, Meter: newAIBudgetMeter(spend, limit), Own: own,
 		Disabled: budgets.sites[name].Disabled, Models: budgets.sites[name].Models,
 		Link: "/manage/" + name + "?tab=ai",
 	}

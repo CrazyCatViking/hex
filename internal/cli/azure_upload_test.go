@@ -109,7 +109,9 @@ func TestAzureFilesUploadsUsePresignedURLs(t *testing.T) {
 					URL:      storage.URL + "/sites/public/sites/demo/" + file.Path + "?sv=2026-06-06&sig=fixture-signature",
 				})
 			}
-			json.NewEncoder(w).Encode(publishPlan{Uploads: uploads})
+			json.NewEncoder(w).Encode(struct {
+				Uploads []hex.UploadTarget `json:"uploads"`
+			}{Uploads: uploads})
 		case "/api/hex/sites/demo/publish/complete":
 			completed = request.Files
 			json.NewEncoder(w).Encode(publishResult{URL: "https://demo.hex.example.com/"})

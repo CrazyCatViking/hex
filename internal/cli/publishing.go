@@ -39,12 +39,18 @@ type publishRequest struct {
 	Actions  json.RawMessage   `json:"actions,omitempty"`
 	// Automations is omitted, not empty, for projects without any, so the
 	// platform keeps automations deployed through the API.
-	Automations *[]hex.Automation `json:"automations,omitempty"`
+	Automations              *[]hex.Automation `json:"automations,omitempty"`
+	SupportedUploadProtocols []string          `json:"supportedUploadProtocols"`
+}
+
+type uploadTarget struct {
+	hex.UploadTarget
+	Headers map[string]string `json:"headers,omitempty"`
 }
 
 type publishPlan struct {
-	Uploads   []hex.UploadTarget `json:"uploads"`
-	Unchanged int                `json:"unchanged"`
+	Uploads   []uploadTarget `json:"uploads"`
+	Unchanged int            `json:"unchanged"`
 }
 
 type publishResult struct {
@@ -200,6 +206,7 @@ func (a *App) publishFiles(ctx context.Context, project Project, name string, so
 	request := publishRequest{
 		Files: files, Metadata: metadata, Access: access,
 		Actions: project.Actions, Automations: project.automations,
+		SupportedUploadProtocols: []string{"hex", "http", "azure-files"},
 	}
 	sitePath := "/api/hex/sites/" + name + "/publish"
 
@@ -241,9 +248,9 @@ func publishError(err error) error {
 
 // uploadAll sends every file except index.html in parallel, then index.html,
 // so visitors never load a new page that references missing assets.
-func (a *App) uploadAll(ctx context.Context, project Project, uploads []hex.UploadTarget, paths map[string]string) error {
-	var index []hex.UploadTarget
-	var assets []hex.UploadTarget
+func (a *App) uploadAll(ctx context.Context, project Project, uploads []uploadTarget, paths map[string]string) error {
+	var index []uploadTarget
+	var assets []uploadTarget
 	for _, upload := range uploads {
 		if _, ok := paths[upload.Path]; !ok {
 			return fmt.Errorf("the platform requested an unknown file %q", upload.Path)
@@ -261,11 +268,11 @@ func (a *App) uploadAll(ctx context.Context, project Project, uploads []hex.Uplo
 	return a.uploadParallel(ctx, project, index, paths)
 }
 
-func (a *App) uploadParallel(ctx context.Context, project Project, uploads []hex.UploadTarget, paths map[string]string) error {
+func (a *App) uploadParallel(ctx context.Context, project Project, uploads []uploadTarget, paths map[string]string) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	work := make(chan hex.UploadTarget)
+	work := make(chan uploadTarget)
 	var failure error
 	var once sync.Once
 	var workers sync.WaitGroup
@@ -297,15 +304,63 @@ func (a *App) uploadParallel(ctx context.Context, project Project, uploads []hex
 	return ctx.Err()
 }
 
-func (a *App) upload(ctx context.Context, project Project, target hex.UploadTarget, path string) error {
+func (a *App) upload(ctx context.Context, project Project, target uploadTarget, path string) error {
 	switch target.Protocol {
 	case "hex":
 		return a.uploadThroughPlatform(ctx, project, target.URL, path)
 	case "azure-files":
 		return uploadToAzureFiles(ctx, target.URL, path)
+	case "http":
+		return a.uploadToHTTP(ctx, target.URL, target.Headers, path)
 	default:
 		return fmt.Errorf("unsupported upload protocol %q; update the Hex CLI with hex update", target.Protocol)
 	}
+}
+
+// uploadToHTTP sends a plain PUT to a signed storage URL using only the
+// headers supplied by the storage provider, without platform credentials.
+func (a *App) uploadToHTTP(ctx context.Context, target string, headers map[string]string, path string) error {
+	parsed, err := url.Parse(target)
+	if err != nil || !parsed.IsAbs() || parsed.Hostname() == "" || parsed.User != nil || parsed.Fragment != "" || parsed.Opaque != "" ||
+		(parsed.Scheme != "https" && !(parsed.Scheme == "http" && isLocalHost(parsed.Hostname()))) {
+		return errors.New("the platform returned an invalid storage upload URL")
+	}
+
+	input, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer input.Close()
+	info, err := input.Stat()
+	if err != nil {
+		return err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPut, target, input)
+	if err != nil {
+		return err
+	}
+	request.ContentLength = info.Size()
+	if info.Size() == 0 {
+		request.Body = http.NoBody
+	}
+	for name, value := range headers {
+		request.Header.Set(name, value)
+	}
+
+	client := *a.HTTP
+	client.Jar = nil
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return fmt.Errorf("storage upload failed: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return fmt.Errorf("storage upload failed (HTTP %d); the upload link may have expired, so run hex publish again", response.StatusCode)
+	}
+	return nil
 }
 
 // uploadThroughPlatform sends a file to the platform's own upload endpoint.

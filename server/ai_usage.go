@@ -2,6 +2,7 @@ package hex
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -24,19 +25,43 @@ type AIPrice struct {
 	CachedInput float64 `json:"cachedInput,omitempty"`
 	CacheWrite  float64 `json:"cacheWrite,omitempty"`
 	Output      float64 `json:"output"`
+	// Overrides distinguish an explicitly free cache category from the
+	// historical zero-value defaults without changing the float fields.
+	CachedInputOverride *float64 `json:"cachedInputOverride,omitempty"`
+	CacheWriteOverride  *float64 `json:"cacheWriteOverride,omitempty"`
+}
+
+func (p AIPrice) cachePrices() (float64, float64) {
+	cached, write := p.CachedInput, p.CacheWrite
+	if cached == 0 {
+		cached = p.Input / 10
+	}
+	if write == 0 {
+		write = p.Input * 1.25
+	}
+	if p.CachedInputOverride != nil {
+		cached = *p.CachedInputOverride
+	}
+	if p.CacheWriteOverride != nil {
+		write = *p.CacheWriteOverride
+	}
+	return cached, write
+}
+
+func (p AIPrice) valid() bool {
+	cached, write := p.cachePrices()
+	for _, rate := range []float64{p.Input, cached, write, p.Output} {
+		if rate < 0 || math.IsNaN(rate) || math.IsInf(rate, 0) {
+			return false
+		}
+	}
+	return true
 }
 
 // costMicros prices usage. Prices are per million tokens, so tokens times
 // price is the cost in micro-dollars.
 func (p AIPrice) costMicros(usage AIUsage) int64 {
-	cached := p.CachedInput
-	if cached == 0 {
-		cached = p.Input / 10
-	}
-	write := p.CacheWrite
-	if write == 0 {
-		write = p.Input * 1.25
-	}
+	cached, write := p.cachePrices()
 	cost := float64(usage.InputTokens)*p.Input + float64(usage.CachedInputTokens)*cached +
 		float64(usage.CacheWriteTokens)*write + float64(usage.OutputTokens)*p.Output
 	return int64(math.Round(cost))
@@ -117,8 +142,26 @@ const (
 
 // AIUsageStore keeps usage records and budgets. Totals are grouped by site,
 // caller, model or UTC day (keyed YYYY-MM-DD); a caller group's Name is the
-// latest name recorded for it.
+// latest name by (At, ID), with the lexically greatest ID breaking time ties.
 type AIUsageStore interface {
+	// ReserveAIUsage atomically checks settled monthly spend plus ALL
+	// outstanding reservations against each check, then inserts the hold.
+	// Admission is allowed only below every limit. The final admitted call
+	// may cross a limit by at most its conservative CostMicros ceiling.
+	// Reservations never expire, including across month boundaries.
+	ReserveAIUsage(ctx context.Context, reservation AIUsageReservation, checks []AIBudgetCheck) error
+	// SettleAIUsage atomically inserts the record and removes its reservation.
+	// Retrying with the original record ID is idempotent. A failed transaction
+	// retains the hold; an ambiguous commit leaves either the hold or the
+	// durable record, never neither. Attribution must match the reservation.
+	SettleAIUsage(ctx context.Context, record AIUsageRecord) error
+	// ListAIReservations returns pending holds ordered by (At, ID). Date
+	// filters apply to listing, but never age holds out of admission.
+	ListAIReservations(ctx context.Context, filter AIUsageFilter) ([]AIUsageReservation, error)
+	// AIBudgetSpend atomically reads settled spend in the filter's period plus
+	// all outstanding holds for its Site/Caller, including older months.
+	AIBudgetSpend(ctx context.Context, filter AIUsageFilter) (AIUsageSpend, error)
+	// RecordAIUsage is an idempotent import of an already settled call by ID.
 	RecordAIUsage(ctx context.Context, record AIUsageRecord) error
 	SumAICost(ctx context.Context, filter AIUsageFilter) (int64, error)
 	AIUsageTotals(ctx context.Context, filter AIUsageFilter, groupBy string) ([]AIUsageTotal, error)
@@ -126,6 +169,59 @@ type AIUsageStore interface {
 	PutAIBudget(ctx context.Context, budget AIBudget) error
 	DeleteAIBudget(ctx context.Context, scope, subject string) error
 }
+
+// AIUsageReservation holds a conservative call ceiling under the future usage
+// record's ID, timestamp and attribution. For budget-enforced calls CostMicros
+// must cover all possible billed token categories for the model call.
+type AIUsageReservation struct {
+	ID              string    `json:"id"`
+	At              time.Time `json:"at"`
+	Site            string    `json:"site"`
+	Caller          string    `json:"caller"`
+	CostMicros      int64     `json:"costMicros"`
+	CallerName      string    `json:"callerName,omitempty"`
+	Model           string    `json:"model,omitempty"`
+	Price           *AIPrice  `json:"price,omitempty"`
+	ContextTokens   int       `json:"contextTokens,omitempty"`
+	MaxOutputTokens int       `json:"maxOutputTokens,omitempty"`
+	// This is the pre-call input estimate, not recovered upstream counts.
+	EstimatedUsage AIUsage `json:"estimatedUsage"`
+}
+
+// Clone keeps pricing snapshots independent of callers' mutable model catalogs.
+func (r AIUsageReservation) Clone() AIUsageReservation {
+	if r.Price != nil {
+		price := *r.Price
+		if price.CachedInputOverride != nil {
+			value := *price.CachedInputOverride
+			price.CachedInputOverride = &value
+		}
+		if price.CacheWriteOverride != nil {
+			value := *price.CacheWriteOverride
+			price.CacheWriteOverride = &value
+		}
+		r.Price = &price
+	}
+	return r
+}
+
+type AIUsageSpend struct {
+	SettledMicros  int64 `json:"settledMicros"`
+	ReservedMicros int64 `json:"reservedMicros"`
+	Reservations   int64 `json:"reservations"`
+}
+
+// AIBudgetCheck supplies an effective monthly limit and its settled-usage
+// filter. Outstanding holds match Site/Caller but deliberately ignore dates.
+type AIBudgetCheck struct {
+	Filter      AIUsageFilter
+	LimitMicros int64
+}
+
+// AIBudgetExceededError identifies the first denied check, in input order.
+type AIBudgetExceededError struct{ Index int }
+
+func (e *AIBudgetExceededError) Error() string { return "AI budget used up" }
 
 // AILimits are the monthly limits in US dollars used where no budget is
 // stored; zero means no limit.
@@ -244,22 +340,19 @@ type budgetCheck struct {
 	whose  string
 }
 
-// checkAIBudget refuses a model call when AI is off for the site or the
-// month's spending has reached the platform's, the site's or the person's
-// limit. A call that starts below a limit may end slightly above it.
-func (s *Server) checkAIBudget(ctx context.Context, caller integrationCaller) error {
+func (s *Server) aiBudgetChecks(ctx context.Context, caller integrationCaller, at time.Time) ([]budgetCheck, error) {
 	if !s.aiAccountingEnabled() {
-		return nil
+		return nil, nil
 	}
 	budgets, err := s.loadAIBudgets(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if budgets.sites[caller.site].Disabled {
-		return &AIError{Status: http.StatusForbidden, Message: "AI is turned off for this site"}
+		return nil, &AIError{Status: http.StatusForbidden, Message: "AI is turned off for this site"}
 	}
 
-	since := monthStart(time.Now())
+	since := monthStart(at)
 	siteLimit, _ := budgets.siteLimit(caller.site)
 	checks := []budgetCheck{
 		{budgets.platform, AIUsageFilter{Since: since}, "the platform's"},
@@ -267,6 +360,16 @@ func (s *Server) checkAIBudget(ctx context.Context, caller integrationCaller) er
 	}
 	if !caller.isAutomation() && caller.identity != nil {
 		checks = append(checks, budgetCheck{budgets.personLimit(caller.identity), AIUsageFilter{Since: since, Caller: caller.usageKey()}, "your"})
+	}
+	return checks, nil
+}
+
+// checkAIBudget provides an early rejection for settled spending. The
+// authoritative admission, including in-flight spending, is ReserveAIUsage.
+func (s *Server) checkAIBudget(ctx context.Context, caller integrationCaller) error {
+	checks, err := s.aiBudgetChecks(ctx, caller, time.Now())
+	if err != nil {
+		return err
 	}
 
 	for _, check := range checks {
@@ -278,14 +381,16 @@ func (s *Server) checkAIBudget(ctx context.Context, caller integrationCaller) er
 			return fmt.Errorf("sum AI spending: %w", err)
 		}
 		if spent >= *check.limit {
-			return &AIError{
-				Status: http.StatusTooManyRequests,
-				Message: fmt.Sprintf("%s AI budget of %s for %s is used up; a platform admin can raise it",
-					capitalize(check.whose), FormatDollars(*check.limit), since.Format("January")),
-			}
+			return budgetExceeded(check)
 		}
 	}
 	return nil
+}
+
+func budgetExceeded(check budgetCheck) error {
+	return &AIError{Status: http.StatusTooManyRequests,
+		Message: fmt.Sprintf("%s AI budget of %s for %s is used up; a platform admin can raise it",
+			capitalize(check.whose), FormatDollars(*check.limit), check.filter.Since.Format("January"))}
 }
 
 func capitalize(text string) string {
@@ -295,54 +400,131 @@ func capitalize(text string) string {
 	return strings.ToUpper(text[:1]) + text[1:]
 }
 
-// modelPrice looks up the configured price of a model.
-func (s *Server) modelPrice(ctx context.Context, id string) (*AIPrice, error) {
+type aiCallAccounting struct {
+	reservation AIUsageReservation
+	record      AIUsageRecord
+	price       *AIPrice
+	enforcing   bool
+}
+
+// reserveAICall snapshots pricing before spending and obtains a durable hold.
+func (s *Server) reserveAICall(ctx context.Context, caller integrationCaller, request AIRequest) (*aiCallAccounting, error) {
+	if !s.aiAccountingEnabled() {
+		return nil, nil
+	}
+	// PostgreSQL timestamps have microsecond precision; use the same temporal
+	// ordering and settlement identity in both stores.
+	at := time.Now().UTC().Truncate(time.Microsecond)
+	checks, err := s.aiBudgetChecks(ctx, caller, at)
+	if err != nil {
+		return nil, err
+	}
+	var admission []AIBudgetCheck
+	var limited []budgetCheck
+	for _, check := range checks {
+		if check.limit != nil {
+			admission = append(admission, AIBudgetCheck{Filter: check.filter, LimitMicros: *check.limit})
+			limited = append(limited, check)
+		}
+	}
 	models, err := s.config.AI.Provider.Models(ctx)
 	if err != nil {
 		return nil, err
 	}
-	for _, model := range models {
-		if model.ID == id {
-			return model.Price, nil
+	var model AIModel
+	for _, candidate := range models {
+		if candidate.ID == request.Model {
+			model = candidate
+			break
 		}
 	}
-	return nil, nil
-}
-
-// recordAIUsage stores one model call. Failing to record is logged rather
-// than failing a call that already happened.
-func (s *Server) recordAIUsage(caller integrationCaller, model string, usage AIUsage) {
-	if usage.InputTokens+usage.CachedInputTokens+usage.CacheWriteTokens+usage.OutputTokens == 0 {
-		return
+	price := model.Price
+	if price != nil && !price.valid() {
+		return nil, &AIError{Status: http.StatusServiceUnavailable, Message: "this model has invalid AI pricing"}
 	}
-	logAIUsage(caller, model, usage)
-	if !s.aiAccountingEnabled() {
-		return
+	if price != nil {
+		cached, write := price.cachePrices()
+		snapshot := *price
+		snapshot.CachedInputOverride = &cached
+		snapshot.CacheWriteOverride = &write
+		price = &snapshot
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	record := AIUsageRecord{
-		At: time.Now().UTC(), Site: caller.site, Caller: caller.usageKey(),
-		CallerName: caller.label(), Model: model, Usage: usage,
+	enforcing := len(admission) > 0
+	if enforcing && (price == nil || model.ContextTokens <= 0) {
+		return nil, &AIError{Status: http.StatusServiceUnavailable,
+			Message: "this model needs valid pricing and contextTokens to enforce AI budgets"}
+	}
+	var ceiling int64
+	if price != nil && model.ContextTokens > 0 {
+		cached, write := price.cachePrices()
+		// Any input token may be uncached, read or written. Charge every
+		// context token at the highest rate, plus the full output allowance.
+		cost := float64(model.ContextTokens)*max(price.Input, cached, write) + float64(request.MaxTokens)*price.Output
+		if math.IsInf(cost, 0) || cost >= float64(math.MaxInt64) {
+			return nil, fmt.Errorf("model %s reservation cost is too large", request.Model)
+		}
+		ceiling = int64(math.Ceil(cost))
 	}
 	id, err := newID()
 	if err != nil {
-		slog.Error("record AI usage", "error", err)
-		return
+		return nil, err
 	}
-	record.ID = id
-	price, err := s.modelPrice(ctx, model)
-	if err != nil {
-		slog.Error("look up AI model price", "model", model, "error", err)
+	call := &aiCallAccounting{
+		reservation: AIUsageReservation{ID: id, At: at, Site: caller.site, Caller: caller.usageKey(), CostMicros: ceiling,
+			CallerName: caller.label(), Model: request.Model, Price: price, ContextTokens: model.ContextTokens,
+			MaxOutputTokens: request.MaxTokens, EstimatedUsage: estimateUsage(request, 0)},
+		record: AIUsageRecord{ID: id, At: at, Site: caller.site, Caller: caller.usageKey(), CallerName: caller.label(), Model: request.Model},
+		price:  price, enforcing: enforcing,
 	}
-	if price != nil {
-		record.CostMicros = price.costMicros(usage)
+	if err := s.config.AIUsage.ReserveAIUsage(ctx, call.reservation, admission); err != nil {
+		var exceeded *AIBudgetExceededError
+		if errors.As(err, &exceeded) && exceeded.Index >= 0 && exceeded.Index < len(limited) {
+			return nil, budgetExceeded(limited[exceeded.Index])
+		}
+		return nil, fmt.Errorf("reserve AI usage %s: %w", id, err)
+	}
+	return call, nil
+}
+
+func (s *Server) settleAICall(call *aiCallAccounting, usage AIUsage) error {
+	if call == nil {
+		return nil
+	}
+	if usage.InputTokens < 0 || usage.CachedInputTokens < 0 || usage.CacheWriteTokens < 0 || usage.OutputTokens < 0 {
+		return fmt.Errorf("provider reported negative AI usage; reservation %s retained", call.record.ID)
+	}
+	record := call.record
+	record.Usage = usage
+	if call.price != nil {
+		record.CostMicros = call.price.costMicros(usage)
 		record.Priced = true
+		// Missing upstream usage cannot release potentially spent funds.
+		if usage.Estimated && call.enforcing {
+			record.CostMicros = call.reservation.CostMicros
+		}
 	} else {
-		slog.Warn("AI model has no price, so its spending is not counted against budgets", "model", model)
+		slog.Warn("AI model has no price; spending is unpriced", "model", record.Model)
 	}
-	if err := s.config.AIUsage.RecordAIUsage(ctx, record); err != nil {
-		slog.Error("record AI usage", "site", caller.site, "model", model, "error", err)
+	// Independent of the caller's cancellation, and the exact same record
+	// on every attempt: a lost commit acknowledgement cannot double-charge.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		err = s.config.AIUsage.SettleAIUsage(ctx, record)
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() != nil || attempt == 2 {
+			break
+		}
+		timer := time.NewTimer(time.Duration(attempt+1) * 100 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+		case <-timer.C:
+		}
 	}
+	slog.Error("settle AI usage; reservation retained", "id", record.ID, "site", record.Site, "error", err)
+	return fmt.Errorf("settle AI usage %s: %w", record.ID, err)
 }

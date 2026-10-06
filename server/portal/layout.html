@@ -34,6 +34,10 @@
         href="/manage"
         aria-current="{{if eq .Active `manage`}}page{{else}}false{{end}}"
         >Your sites</a
+      >{{end}} {{if .Integrations}}<a
+        href="/integrations"
+        aria-current="{{if eq .Active `integrations`}}page{{else}}false{{end}}"
+        >Integrations</a
       >{{end}}
       <a
         href="/start"
@@ -71,12 +75,14 @@
           <li class="tag">{{.}}</li>
           {{end}}
         </ul>
-        {{end}}
-        <a class="menu-link" href="/manage">Your sites</a>
-        {{if $.Connections}}<a class="menu-link" href="/connections"
+        {{end}} {{if $.Manage}}<a class="menu-link" href="/manage">Your sites</a
+        >{{end}} {{if $.Connections}}<a class="menu-link" href="/connections"
           >Connected accounts</a
+        >{{end}} {{if $.Integrations}}<a class="menu-link" href="/integrations"
+          >Integrations</a
+        >{{end}} {{if $.LogoutURL}}<a class="menu-link" href="{{$.LogoutURL}}"
+          >Sign out</a
         >{{end}}
-        <a class="menu-link" href="/.auth/logout">Sign out</a>
       </div>
     </details>
     {{end}}

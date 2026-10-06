@@ -263,8 +263,8 @@ type responseStatus struct {
 	} `json:"incomplete_details"`
 	Error *errorBody `json:"error"`
 	Usage *struct {
-		InputTokens        int `json:"input_tokens"`
-		OutputTokens       int `json:"output_tokens"`
+		InputTokens        *int `json:"input_tokens"`
+		OutputTokens       *int `json:"output_tokens"`
 		InputTokensDetails *struct {
 			CachedTokens int `json:"cached_tokens"`
 		} `json:"input_tokens_details"`
@@ -387,18 +387,19 @@ func (s *responsesStream) finish(response *responseStatus) {
 		return
 	}
 	s.finished = true
-	var usage hex.AIUsage
+	var usage *hex.AIUsage
 	stop := hex.StopEndTurn
 	if response != nil {
-		if response.Usage != nil {
+		if response.Usage != nil && response.Usage.InputTokens != nil && response.Usage.OutputTokens != nil {
 			// Input tokens include the cached ones, which are priced separately.
+			input, output := *response.Usage.InputTokens, *response.Usage.OutputTokens
 			cached := 0
 			if response.Usage.InputTokensDetails != nil {
-				cached = min(response.Usage.InputTokensDetails.CachedTokens, response.Usage.InputTokens)
+				cached = min(response.Usage.InputTokensDetails.CachedTokens, input)
 			}
-			usage = hex.AIUsage{
-				InputTokens: response.Usage.InputTokens - cached, CachedInputTokens: cached,
-				OutputTokens: response.Usage.OutputTokens,
+			usage = &hex.AIUsage{
+				InputTokens: input - cached, CachedInputTokens: cached,
+				OutputTokens: output,
 			}
 		}
 		if response.IncompleteDetails != nil {
@@ -422,6 +423,6 @@ func (s *responsesStream) finish(response *responseStatus) {
 	}
 	s.pending = append(s.pending,
 		hex.AIEvent{Type: hex.EventMessage, Message: &hex.AIMessage{Role: hex.RoleAssistant, Content: content}},
-		hex.AIEvent{Type: hex.EventDone, StopReason: stop, Usage: &usage},
+		hex.AIEvent{Type: hex.EventDone, StopReason: stop, Usage: usage},
 	)
 }

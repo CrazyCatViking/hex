@@ -18,6 +18,8 @@ import (
 // that never leaves the vault; KeySealer uses a local AES-256 key, for
 // development. Changing sealers makes existing connections unreadable;
 // people then reconnect.
+// OAuth connection state uses this same sealer with distinct associated data;
+// all instances serving a deployment must be able to open each other's values.
 type CredentialSealer interface {
 	Seal(ctx context.Context, plaintext, associated []byte) ([]byte, error)
 	Open(ctx context.Context, sealed, associated []byte) ([]byte, error)
@@ -53,16 +55,6 @@ func NewKeySealer(key []byte) (*KeySealer, error) {
 		return nil, err
 	}
 	return &KeySealer{aead: aead}, nil
-}
-
-// newRandomKeySealer seals values that only this process needs to open
-// again, such as short-lived connection state.
-func newRandomKeySealer() (*KeySealer, error) {
-	key := make([]byte, 32)
-	if _, err := rand.Read(key); err != nil {
-		return nil, fmt.Errorf("generate a sealing key: %w", err)
-	}
-	return NewKeySealer(key)
 }
 
 func (s *KeySealer) Seal(_ context.Context, plaintext, associated []byte) ([]byte, error) {

@@ -358,14 +358,17 @@ func (a *App) readCommand(name, description, path string, cached bool) *cobra.Co
 			if err != nil {
 				return err
 			}
-			if cached && project.Capabilities != nil && !refresh && !cmd.Flags().Changed("server") {
+			if cached && project.Capabilities != nil && !refresh && !cmd.Flags().Changed("server") && resource == "" {
 				return a.printJSON(project.Capabilities)
 			}
 			if server != "" {
 				project.Server = server
 			}
 			if resource != "" {
-				project = project.withResource(resource)
+				project, err = project.withResource(resource)
+				if err != nil {
+					return err
+				}
 			}
 			data, err := a.apiRequest(cmd.Context(), project, path)
 			if err != nil {

@@ -329,6 +329,24 @@
         </div>
         <div id="automation-detail" aria-live="polite"></div>
       </section>
+      {{end}} {{if eq .Tab "integrations"}}
+      <section class="panel" aria-labelledby="integrations-heading">
+        <h2 id="integrations-heading">Integrations</h2>
+        <div
+          hx-get="/api/hex/manage/sites/{{.Site.Name}}/integrations"
+          hx-trigger="load"
+          hx-swap="outerHTML"
+        >
+          <p class="muted">Loading…</p>
+        </div>
+        <noscript
+          ><p>
+            <a href="/integrations?site={{.Site.Name}}"
+              >Manage this site's integrations</a
+            >
+          </p></noscript
+        >
+      </section>
       {{end}} {{if eq .Tab "history"}}
       <section class="panel" aria-labelledby="history-heading">
         <h2 id="history-heading">History</h2>
@@ -346,13 +364,13 @@
         <p class="muted">No publications recorded yet.</p>
         {{end}}
       </section>
-      {{end}} {{if eq .Tab "settings"}}
+      {{end}} {{if and (eq .Tab "settings") .Publishing}}
       <section class="panel panel-danger" aria-labelledby="unpublish-heading">
         <h2 id="unpublish-heading">Take it down</h2>
         <p>
-          Removes the {{if eq .Site.Kind "File"}}file{{else}}app{{end}} and its
-          history. Its stored data and sharing settings are kept, and the name
-          stays reserved for its owners.
+          Removes the {{if eq .Site.Kind "File"}}file{{else}}app{{end}} and
+          stops its automations. Its stored data, analytics history and sharing
+          settings are kept, and the name stays reserved for its owners.
         </p>
         <form
           hx-post="/api/hex/manage/sites/{{.Site.Name}}/unpublish"
@@ -368,6 +386,13 @@
             Take it down
           </button>
         </form>
+      </section>
+      {{else if eq .Tab "settings"}}
+      <section class="panel">
+        <h2>Publishing unavailable</h2>
+        <p class="muted">
+          This platform does not allow sites to be unpublished.
+        </p>
       </section>
       {{end}}
     </main>

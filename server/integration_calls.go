@@ -35,7 +35,6 @@ func (s *Server) registerIntegrationRoutes() {
 		s.mux.HandleFunc("PUT /api/hex/sites/{site}/integrations/{integration}/approval", s.approveIntegration)
 		s.mux.HandleFunc("DELETE /api/hex/sites/{site}/integrations/{integration}/approval", s.deleteIntegrationApproval)
 	}
-	s.registerConnectionRoutes()
 }
 
 // SiteIntegration is what a caller sees of one integration on a site. The
@@ -250,6 +249,10 @@ func (s *Server) callIntegration(ctx context.Context, caller integrationCaller, 
 	if err := validateActionJSON(endpoint.input, input); err != nil {
 		return nil, false, &IntegrationError{Status: http.StatusBadRequest, Message: "invalid input: " + err.Error()}
 	}
+	if caller.isAutomation() && caller.dryRun && endpoint.endpoint.Write {
+		output, err := json.Marshal(map[string]any{"wouldCall": endpoint.qualifiedName(), "input": input})
+		return output, false, err
+	}
 	if integration.Audit && s.config.IntegrationAudit == nil {
 		slog.Error("audited integration called without an integration audit store", "endpoint", endpoint.qualifiedName())
 		return nil, false, unauditedError(integration)
@@ -257,19 +260,30 @@ func (s *Server) callIntegration(ctx context.Context, caller integrationCaller, 
 
 	call := IntegrationCall{Site: caller.site, Identity: caller.identity, Automation: caller.automation}
 	cacheOwner := ""
+	connectionGeneration := ""
 	if integration.Connector != "" {
 		if caller.identity == nil {
 			return nil, false, &IntegrationError{Status: http.StatusUnauthorized, Message: "sign in to use " + integration.Title}
 		}
 		owner := caller.identity.ID
-		cacheOwner = owner
+		record, err := s.eligibleCredential(ctx, owner, integration.Connector)
+		if err != nil {
+			return nil, false, err
+		}
+		connectionGeneration = record.Generation
+		cacheOwner = owner + "\x00" + connectionGeneration
 		call.connection = func(ctx context.Context) (*http.Client, error) {
-			return s.connectionClient(ctx, integration.Connector, owner)
+			return s.connectionClientGeneration(ctx, integration.Connector, owner, connectionGeneration)
 		}
 	}
-	cacheKey := integrationCacheKey(endpoint, cacheOwner, input)
+	cacheKey := integrationCacheKey(endpoint, caller.site, cacheOwner, input)
 	if endpoint.endpoint.CacheTTL > 0 {
 		if output, ok := s.integrationCache.get(cacheKey); ok {
+			if call.connection != nil {
+				if _, err := call.connection(ctx); err != nil {
+					return nil, false, err
+				}
+			}
 			outcome := integrationOutcome{output: output, cached: true}
 			if err := s.finishIntegrationCall(ctx, caller, endpoint, input, outcome); err != nil {
 				return nil, false, err
@@ -280,6 +294,17 @@ func (s *Server) callIntegration(ctx context.Context, caller integrationCaller, 
 
 	started := time.Now()
 	output, err := s.runIntegrationHandler(ctx, call, endpoint, input)
+	if err == nil && connectionGeneration != "" {
+		record, checkErr := s.eligibleCredential(ctx, caller.identity.ID, integration.Connector)
+		if checkErr != nil {
+			err = checkErr
+		} else if record.Generation != connectionGeneration {
+			err = ErrNotConnected
+		}
+		if err != nil {
+			output = nil
+		}
+	}
 	outcome := integrationOutcome{output: output, failed: err != nil, duration: time.Since(started)}
 	if auditErr := s.finishIntegrationCall(ctx, caller, endpoint, input, outcome); auditErr != nil {
 		return nil, false, auditErr
@@ -313,9 +338,9 @@ func (s *Server) runIntegrationHandler(ctx context.Context, call IntegrationCall
 	return output, nil
 }
 
-func integrationCacheKey(endpoint *registeredEndpoint, owner string, input json.RawMessage) string {
+func integrationCacheKey(endpoint *registeredEndpoint, site, owner string, input json.RawMessage) string {
 	digest := sha256.Sum256(compactJSON(input))
-	return endpoint.qualifiedName() + "\x00" + owner + "\x00" + hex.EncodeToString(digest[:])
+	return endpoint.qualifiedName() + "\x00" + site + "\x00" + owner + "\x00" + hex.EncodeToString(digest[:])
 }
 
 // responseCache is a small in-process TTL cache for read results. When full
@@ -366,6 +391,10 @@ func (c *responseCache) put(key string, value json.RawMessage, ttl time.Duration
 }
 
 func (s *Server) requestApprovalTarget(w http.ResponseWriter, r *http.Request) (*Identity, *registeredIntegration, bool) {
+	if !s.integrationApprovalsEnabled() {
+		writeError(w, http.StatusNotFound, "integration approvals are not available")
+		return nil, nil, false
+	}
 	identity, ok := s.accessCaller(w, r)
 	if !ok {
 		return nil, nil, false
@@ -386,6 +415,19 @@ func (s *Server) requestApprovalTarget(w http.ResponseWriter, r *http.Request) (
 	return identity, integration, true
 }
 
+func (s *Server) integrationApprovalsEnabled() bool {
+	return s.config.Identity != nil && s.config.IntegrationStore != nil
+}
+
+func writeIntegrationApprovalError(w http.ResponseWriter, err error) {
+	var integrationError *IntegrationError
+	if errors.As(err, &integrationError) {
+		writeError(w, integrationError.Status, integrationError.Message)
+		return
+	}
+	writeServerError(w, err)
+}
+
 func (s *Server) isSiteOwner(ctx context.Context, identity *Identity, site string) (bool, error) {
 	access, exists, err := s.sitePolicy(ctx, site)
 	if err != nil {
@@ -402,15 +444,6 @@ func (s *Server) requestIntegrationApproval(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	site := r.PathValue("site")
-	owner, err := s.isSiteOwner(r.Context(), identity, site)
-	if err != nil {
-		writeServerError(w, err)
-		return
-	}
-	if !owner {
-		writeError(w, http.StatusForbidden, "only the site's owners can request integrations for it")
-		return
-	}
 	var body struct {
 		Reason string `json:"reason"`
 	}
@@ -426,32 +459,45 @@ func (s *Server) requestIntegrationApproval(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	existing, err := s.config.IntegrationStore.GetIntegrationApproval(r.Context(), site, integration.integration.Name)
-	if err == nil && existing.Status == ApprovalApproved {
-		writeJSON(w, http.StatusOK, existing)
+	approval, err := s.requestSiteIntegrationApproval(r.Context(), identity, site, integration, body.Reason)
+	if err != nil {
+		writeIntegrationApprovalError(w, err)
 		return
 	}
+	writeJSON(w, http.StatusOK, approval)
+}
+
+func (s *Server) requestSiteIntegrationApproval(ctx context.Context, identity *Identity, site string, integration *registeredIntegration, reason string) (IntegrationApproval, error) {
+	owner, err := s.isSiteOwner(ctx, identity, site)
+	if err != nil {
+		return IntegrationApproval{}, err
+	}
+	if !owner {
+		return IntegrationApproval{}, &IntegrationError{Status: http.StatusForbidden, Message: "only the site's owners can request integrations for it"}
+	}
+	existing, err := s.config.IntegrationStore.GetIntegrationApproval(ctx, site, integration.integration.Name)
+	if err == nil && existing.Status == ApprovalApproved {
+		return existing, nil
+	}
 	if err != nil && !errors.Is(err, ErrNotFound) {
-		writeServerError(w, err)
-		return
+		return IntegrationApproval{}, err
 	}
 
 	now := time.Now().UTC()
 	approval := IntegrationApproval{
 		Site: site, Integration: integration.integration.Name, Status: ApprovalRequested,
-		Reason: body.Reason, RequestedBy: personOf(identity), RequestedAt: now,
+		Reason: reason, RequestedBy: personOf(identity), RequestedAt: now,
 	}
 	if s.isAdmin(identity) {
 		approval.Status = ApprovalApproved
 		approval.DecidedBy = personOf(identity)
 		approval.DecidedAt = now
 	}
-	if err := s.config.IntegrationStore.PutIntegrationApproval(r.Context(), approval); err != nil {
-		writeServerError(w, err)
-		return
+	if err := s.config.IntegrationStore.PutIntegrationApproval(ctx, approval); err != nil {
+		return IntegrationApproval{}, err
 	}
 	slog.Info("integration approval requested", "site", site, "integration", approval.Integration, "status", approval.Status, "by", identityName(identity))
-	writeJSON(w, http.StatusOK, approval)
+	return approval, nil
 }
 
 func (s *Server) approveIntegration(w http.ResponseWriter, r *http.Request) {
@@ -459,27 +505,33 @@ func (s *Server) approveIntegration(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !s.isAdmin(identity) {
-		writeError(w, http.StatusForbidden, "only platform admins approve integrations")
+	site := r.PathValue("site")
+	approval, err := s.approveSiteIntegration(r.Context(), identity, site, integration)
+	if err != nil {
+		writeIntegrationApprovalError(w, err)
 		return
 	}
-	site := r.PathValue("site")
-	approval, err := s.config.IntegrationStore.GetIntegrationApproval(r.Context(), site, integration.integration.Name)
+	writeJSON(w, http.StatusOK, approval)
+}
+
+func (s *Server) approveSiteIntegration(ctx context.Context, identity *Identity, site string, integration *registeredIntegration) (IntegrationApproval, error) {
+	if !s.isAdmin(identity) {
+		return IntegrationApproval{}, &IntegrationError{Status: http.StatusForbidden, Message: "only platform admins approve integrations"}
+	}
+	approval, err := s.config.IntegrationStore.GetIntegrationApproval(ctx, site, integration.integration.Name)
 	if errors.Is(err, ErrNotFound) {
 		approval = IntegrationApproval{Site: site, Integration: integration.integration.Name}
 	} else if err != nil {
-		writeServerError(w, err)
-		return
+		return IntegrationApproval{}, err
 	}
 	approval.Status = ApprovalApproved
 	approval.DecidedBy = personOf(identity)
 	approval.DecidedAt = time.Now().UTC()
-	if err := s.config.IntegrationStore.PutIntegrationApproval(r.Context(), approval); err != nil {
-		writeServerError(w, err)
-		return
+	if err := s.config.IntegrationStore.PutIntegrationApproval(ctx, approval); err != nil {
+		return IntegrationApproval{}, err
 	}
 	slog.Info("integration approved", "site", site, "integration", approval.Integration, "by", identityName(identity))
-	writeJSON(w, http.StatusOK, approval)
+	return approval, nil
 }
 
 // deleteIntegrationApproval lets admins revoke an approval and owners
@@ -490,33 +542,36 @@ func (s *Server) deleteIntegrationApproval(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	site := r.PathValue("site")
-	approval, err := s.config.IntegrationStore.GetIntegrationApproval(r.Context(), site, integration.integration.Name)
-	if errors.Is(err, ErrNotFound) {
-		w.WriteHeader(http.StatusNoContent)
+	if err := s.removeSiteIntegrationApproval(r.Context(), identity, site, integration); err != nil {
+		writeIntegrationApprovalError(w, err)
 		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) removeSiteIntegrationApproval(ctx context.Context, identity *Identity, site string, integration *registeredIntegration) error {
+	owner, err := s.isSiteOwner(ctx, identity, site)
+	if err != nil {
+		return err
+	}
+	if !owner {
+		return &IntegrationError{Status: http.StatusForbidden, Message: "only the site's owners can withdraw requests"}
+	}
+	approval, err := s.config.IntegrationStore.GetIntegrationApproval(ctx, site, integration.integration.Name)
+	if errors.Is(err, ErrNotFound) {
+		return nil
 	}
 	if err != nil {
-		writeServerError(w, err)
-		return
+		return err
 	}
-	allowed := s.isAdmin(identity)
-	if !allowed && approval.Status == ApprovalRequested {
-		allowed, err = s.isSiteOwner(r.Context(), identity, site)
-		if err != nil {
-			writeServerError(w, err)
-			return
-		}
+	if !s.isAdmin(identity) && approval.Status != ApprovalRequested {
+		return &IntegrationError{Status: http.StatusForbidden, Message: "only platform admins revoke approvals"}
 	}
-	if !allowed {
-		writeError(w, http.StatusForbidden, "only platform admins revoke approvals")
-		return
-	}
-	if err := s.config.IntegrationStore.DeleteIntegrationApproval(r.Context(), site, integration.integration.Name); err != nil && !errors.Is(err, ErrNotFound) {
-		writeServerError(w, err)
-		return
+	if err := s.config.IntegrationStore.DeleteIntegrationApproval(ctx, site, integration.integration.Name); err != nil && !errors.Is(err, ErrNotFound) {
+		return err
 	}
 	slog.Info("integration approval removed", "site", site, "integration", integration.integration.Name, "by", identityName(identity))
-	w.WriteHeader(http.StatusNoContent)
+	return nil
 }
 
 func (s *Server) listIntegrationApprovals(w http.ResponseWriter, r *http.Request) {

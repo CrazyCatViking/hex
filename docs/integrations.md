@@ -49,6 +49,26 @@ hex integrations revoke crm --site sales-dashboard
 
 Approvals are stored in the `IntegrationStore` and checked on every call, including AI tool use and automations.
 
+### Portal discovery and approval management
+
+Open **Integrations** (`/integrations`) in the platform portal to discover every registered integration. The catalog shows its title, description, operations, permission names, read/write effects, whether it requires site approval, whether its calls are audited, and whether it uses a platform credential or a connected account. Your grants are shown alongside the operations; platform admins do not receive implicit data grants.
+
+Enter a site name, or open `/integrations?site=sales-dashboard`, to manage that site's integrations. This view requires site ownership or platform administration. Owners can submit a reason for an approval request, update a pending request, or withdraw it. Platform admins can approve a request or revoke an approval; an admin requesting approval approves the integration immediately. The page also shows the caller's connection status when connected accounts are configured. Approval, grants, auditing availability, and required connections determine the displayed operation access.
+
+Platform admins see **Integration approval review** on the catalog page, with pending requests first, the requesting person and reason, and approve/revoke controls. The list comes from the approval store and the current integration registry, so integrations removed from the registry no longer produce active controls. This catalog and approval workflow do not require a site-content store (`Config.Sites`). Discovery requires `Config.Identity` and at least one registered integration; approval controls additionally require `Config.IntegrationStore`.
+
+The portal uses these HTML-fragment and form routes. Mutations require the usual same-origin checks and `X-Hex-Request: 1`, sent by HTMX, and share the JSON API's approval mutation logic:
+
+| Method | Path | Result |
+| --- | --- | --- |
+| GET | `/api/hex/manage/sites/{site}/integrations` | Owners/admins: the `site-integrations` fragment |
+| GET | `/api/hex/manage/integration-approvals` | Admins: approval-review fragment |
+| POST | `/api/hex/manage/sites/{site}/integrations/{integration}/approval/request` | Owners/admins: request with form field `reason` |
+| POST | `/api/hex/manage/sites/{site}/integrations/{integration}/approval/approve` | Admins: approve |
+| POST | `/api/hex/manage/sites/{site}/integrations/{integration}/approval/revoke` | Admins: revoke; owners: withdraw a pending request |
+
+Form mutations return the updated site fragment. Admin review forms add `?view=catalog` to return the updated approval-review fragment instead. GET requests never mutate approval state. Registering an integration supplies its discovery metadata and approval workflow without provider-specific portal code.
+
 ## Calling endpoints
 
 | Method | Path | Result |
@@ -59,7 +79,7 @@ Approvals are stored in the `IntegrationStore` and checked on every call, includ
 | GET | `/api/hex/integration-approvals` | Admins: approvals, optionally `?status=requested` |
 | POST/PUT/DELETE | `/api/hex/sites/{site}/integrations/{integration}/approval` | Owners request (POST, `{"reason"}`), admins approve (PUT) and revoke (DELETE); owners may withdraw a pending request |
 
-Errors: 400 invalid input, 403 missing grant, role or approval, 404 unknown endpoint or third-party 404, 409 account not connected (with a `connect` object, see below), 429 third-party rate limiting, 502 other third-party failures, 503 an audited call that could not be recorded, 504 timeouts. Read results may be cached per input for the endpoint's `CacheTTL` (per person for connected accounts); cached answers carry `X-Hex-Cache: hit`. Every call is logged with site, endpoint, caller, duration and whether it was cached; calls of audited integrations are also [recorded](#auditing).
+Errors: 400 invalid input, 403 missing grant, role or approval, 404 unknown endpoint or third-party 404, 409 account not connected (with a `connect` object, see below), 429 third-party rate limiting, 502 other third-party failures, 503 an audited call that could not be recorded, 504 timeouts. Read results may be cached per site and input for the endpoint's `CacheTTL` (also per person and connection generation for connected accounts); cached answers carry `X-Hex-Cache: hit`. Cached connected-account results recheck connection eligibility, and reconnecting does not reuse the previous connection's cache. Every call is logged with site, endpoint, caller, duration and whether it was cached; calls of audited integrations are also [recorded](#auditing).
 
 ```ts
 const deals = await hex.integrations.call('hubspot', 'deals', { pipeline: 'default', limit: 50 });
@@ -119,6 +139,12 @@ A connector is an OAuth 2.0 authorization server (Atlassian, Google, Microsoft E
 
 Connections unused for `Config.ConnectionIdleExpiry` (90 days by default) count as disconnected and are removed by `Server.RunBackground`. People see their connections, when each was last used, and disconnect them under **Connected accounts** in the portal's account menu; platform admins also see and remove everyone's there, for example when someone leaves. Changing the sealer makes existing connections unreadable, and people connect again.
 
+### Custom-store upgrade contract
+
+`IntegrationStore` implementations now assign opaque `CredentialRecord.Generation` and `Version` values. `PutCredential` starts a new generation on every connection/reconnection. `UpdateCredential` compares the supplied version, updates only that record and rotates its version without changing its generation; `DeleteCredentialVersion` and versioned `TouchCredential` reject stale records with `ErrCredentialChanged`. Unconditional disconnects remain supported. `WithCredentialLock` serializes refreshes for an owner/connector across instances and supplies a context that store operations must use; it must not prevent an independent disconnect or reconnect from completing. Conditional writes prevent a running refresh from resurrecting or overwriting those changes. Built-in migrations populate identifiers for existing credentials without exposing their tokens.
+
+OAuth state uses `Config.CredentialSealer` with domain-separated associated data. All instances must use the same readable sealer; callbacks no longer require instance affinity. Cached read results are site-scoped and, for connected accounts, generation-scoped. Eligibility is checked before a cache hit, so disconnect/reconnect invalidates old answers across instances.
+
 | Method | Path | Result |
 | --- | --- | --- |
 | GET | `/api/hex/connections` | The caller's connections |
@@ -146,6 +172,7 @@ err := registry.Register(hex.Integration{
         Name:        "deals",
         Description: "Open deals, newest first. Filter by owner with ownerId.",
         InputSchema: json.RawMessage(`{"type":"object","properties":{"ownerId":{"type":"string"}},"additionalProperties":false}`),
+        OutputSchema: json.RawMessage(`{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}}`),
         CacheTTL:    2 * time.Minute,
         Handler: func(ctx context.Context, call hex.IntegrationCall, input json.RawMessage) (any, error) {
             request, err := hex.NewJSONRequest(ctx, http.MethodGet, crmURL+"/deals", nil)

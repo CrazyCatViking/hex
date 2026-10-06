@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -103,9 +104,26 @@ func configure(ctx context.Context, getenv func(string) string) (hex.Config, fun
 	config := hex.Config{
 		SiteBaseURL:   environmentValue(getenv, "HEX_SITE_BASE_URL", "http://localhost:8080"),
 		CLIReleaseURL: getenv("HEX_CLI_RELEASE_URL"),
+		LogoutURL:     getenv("HEX_LOGOUT_URL"),
 	}
 	selection, err := readProviderSelection(getenv)
 	if err != nil {
+		return config, nil, err
+	}
+	if selection.identity == "easyauth" {
+		if config.LogoutURL == "" {
+			config.LogoutURL = "/.auth/logout"
+		}
+	}
+	config.PathCaseInsensitive = selection.publisher == "azurefiles" ||
+		selection.sites == "filesystem" && getenv("AZURE_FILES_SHARE_URL") != ""
+	if value := getenv("HEX_SITE_PATH_CASE_INSENSITIVE"); value != "" {
+		config.PathCaseInsensitive, err = strconv.ParseBool(value)
+		if err != nil {
+			return config, nil, fmt.Errorf("HEX_SITE_PATH_CASE_INSENSITIVE: %w", err)
+		}
+	}
+	if err := configureConnection(&config, getenv); err != nil {
 		return config, nil, err
 	}
 
@@ -178,7 +196,7 @@ func configure(ctx context.Context, getenv func(string) string) (hex.Config, fun
 
 	switch selection.database {
 	case "postgres":
-		database, err := openPostgres(ctx, getenv("DATABASE_URL"))
+		database, err := openPostgres(ctx, getenv("DATABASE_URL"), (*postgres.Database).MigrateDocuments)
 		if err != nil {
 			return config, nil, fmt.Errorf("configure document database: %w", err)
 		}
@@ -200,9 +218,12 @@ func configure(ctx context.Context, getenv func(string) string) (hex.Config, fun
 	case "postgres":
 		connection := environmentValue(getenv, "HEX_ANALYTICS_DATABASE_URL", getenv("DATABASE_URL"))
 		if database, ok := config.Database.(*postgres.Database); ok && connection == getenv("DATABASE_URL") {
+			if err := database.MigrateAnalytics(ctx); err != nil {
+				return config, nil, err
+			}
 			config.Analytics = database
 		} else {
-			database, err := openPostgres(ctx, connection)
+			database, err := openPostgres(ctx, connection, (*postgres.Database).MigrateAnalytics)
 			if err != nil {
 				return config, nil, fmt.Errorf("configure analytics database: %w", err)
 			}
@@ -224,25 +245,55 @@ func configure(ctx context.Context, getenv func(string) string) (hex.Config, fun
 	}
 
 	configureIdentity(&config, selection, getenv)
-	config.Groups = hex.ParseGroups(getenv("HEX_GROUPS"))
-
-	if serverURL := getenv("HEX_PUBLIC_URL"); serverURL != "" {
-		auth, err := hex.ParseAuthConfig(getenv("HEX_AUTH_CONFIG"))
-		if err != nil {
-			return config, nil, fmt.Errorf("HEX_AUTH_CONFIG: %w", err)
+	if database, ok := config.Access.(*postgres.Database); ok {
+		if err := database.MigrateAccess(ctx); err != nil {
+			return config, nil, err
 		}
-		config.Connection = &hex.ConnectionConfig{
-			Name:     environmentValue(getenv, "HEX_PLATFORM_NAME", "Hex"),
-			Server:   serverURL,
-			Resource: getenv("HEX_API_RESOURCE"),
-			ClientID: getenv("HEX_CLI_CLIENT_ID"),
-			TenantID: getenv("HEX_CLI_TENANT_ID"),
-			Auth:     auth,
+		if err := database.MigratePeople(ctx); err != nil {
+			return config, nil, err
+		}
+	}
+	config.Groups = hex.ParseGroups(getenv("HEX_GROUPS"))
+	if selection.identity == "easyauth" {
+		for i, principal := range config.PublisherGroups {
+			config.PublisherGroups[i] = easyauth.CanonicalPrincipal(principal)
+		}
+		for i, principal := range config.AdminGroups {
+			config.AdminGroups[i] = easyauth.CanonicalPrincipal(principal)
+		}
+		for i, group := range config.Groups {
+			config.Groups[i].ID = easyauth.CanonicalID(group.ID)
 		}
 	}
 
 	configured = true
 	return config, closeProviders, nil
+}
+
+func configureConnection(config *hex.Config, getenv func(string) string) error {
+	auth, err := hex.ParseAuthConfig(getenv("HEX_AUTH_CONFIG"))
+	if err != nil {
+		return fmt.Errorf("HEX_AUTH_CONFIG: %w", err)
+	}
+	connection := &hex.ConnectionConfig{
+		Name: environmentValue(getenv, "HEX_PLATFORM_NAME", "Hex"), Server: getenv("HEX_PUBLIC_URL"),
+		Resource: getenv("HEX_API_RESOURCE"), ClientID: getenv("HEX_CLI_CLIENT_ID"), TenantID: getenv("HEX_CLI_TENANT_ID"), Auth: auth,
+	}
+	if auth != nil && (connection.Resource != "" || connection.ClientID != "" || connection.TenantID != "") {
+		return fmt.Errorf("HEX_AUTH_CONFIG cannot be combined with HEX_API_RESOURCE, HEX_CLI_CLIENT_ID or HEX_CLI_TENANT_ID")
+	}
+	validation := *connection
+	if validation.Server == "" {
+		validation.Server = "http://localhost"
+	}
+	if err := validation.Validate(config.SiteBaseURL); err != nil {
+		return fmt.Errorf("platform connection configuration: %w", err)
+	}
+	if connection.Server == "" {
+		return nil
+	}
+	config.Connection = connection
+	return nil
 }
 
 // configureIdentity wires the identity resolver, admin groups and the access
@@ -321,7 +372,7 @@ func openBlobStorage(getenv func(string) string) (*azureblob.Store, error) {
 	return azureblob.New(endpoint, container, credential)
 }
 
-func openPostgres(ctx context.Context, connectionString string) (*postgres.Database, error) {
+func openPostgres(ctx context.Context, connectionString string, migrations ...func(*postgres.Database, context.Context) error) (*postgres.Database, error) {
 	startupContext, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
@@ -330,9 +381,11 @@ func openPostgres(ctx context.Context, connectionString string) (*postgres.Datab
 		return nil, err
 	}
 
-	if err := database.Migrate(startupContext); err != nil {
-		database.Close()
-		return nil, err
+	for _, migrate := range migrations {
+		if err := migrate(database, startupContext); err != nil {
+			database.Close()
+			return nil, err
+		}
 	}
 
 	return database, nil

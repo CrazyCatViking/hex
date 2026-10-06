@@ -55,12 +55,17 @@ export async function verifyAnalyticsPortal(port) {
         0,
     );
     await page.goto(`${base}/admin`);
-    assert.equal(await page.locator("h1").textContent(), "Platform overview");
     assert.equal(
-      await page
-        .locator(".metric", { hasText: "Published sites" })
-        .locator(".metric-value")
-        .textContent(),
+      (await page.locator("h1").textContent()).trim(),
+      "Platform overview",
+    );
+    assert.equal(
+      (
+        await page
+          .locator(".metric", { hasText: "Published sites" })
+          .locator(".metric-value")
+          .textContent()
+      ).trim(),
       "1",
     );
     assert.ok((await page.locator(".trend-bar").count()) > 0);
@@ -92,7 +97,7 @@ export async function verifyAnalyticsPortal(port) {
     await refiltered;
     await page.locator('a[href^="/admin/sites/demo?"]').first().click();
     assert.equal(
-      await page.locator(".analytics-header .eyebrow").textContent(),
+      (await page.locator(".analytics-header .eyebrow").textContent()).trim(),
       "Site analytics",
     );
     const today = new Date();
@@ -122,7 +127,9 @@ export async function verifyAnalyticsPortal(port) {
       /Local Developer/,
     );
     assert.match(
-      await page.locator("#site-analytics .metric-hint").first().textContent(),
+      (
+        await page.locator("#site-analytics .metric-hint").first().textContent()
+      ).trim(),
       /^[1-9][\d,]* all time$/,
     );
     await page.waitForFunction(

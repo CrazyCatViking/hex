@@ -89,6 +89,8 @@ After updating the CLI, the next command that reads platform profiles automatica
 
 The CLI atomically saves the migrated profiles, preserving the selected default, other profile settings, newer capability fields, and existing project resource pins. Already-upgraded profiles are not rewritten. The first OIDC API request may require a new browser sign-in because the OIDC session uses a separate cache from the legacy Microsoft session.
 
+Existing `auth` settings are preserved unchanged, including explicit Entra OIDC delegated scopes. A resource is compatible when the configured scopes name `<resource>/<scope>`, including `<resource>/.default`; the CLI also recognizes Entra's own-API GUID and `api://<client-guid>` spellings. It never rewrites the configured scopes. An incompatible legacy `resource` pin in hex.json is ignored when the profile has `auth`: the profile's issuer, public client and scopes remain authoritative. An incompatible explicit `--resource` override returns an error; configure different scopes in a separate profile and select it with `--platform`. Neither an Entra issuer nor a resource mismatch can discard configured OIDC auth and select Azure CLI. Profiles genuinely lacking `auth`, such as unmigrated resource-only profiles, retain their legacy Azure CLI resource overrides.
+
 By default, initialization creates only the site name and commands use the current default profile:
 
 ```json

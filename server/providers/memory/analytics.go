@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +18,7 @@ type Analytics struct {
 	receipts      map[string]time.Time
 	sessions      map[visitorKey]time.Time
 	lastByVisitor map[visitorKey]time.Time
+	lifetime      map[string]map[string]hex.TrafficBucket
 }
 
 type visitorKey struct{ site, user string }
@@ -31,6 +33,7 @@ func NewAnalytics() *Analytics {
 		buckets: make(map[bucketKey]hex.TrafficBucket), receipts: make(map[string]time.Time),
 		sessions:      make(map[visitorKey]time.Time),
 		lastByVisitor: make(map[visitorKey]time.Time),
+		lifetime:      make(map[string]map[string]hex.TrafficBucket),
 	}
 }
 
@@ -38,13 +41,14 @@ func (a *Analytics) ObservePerson(ctx context.Context, person hex.Person, at tim
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	at = at.UTC()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	previous, exists := a.people[person.ID]
 	if !exists {
 		previous.FirstSeen = at
 	}
-	if at.After(previous.LastSeen) {
+	if !at.Before(previous.LastSeen) {
 		previous.Person = person
 		previous.LastSeen = at
 	}
@@ -59,6 +63,7 @@ func (a *Analytics) RecordSiteEvents(ctx context.Context, events []hex.SiteEvent
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for _, event := range events {
+		event.At = event.At.UTC()
 		if _, exists := a.events[event.ID]; exists {
 			continue
 		}
@@ -86,6 +91,7 @@ func (a *Analytics) RecordTraffic(ctx context.Context, events []hex.TrafficEvent
 		}
 	}
 	for _, event := range events {
+		event.At = event.At.UTC()
 		if _, exists := a.receipts[event.ID]; exists || event.At.Before(cutoff) {
 			continue
 		}
@@ -94,6 +100,7 @@ func (a *Analytics) RecordTraffic(ctx context.Context, events []hex.TrafficEvent
 		day := event.At.UTC().Truncate(24 * time.Hour)
 		key := bucketKey{visitor, day}
 		bucket := a.buckets[key]
+		before := bucket.TrafficTotals
 		bucket.Day, bucket.Site, bucket.UserID = day, event.Site, event.UserID
 		bucket.Requests++
 		bucket.Bytes += event.Bytes
@@ -117,6 +124,21 @@ func (a *Analytics) RecordTraffic(ctx context.Context, events []hex.TrafficEvent
 			}
 		}
 		a.buckets[key] = bucket
+		if a.lifetime[event.Site] == nil {
+			a.lifetime[event.Site] = make(map[string]hex.TrafficBucket)
+		}
+		total := a.lifetime[event.Site][event.UserID]
+		total.Site, total.UserID = event.Site, event.UserID
+		total.Requests += bucket.Requests - before.Requests
+		total.PageViews += bucket.PageViews - before.PageViews
+		total.Visits += bucket.Visits - before.Visits
+		total.Errors += bucket.Errors - before.Errors
+		total.Bytes += bucket.Bytes - before.Bytes
+		total.DurationMillis += bucket.DurationMillis - before.DurationMillis
+		if bucket.LastVisited.After(total.LastVisited) {
+			total.LastVisited = bucket.LastVisited
+		}
+		a.lifetime[event.Site][event.UserID] = total
 		if event.At.After(a.lastByVisitor[visitor]) {
 			a.lastByVisitor[visitor] = event.At
 		}
@@ -125,6 +147,22 @@ func (a *Analytics) RecordTraffic(ctx context.Context, events []hex.TrafficEvent
 }
 
 func (a *Analytics) QueryAnalytics(ctx context.Context, query hex.AnalyticsQuery) (hex.AnalyticsReport, error) {
+	return a.queryAnalytics(ctx, query, false)
+}
+
+func (a *Analytics) QueryAnalyticsSummary(ctx context.Context, query hex.AnalyticsQuery) (hex.AnalyticsReport, error) {
+	return a.queryAnalytics(ctx, query, true)
+}
+
+func (a *Analytics) QueryAnalyticsVisitors(ctx context.Context, query hex.AnalyticsVisitorsQuery) (hex.AnalyticsVisitorsPage, error) {
+	report, err := a.QueryAnalytics(ctx, query.AnalyticsQuery)
+	if err != nil {
+		return hex.AnalyticsVisitorsPage{}, err
+	}
+	return hex.PaginateAnalyticsVisitors(report, query), nil
+}
+
+func (a *Analytics) queryAnalytics(ctx context.Context, query hex.AnalyticsQuery, summary bool) (hex.AnalyticsReport, error) {
 	if err := ctx.Err(); err != nil {
 		return hex.AnalyticsReport{}, err
 	}
@@ -138,6 +176,12 @@ func (a *Analytics) QueryAnalytics(ctx context.Context, query hex.AnalyticsQuery
 			}
 		}
 	}
+	slices.SortFunc(people, func(a, b hex.AnalyticsPerson) int {
+		if name := strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name)); name != 0 {
+			return name
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
 	events := []hex.SiteEvent{}
 	for _, event := range a.events {
 		if event.At.Before(query.From) || !event.At.Before(query.Until) || query.Site != "" && event.Site != query.Site {
@@ -168,6 +212,9 @@ func (a *Analytics) QueryAnalytics(ctx context.Context, query hex.AnalyticsQuery
 			last = at
 		}
 	}
+	if summary {
+		return hex.SummarizeAnalyticsSummary(query, people, events, buckets, last), nil
+	}
 	report := hex.SummarizeAnalytics(query, people, events, buckets, last)
 	for index := range report.Users {
 		row := &report.Users[index]
@@ -183,15 +230,14 @@ func (a *Analytics) SiteTraffic(ctx context.Context, sites []string) ([]hex.Anal
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	wanted := make(map[string]bool, len(sites))
-	for _, site := range sites {
-		wanted[site] = true
-	}
+	sites = slices.Clone(sites)
+	slices.Sort(sites)
+	sites = slices.Compact(sites)
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	buckets := []hex.TrafficBucket{}
-	for _, bucket := range a.buckets {
-		if wanted[bucket.Site] {
+	for _, site := range sites {
+		for _, bucket := range a.lifetime[site] {
 			buckets = append(buckets, bucket)
 		}
 	}

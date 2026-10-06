@@ -2,6 +2,9 @@ package memory
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -31,13 +34,29 @@ func (s *AutomationStore) ReplaceSiteAutomations(ctx context.Context, site strin
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	proposed, err := cloneScheduledAutomations(automations)
+	if err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(automations) == 0 {
 		delete(s.automations, site)
 		return nil
 	}
-	s.automations[site] = slices.Clone(automations)
+	current := make(map[string]hex.ScheduledAutomation, len(s.automations[site]))
+	for _, entry := range s.automations[site] {
+		current[entry.Automation.Name] = entry
+	}
+	for i := range proposed {
+		entry := &proposed[i]
+		entry.Site = site
+		entry.Revision = rand.Text()
+		if previous, exists := current[entry.Automation.Name]; exists && hex.SameAutomationSchedule(previous.Automation, entry.Automation) {
+			entry.NextRun = previous.NextRun
+		}
+	}
+	s.automations[site] = proposed
 	return nil
 }
 
@@ -47,7 +66,10 @@ func (s *AutomationStore) ListSiteAutomations(ctx context.Context, site string) 
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	result := slices.Clone(s.automations[site])
+	result, err := cloneScheduledAutomations(s.automations[site])
+	if err != nil {
+		return nil, err
+	}
 	slices.SortFunc(result, func(a, b hex.ScheduledAutomation) int {
 		return strings.Compare(a.Automation.Name, b.Automation.Name)
 	})
@@ -75,10 +97,10 @@ func (s *AutomationStore) DueAutomations(ctx context.Context, now time.Time, lim
 	if len(due) > limit {
 		due = due[:limit]
 	}
-	return due, nil
+	return cloneScheduledAutomations(due)
 }
 
-func (s *AutomationStore) ClaimAutomation(ctx context.Context, site, name string, expected, next time.Time) (bool, error) {
+func (s *AutomationStore) ClaimAutomation(ctx context.Context, site, name, revision string, expected, next time.Time) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
@@ -86,12 +108,27 @@ func (s *AutomationStore) ClaimAutomation(ctx context.Context, site, name string
 	defer s.mu.Unlock()
 	automations := s.automations[site]
 	for index := range automations {
-		if automations[index].Automation.Name == name && automations[index].NextRun.Equal(expected) {
+		if automations[index].Automation.Name == name && automations[index].Revision == revision &&
+			!expected.IsZero() && automations[index].NextRun.Equal(expected) {
 			automations[index].NextRun = next
 			return true, nil
 		}
 	}
 	return false, nil
+}
+
+func cloneScheduledAutomations(automations []hex.ScheduledAutomation) ([]hex.ScheduledAutomation, error) {
+	data, err := json.Marshal(automations)
+	if err != nil {
+		return nil, fmt.Errorf("encode automations: %w", err)
+	}
+	cloned := make([]hex.ScheduledAutomation, 0)
+	if len(automations) > 0 {
+		if err := json.Unmarshal(data, &cloned); err != nil {
+			return nil, fmt.Errorf("decode automations: %w", err)
+		}
+	}
+	return cloned, nil
 }
 
 func (s *AutomationStore) RecordAutomationRun(ctx context.Context, run hex.AutomationRun) error {

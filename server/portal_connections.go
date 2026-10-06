@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 )
 
@@ -34,6 +33,7 @@ type connectionRow struct {
 	ConnectedAt string
 	LastUsed    string
 	ConnectURL  string
+	RemoveURL   string
 	Admin       bool
 }
 
@@ -120,7 +120,7 @@ func (s *Server) everyonesConnections(ctx context.Context, now time.Time) ([]con
 		if connector, exists := s.config.Integrations.connector(record.Connector); exists {
 			title = connector.Title
 		}
-		person := names[strings.ToLower(record.Owner)]
+		person := names[record.Owner]
 		if person == "" {
 			person = record.Owner
 		}
@@ -129,6 +129,7 @@ func (s *Server) everyonesConnections(ctx context.Context, now time.Time) ([]con
 			Connected: true, Account: record.Account, Admin: true,
 			ConnectedAt: record.ConnectedAt.Format("Jan 2, 2006"),
 			LastUsed:    relativeTime(record.LastUsedAt, now),
+			RemoveURL:   "/api/hex/manage/connections/" + url.PathEscape(record.Connector) + "/" + url.PathEscape(record.Owner),
 		})
 	}
 	return rows, nil
@@ -149,7 +150,7 @@ func (s *Server) personNames(ctx context.Context, records []CredentialRecord) ma
 		return names
 	}
 	for _, person := range people {
-		names[strings.ToLower(person.ID)] = personName(&person)
+		names[person.ID] = personName(&person)
 	}
 	return names
 }
@@ -165,7 +166,10 @@ func (s *Server) manageDisconnect(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s.removeCredential(r.Context(), identity.ID, connector.Name, "disconnected by its owner")
+	if err := s.removeCredential(r.Context(), identity.ID, connector.Name, "disconnected by its owner"); err != nil {
+		writeServerError(w, err)
+		return
+	}
 	status, err := s.connectionStatus(r.Context(), identity, connector)
 	if err != nil {
 		writeServerError(w, err)

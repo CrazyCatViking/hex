@@ -78,8 +78,8 @@ func (s *Server) siteIcon(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	candidates := []string{}
-	if pathAllowed(authorization.role, identity, authorization.access, "/") &&
-		pathAllowed(authorization.role, identity, authorization.access, "/index.html") {
+	if s.pathAllowed(authorization.role, identity, authorization.access, "/") &&
+		s.pathAllowed(authorization.role, identity, authorization.access, "/index.html") {
 		index, err := reader.ReadSiteFile(r.Context(), site, "index.html")
 		if err == nil {
 			candidates = siteIconCandidates(io.LimitReader(index, maxSiteIconBytes), siteURL)
@@ -91,7 +91,7 @@ func (s *Server) siteIcon(w http.ResponseWriter, r *http.Request) {
 	candidates = append(candidates, "favicon.svg", "favicon.ico", "favicon.png", "apple-touch-icon.png")
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
 	for _, candidate := range candidates {
-		if !pathAllowed(authorization.role, identity, authorization.access, "/"+candidate) {
+		if !s.pathAllowed(authorization.role, identity, authorization.access, "/"+candidate) {
 			continue
 		}
 		data, contentType, err := readSiteIcon(r.Context(), reader, site, candidate)

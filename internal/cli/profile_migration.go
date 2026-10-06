@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"slices"
 	"strings"
 
@@ -71,9 +72,35 @@ func migrateProfileAuth(store *profiles) (bool, error) {
 }
 
 func authMatchesResource(auth *hex.AuthConfig, resource string) bool {
+	resource = strings.TrimRight(resource, "/")
 	if auth == nil || auth.Type != "oidc" || resource == "" {
 		return false
 	}
-	scope := signInScopes(Project{Resource: resource, ClientID: auth.ClientID})[0]
-	return slices.Contains(auth.Scopes, scope)
+	resources := []string{resource}
+	// Entra accepts a registration's own API by its client GUID as well as
+	// api://<client-guid>. Compare those spellings without rewriting scopes.
+	if isEntraAuth(auth) && (strings.EqualFold(resource, auth.ClientID) || strings.EqualFold(resource, "api://"+auth.ClientID)) {
+		resources = append(resources, auth.ClientID, "api://"+auth.ClientID)
+	}
+	for _, scope := range auth.Scopes {
+		separator := strings.LastIndex(scope, "/")
+		if separator > 0 && separator < len(scope)-1 && slices.Contains(resources, scope[:separator]) {
+			return true
+		}
+	}
+	return false
+}
+
+// isEntraAuth identifies the provider-specific own-API spelling above. The
+// issuer alone never permits discarding configured auth or changing scopes.
+func isEntraAuth(auth *hex.AuthConfig) bool {
+	if auth == nil || auth.Type != "oidc" || !clientIDPattern.MatchString(auth.ClientID) {
+		return false
+	}
+	issuer, err := url.Parse(auth.Issuer)
+	if err != nil || issuer.Scheme != "https" || issuer.Host != "login.microsoftonline.com" {
+		return false
+	}
+	parts := strings.Split(strings.Trim(issuer.Path, "/"), "/")
+	return len(parts) == 2 && clientIDPattern.MatchString(parts[0]) && parts[1] == "v2.0"
 }

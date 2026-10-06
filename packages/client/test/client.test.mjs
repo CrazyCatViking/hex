@@ -490,3 +490,127 @@ test("conversations run app tools and merge their results with server results", 
   assert.equal(second[2].content[2].text, "no luck");
   assert.equal(chat.messages.length, 4);
 });
+
+test("AI results preserve cache usage and estimation fields", async () => {
+  const usage = {
+    inputTokens: 20,
+    outputTokens: 3,
+    cachedInputTokens: 12,
+    cacheWriteTokens: 0,
+    estimated: false,
+  };
+  const hex = createHexClient({
+    site: "demo",
+    fetch: async (url) =>
+      url.endsWith("/complete")
+        ? new Response(
+            JSON.stringify({
+              messages: [],
+              text: "",
+              stopReason: "end_turn",
+              usage,
+            }),
+          )
+        : sseResponse([sse([{ type: "done", stopReason: "end_turn", usage }])]),
+  });
+  const request = { model: "general", messages: [] };
+  assert.deepEqual((await hex.ai.complete(request)).usage, usage);
+  assert.deepEqual((await hex.ai.stream(request).done()).usage, usage);
+});
+
+test("conversations aggregate cache tokens and estimation across tool rounds", async () => {
+  for (const { rounds, expected } of [
+    {
+      rounds: [
+        {
+          inputTokens: 10,
+          outputTokens: 4,
+          cachedInputTokens: 8,
+          cacheWriteTokens: 6,
+          estimated: true,
+        },
+        {
+          inputTokens: 20,
+          outputTokens: 3,
+          cachedInputTokens: 12,
+          estimated: false,
+        },
+        { inputTokens: 1, outputTokens: 2, cacheWriteTokens: 2 },
+      ],
+      expected: {
+        inputTokens: 31,
+        outputTokens: 9,
+        cachedInputTokens: 20,
+        cacheWriteTokens: 8,
+        estimated: true,
+      },
+    },
+    {
+      rounds: [
+        undefined,
+        {
+          inputTokens: 20,
+          outputTokens: 3,
+          cachedInputTokens: 0,
+          cacheWriteTokens: 0,
+          estimated: false,
+        },
+      ],
+      expected: {
+        inputTokens: 20,
+        outputTokens: 3,
+        cachedInputTokens: 0,
+        cacheWriteTokens: 0,
+        estimated: false,
+      },
+    },
+    {
+      rounds: [{ inputTokens: 10, outputTokens: 4 }, undefined],
+      expected: { inputTokens: 10, outputTokens: 4 },
+    },
+  ]) {
+    let round = 0;
+    const hex = createHexClient({
+      site: "demo",
+      fetch: async () => {
+        const usage = rounds[round];
+        const last = ++round === rounds.length;
+        return sseResponse([
+          sse([
+            {
+              type: "message",
+              message: assistant(
+                last
+                  ? [{ type: "text", text: "Finished" }]
+                  : [
+                      {
+                        type: "tool_call",
+                        toolCallId: `call-${round}`,
+                        name: "noop",
+                        input: {},
+                      },
+                    ],
+              ),
+            },
+            { type: "done", stopReason: last ? "end_turn" : "tool_use", usage },
+          ]),
+        ]);
+      },
+    });
+    const chat = hex.ai.conversation({
+      model: "general",
+      tools: {
+        noop: {
+          description: "Continue",
+          inputSchema: { type: "object" },
+          run: () => "ok",
+        },
+      },
+    });
+    assert.deepEqual((await chat.send("Start")).usage, expected);
+    assert.equal(round, rounds.length);
+    // A new send starts fresh rather than reusing the previous turn's totals.
+    round = 0;
+    assert.deepEqual((await chat.send("Again")).usage, expected);
+  }
+});

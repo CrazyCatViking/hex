@@ -195,7 +195,7 @@ func newAnalyticsView(report AnalyticsReport, now time.Time) AnalyticsView {
 // previousReport queries the period before the report's, for comparisons.
 // Comparisons are optional, so a failure only hides them.
 func (s *Server) previousReport(ctx context.Context, query AnalyticsQuery) (AnalyticsReport, bool) {
-	report, err := s.config.Analytics.QueryAnalytics(ctx, previousPeriod(query))
+	report, err := s.analyticsSummary(ctx, previousPeriod(query))
 	if err != nil {
 		slog.Warn("load previous analytics period", "error", err)
 		return AnalyticsReport{}, false
@@ -275,21 +275,7 @@ func (s *Server) adminInventory(ctx context.Context) ([]adminSiteRow, adminInven
 	if !s.analyticsBootstrapped {
 		failures := s.analyticsFailures.Load()
 		for _, row := range rows {
-			if s.config.Publisher == nil {
-				break
-			}
 			s.recordPublication(ctx, row.Name)
-			var history []Publication
-			if err := s.readRecord(ctx, row.Name, siteHistoryFile, &history); err != nil {
-				s.analyticsFailures.Add(1)
-				slog.Warn("import site analytics history", "site", row.Name, "error", err)
-				continue
-			}
-			events := make([]SiteEvent, 0, len(history))
-			for _, publication := range history {
-				events = append(events, analyticsEvent(row.Name, "published", publication.PublishedAt, row.Title, publication.PublishedBy))
-			}
-			s.recordAnalyticsEvents(ctx, events)
 		}
 		s.analyticsBootstrapped = failures == s.analyticsFailures.Load()
 	}
@@ -744,7 +730,7 @@ func (s *Server) adminAnalyticsCSV(w http.ResponseWriter, r *http.Request) {
 		writeServerError(w, err)
 		return
 	}
-	report, err := s.config.Analytics.QueryAnalytics(r.Context(), query)
+	report, err := s.analyticsSummary(r.Context(), query)
 	if err != nil {
 		writeServerError(w, err)
 		return

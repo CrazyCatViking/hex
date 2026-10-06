@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	hex "github.com/crazycatviking/hex/server"
 )
 
 // typeScriptTypes converts the JSON Schemas of integration endpoints into
@@ -160,11 +162,7 @@ func (t *typeScriptTypes) typeForKind(kind string, schema map[string]any, scope 
 
 func (t *typeScriptTypes) arrayType(schema map[string]any, scope *schemaScope, indent, depth int) string {
 	if prefix, isTuple := schema["prefixItems"].([]any); isTuple {
-		elements := make([]string, 0, len(prefix))
-		for _, item := range prefix {
-			elements = append(elements, t.typeOf(item, scope, indent, depth+1))
-		}
-		return "[" + strings.Join(elements, ", ") + "]"
+		return t.tupleType(schema, prefix, scope, indent, depth)
 	}
 	items, hasItems := schema["items"]
 	if !hasItems {
@@ -175,6 +173,64 @@ func (t *typeScriptTypes) arrayType(schema map[string]any, scope *schemaScope, i
 		return "Array<" + element + ">"
 	}
 	return element + "[]"
+}
+
+func (t *typeScriptTypes) tupleType(schema map[string]any, prefix []any, scope *schemaScope, indent, depth int) string {
+	minimum := schemaItemCount(schema["minItems"], 0)
+	maximum := schemaItemCount(schema["maxItems"], -1)
+	tail, hasTail := schema["items"]
+	if !hasTail {
+		tail = true
+	}
+	if tail == false && (maximum < 0 || maximum > len(prefix)) {
+		maximum = len(prefix)
+	}
+	if maximum >= 0 && minimum > maximum {
+		return "never"
+	}
+	if maximum >= 0 && maximum < len(prefix) {
+		prefix = prefix[:maximum]
+	}
+
+	// Large bounds cannot reasonably be expanded into tuple positions. A
+	// wider array type remains safe for consumers of schema-valid values.
+	const maxTupleItems = 64
+	if minimum > maxTupleItems || len(prefix) > maxTupleItems {
+		items := append([]any(nil), prefix...)
+		if tail != false && (maximum < 0 || maximum > len(prefix)) {
+			items = append(items, tail)
+		}
+		return "Array<" + t.combine(items, " | ", scope, indent, depth) + ">"
+	}
+
+	length := max(len(prefix), minimum)
+	if maximum >= 0 && maximum <= maxTupleItems {
+		length = maximum
+	}
+	elements := make([]string, 0, length+1)
+	for index := 0; index < length; index++ {
+		item := tail
+		if index < len(prefix) {
+			item = prefix[index]
+		}
+		element := t.typeOf(item, scope, indent, depth+1)
+		if index >= minimum {
+			element = "(" + element + ")?"
+		}
+		elements = append(elements, element)
+	}
+	if tail != false && (maximum < 0 || maximum > maxTupleItems) {
+		elements = append(elements, "...Array<"+t.typeOf(tail, scope, indent, depth+1)+">")
+	}
+	return "[" + strings.Join(elements, ", ") + "]"
+}
+
+func schemaItemCount(value any, fallback int) int {
+	count, ok := value.(float64)
+	if !ok || count < 0 || count != float64(int(count)) {
+		return fallback
+	}
+	return int(count)
 }
 
 func (t *typeScriptTypes) objectType(schema map[string]any, scope *schemaScope, indent, depth int) string {
@@ -279,11 +335,12 @@ func isPlainObject(schema map[string]any) bool {
 }
 
 func acceptsEmptyObject(schema any) bool {
-	object, isObject := schema.(map[string]any)
-	if !isObject {
-		return schema == true
+	encoded, err := json.Marshal(schema)
+	if err != nil {
+		return false
 	}
-	return len(stringSet(object["required"])) == 0
+	definition := hex.ActionDefinition{InputSchema: encoded}
+	return definition.ValidateInput(json.RawMessage(`{}`)) == nil
 }
 
 func stringSet(value any) map[string]bool {

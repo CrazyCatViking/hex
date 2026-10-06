@@ -10,12 +10,37 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 
 	hex "github.com/crazycatviking/hex/server"
 )
 
 const maxPrincipalBytes = 64 << 10
+
+var objectIDPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// CanonicalID normalizes Entra object GUIDs, leaving opaque IDs unchanged.
+// Hosts should apply this to configured Entra user/group IDs as well.
+func CanonicalID(id string) string {
+	if objectIDPattern.MatchString(id) {
+		return strings.ToLower(id)
+	}
+	return id
+}
+
+// CanonicalPrincipal normalizes configured Entra user/group GUIDs. App role
+// values are case-sensitive, even when a role happens to look like a GUID.
+func CanonicalPrincipal(principal string) string {
+	kind, value, typed := strings.Cut(principal, ":")
+	if !typed {
+		return CanonicalID(principal)
+	}
+	if kind == "user" || kind == "group" {
+		return kind + ":" + CanonicalID(value)
+	}
+	return principal
+}
 
 // Claim types that carry the Entra object ID when the identifying headers
 // are absent.
@@ -87,6 +112,12 @@ func (Resolver) ResolveIdentity(r *http.Request) (*hex.Identity, error) {
 	identity.Email = firstClaim(principal.Claims, emailClaims)
 	if identity.ID == "" {
 		return nil, fmt.Errorf("client principal is missing a stable identifier")
+	}
+	if principal.AuthType == "aad" {
+		identity.ID = CanonicalID(identity.ID)
+		for i, group := range identity.Groups {
+			identity.Groups[i] = CanonicalID(group)
+		}
 	}
 	return identity, nil
 }

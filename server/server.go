@@ -17,11 +17,15 @@ type Config struct {
 	Files            ObjectStore
 	Sites            SiteDirectory
 	SiteBaseURL      string
-	Database         Database
-	Realtime         Realtime
-	Identity         IdentityResolver
-	Access           AccessStore
-	AdminGroups      []string
+	// PathCaseInsensitive must match the static host's path comparison.
+	PathCaseInsensitive bool
+	// LogoutURL is the host-owned sign-out destination; empty hides sign-out.
+	LogoutURL   string
+	Database    Database
+	Realtime    Realtime
+	Identity    IdentityResolver
+	Access      AccessStore
+	AdminGroups []string
 	// Actions exposes contract-validated operations implemented by app backends.
 	Actions *ActionRegistry
 	// Publisher enables publishing through the API. PublisherGroups limits
@@ -74,8 +78,6 @@ type Server struct {
 	analyticsBootstrap    sync.Mutex
 	analyticsBootstrapped bool
 	integrationCache      responseCache
-	connectionLocks       sync.Map
-	stateSealer           *KeySealer
 	automationRuns        sync.WaitGroup
 }
 
@@ -104,17 +106,10 @@ func New(config Config) *Server {
 			config.CredentialSealer = sealer
 		}
 	}
-	// crypto/rand does not fail on supported platforms.
-	stateSealer, err := newRandomKeySealer()
-	if err != nil {
-		panic(err)
-	}
-
 	server := &Server{
-		config:      config,
-		mux:         http.NewServeMux(),
-		seen:        peopleSeen{entries: make(map[string]seenPerson)},
-		stateSealer: stateSealer,
+		config: config,
+		mux:    http.NewServeMux(),
+		seen:   peopleSeen{entries: make(map[string]seenPerson)},
 	}
 	server.registerRoutes()
 	server.warnAboutUnauditedIntegrations()
@@ -134,6 +129,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/hex/htmx.min.js", s.portalAsset)
 	s.mux.HandleFunc("GET /api/hex/portal.css", s.portalAsset)
 	s.mux.HandleFunc("GET /api/hex/portal.js", s.portalAsset)
+	s.mux.HandleFunc("GET /api/hex/manage.js", s.portalAsset)
 	s.mux.HandleFunc("GET /api/hex/capabilities", s.capabilities)
 	s.mux.HandleFunc("GET /api/hex/authz", s.staticAuthz)
 	if s.config.Connection != nil {
@@ -194,6 +190,8 @@ func (s *Server) registerRoutes() {
 	}
 
 	s.registerIntegrationRoutes()
+	s.registerConnectionRoutes()
+	s.registerPortalIntegrationRoutes()
 	s.registerAIRoutes()
 	s.registerAutomationRoutes()
 	s.registerManageRoutes()

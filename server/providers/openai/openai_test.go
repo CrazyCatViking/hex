@@ -177,3 +177,60 @@ func TestStreamEndingsAndErrors(t *testing.T) {
 		t.Fatalf("expected a request error, got %v", err)
 	}
 }
+
+func TestStreamsPreserveUnknownUsageAndExplicitZero(t *testing.T) {
+	for _, responses := range []bool{false, true} {
+		for _, known := range []bool{false, true} {
+			name := "chat"
+			if responses {
+				name = "responses"
+			}
+			if known {
+				name += "/known-zero"
+			} else {
+				name += "/unknown"
+			}
+			t.Run(name, func(t *testing.T) {
+				usage := ""
+				if known {
+					usage = `,"usage":{"prompt_tokens":0,"completion_tokens":0}`
+					if responses {
+						usage = `,"usage":{"input_tokens":0,"output_tokens":0}`
+					}
+				}
+				var stream hex.AIStream
+				if responses {
+					body := `data: {"type":"response.completed","response":{"status":"completed"` + usage + "}}\n\n"
+					stream = newResponsesStream(io.NopCloser(strings.NewReader(body)), false)
+				} else {
+					body := `data: {"choices":[{"delta":{"content":"hello"},"finish_reason":"stop"}]` + usage + "}\n\ndata: [DONE]\n\n"
+					stream = newStream(io.NopCloser(strings.NewReader(body)), false)
+				}
+				events := collect(t, stream)
+				done := events[len(events)-1]
+				if done.Type != hex.EventDone || (done.Usage != nil) != known {
+					t.Fatalf("upstream usage presence lost: %+v", done)
+				}
+			})
+		}
+	}
+}
+
+func TestEmptyAndPartialUsageObjectsRemainUnknown(t *testing.T) {
+	for _, usage := range []string{`{}`, `null`, `{"prompt_tokens":0}`, `{"completion_tokens":0}`, `{"input_tokens":0}`, `{"output_tokens":0}`} {
+		for _, responses := range []bool{false, true} {
+			var stream hex.AIStream
+			if responses {
+				body := `data: {"type":"response.completed","response":{"usage":` + usage + "}}\n\n"
+				stream = newResponsesStream(io.NopCloser(strings.NewReader(body)), false)
+			} else {
+				body := `data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":` + usage + "}\n\ndata: [DONE]\n\n"
+				stream = newStream(io.NopCloser(strings.NewReader(body)), false)
+			}
+			events := collect(t, stream)
+			if done := events[len(events)-1]; done.Type != hex.EventDone || done.Usage != nil {
+				t.Fatalf("responses=%v usage=%s: absent counts became reported zero: %+v", responses, usage, done)
+			}
+		}
+	}
+}

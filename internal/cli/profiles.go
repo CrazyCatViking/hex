@@ -161,7 +161,14 @@ func (a *App) readProjectIn(directory string, optional bool) (Project, error) {
 		if project.Resource == "" {
 			project.Resource = connection.Resource
 		}
-		if project.Resource == connection.Resource || authMatchesResource(connection.Auth, project.Resource) {
+		if connection.Auth != nil {
+			// The profile's auth and scopes are authoritative. An incompatible
+			// legacy project pin cannot select another authentication flow.
+			if !authMatchesResource(connection.Auth, project.Resource) {
+				project.Resource = ""
+			}
+			project.Auth = connection.Auth
+		} else if project.Resource == connection.Resource {
 			project.ClientID = connection.ClientID
 			project.TenantID = connection.TenantID
 			project.Auth = connection.Auth

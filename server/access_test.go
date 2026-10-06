@@ -359,14 +359,58 @@ func TestStaticAssetAuthorizationEndpoint(t *testing.T) {
 	authz(t, nil, "", "/", 204)
 
 	// Path rules: the longest prefix wins, the bare directory is covered, and
-	// matching ignores case like the Azure Files share does.
+	// matching is case-sensitive by default.
 	authz(t, member, "demo", "/admin/index.html", 403)
 	authz(t, member, "demo", "/admin", 403)
-	authz(t, member, "demo", "/ADMIN/index.html", 403)
+	authz(t, member, "demo", "/ADMIN/index.html", 204)
 	authz(t, member, "demo", "/administration.html", 204)
 	authz(t, member, "demo", "/admin/help/faq.html", 204)
 	authz(t, admin, "demo", "/admin/index.html", 204)
 	authz(t, owner, "demo", "/admin/index.html", 204)
+}
+
+func TestStaticPathCaseModesAndAmbiguousPolicies(t *testing.T) {
+	for _, insensitive := range []bool{false, true} {
+		t.Run(fmt.Sprintf("caseInsensitive=%v", insensitive), func(t *testing.T) {
+			access := memory.NewAccessStore()
+			server := hex.New(hex.Config{Identity: easyauth.Resolver{}, Access: access, PathCaseInsensitive: insensitive})
+			owner := principalHeaders("owner")
+			putPolicy(t, server, owner, "demo", `{"paths":[{"prefix":"/Admin/","viewers":"owners"}]}`)
+			headers := principalHeaders("viewer")
+			headers.Set("X-Hex-Site", "demo")
+			headers.Set("X-Hex-Path", "/admin/private.html")
+			want := 204
+			if insensitive {
+				want = 403
+			}
+			requestAs(t, server, headers, "GET", "/api/hex/authz", nil, want)
+			ambiguous := []byte(`{"paths":[{"prefix":"/Admin/","viewers":"owners"},{"prefix":"/admin/","viewers":"viewers"}]}`)
+			want = 200
+			if insensitive {
+				want = 400
+			}
+			requestAs(t, server, owner, "PUT", "/api/hex/sites/demo/access", ambiguous, want)
+			if insensitive {
+				// Existing policies must fail closed when a host changes its mode.
+				var policy hex.SiteAccess
+				if err := json.Unmarshal(ambiguous, &policy); err != nil {
+					t.Fatal(err)
+				}
+				if err := access.PutSiteAccess(context.Background(), "demo", policy); err != nil {
+					t.Fatal(err)
+				}
+				requestAs(t, server, headers, "GET", "/api/hex/authz", nil, 500)
+			}
+		})
+	}
+}
+
+func TestOpaqueIdentityClaimsCanOwnPolicies(t *testing.T) {
+	server, _ := setupWithAccess(t)
+	owner := principalHeaders("oidc|Subject:AbC")
+	putPolicy(t, server, owner, "demo", `{}`)
+	requestAs(t, server, owner, "GET", "/api/hex/sites/demo/access", nil, 200)
+	requestAs(t, server, principalHeaders("oidc|subject:abc"), "GET", "/api/hex/sites/demo/access", nil, 403)
 }
 
 func TestPermissionsDescribeTheCaller(t *testing.T) {

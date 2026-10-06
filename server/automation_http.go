@@ -260,19 +260,21 @@ func (s *Server) startDueAutomations(ctx context.Context, slots chan struct{}) {
 		return
 	}
 	for _, entry := range due {
-		next := nextRun(entry.Automation, now)
-		won, err := s.config.Automations.ClaimAutomation(ctx, entry.Site, entry.Automation.Name, entry.NextRun, next)
-		if err != nil {
-			slog.Error("claim automation", "site", entry.Site, "automation", entry.Automation.Name, "error", err)
-			continue
-		}
-		if !won {
-			continue
-		}
 		select {
 		case slots <- struct{}{}:
 		case <-ctx.Done():
 			return
+		}
+		next := nextRun(entry.Automation, time.Now().UTC())
+		won, err := s.config.Automations.ClaimAutomation(ctx, entry.Site, entry.Automation.Name, entry.Revision, entry.NextRun, next)
+		if err != nil {
+			<-slots
+			slog.Error("claim automation", "site", entry.Site, "automation", entry.Automation.Name, "error", err)
+			continue
+		}
+		if !won {
+			<-slots
+			continue
 		}
 		run, err := s.startScheduledRun(entry, slots)
 		if err != nil {

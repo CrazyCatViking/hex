@@ -1,0 +1,275 @@
+{{define "integrations"}}
+<!doctype html>
+<html lang="en">
+  <head>
+    {{template "head" (printf "%s · Integrations" .Platform)}}
+  </head>
+  <body hx-headers='{"X-Hex-Request":"1"}'>
+    {{template "header" .Chrome}}
+    <main id="main" class="page">
+      <section class="page-heading">
+        <div>
+          <p class="eyebrow">Platform integrations</p>
+          <h1>Integrations{{with .Catalog.Site}} for {{.}}{{end}}</h1>
+          <p class="lead">
+            Discover the systems apps and automations can use, their operations,
+            and the permissions each operation needs. Site approval and caller
+            grants are separate: approval does not grant permission to data.
+          </p>
+        </div>
+      </section>
+      <section class="panel" aria-labelledby="integration-site-heading">
+        <h2 id="integration-site-heading">Your site's integrations</h2>
+        <form method="get" action="/integrations">
+          <label for="integration-site">Site name</label>
+          <input
+            id="integration-site"
+            name="site"
+            value="{{.Catalog.Site}}"
+            required
+          />
+          <button class="button button-secondary" type="submit">
+            View site
+          </button>
+        </form>
+        <p class="muted">
+          Site owners can request approval. Platform admins can approve or
+          revoke it.
+        </p>
+        {{if .Catalog.Site}}<a href="/integrations"
+          >Back to the integration catalog</a
+        >{{end}}
+      </section>
+      {{template "site-integrations" .Catalog}} {{with .Approvals}}{{template
+      "integration-approvals" .}}{{end}}
+    </main>
+    {{template "footer" .Chrome}}
+  </body>
+</html>
+{{end}} {{define "site-integrations"}}
+<div id="site-integrations" hx-headers='{"X-Hex-Request":"1"}'>
+  {{if and .Site (not .ApprovalsEnabled)}}
+  <p class="banner">
+    Integration approval management is not configured on this platform.
+  </p>
+  {{end}} {{range .Integrations}}
+  <section class="panel" aria-labelledby="integration-{{.Name}}-heading">
+    <h2 id="integration-{{.Name}}-heading">
+      {{.Title}} <code>{{.Name}}</code>
+    </h2>
+    {{with .Description}}
+    <p>{{.}}</p>
+    {{end}}
+    <ul class="tag-list">
+      <li class="tag">
+        {{if .RequiresApproval}}Site approval required{{else}}No site approval
+        required{{end}}
+      </li>
+      {{if .Audit}}
+      <li class="tag">Calls audited</li>
+      {{end}}
+      <li class="tag">
+        {{if .Connector}}Connected account: {{.Connector}}{{else}}Platform
+        credential{{end}}
+      </li>
+    </ul>
+    {{if .AuditUnavailable}}
+    <p class="banner">
+      This integration is unavailable because its audit store is not configured.
+    </p>
+    {{end}} {{if .Connector}}
+    <p class="muted">
+      Calls use the caller's own account. Automations cannot use this
+      integration.
+    </p>
+    {{with .Connection}}
+    <p>
+      {{if .Connected}}Connected{{with .Account}} as {{.}}{{end}}{{else}}Your
+      account is not connected.
+      <a href="{{.ConnectURL}}">Connect {{.Title}}</a>{{end}}
+    </p>
+    {{else}}{{if $.Site}}
+    <p class="muted">Connected accounts are not configured on this platform.</p>
+    {{end}} {{end}} {{end}} {{if and $.Site .RequiresApproval}}
+    <p>
+      <strong>Site approval:</strong> {{if $.ApprovalsEnabled}}{{with
+      .Approval}}{{if eq .Status "approved"}}Approved{{else if eq .Status
+      "requested"}}Awaiting approval{{else}}{{.Status}}{{end}}{{else}}Not
+      requested{{end}}{{else}}Unavailable{{end}}
+    </p>
+    {{with .Approval}} {{with .Reason}}
+    <p>Reason: {{.}}</p>
+    {{end}} {{if .RequestedBy}}
+    <p class="muted">
+      Requested by {{.RequestedBy}}{{with .RequestedAt}} ·
+      <time datetime="{{.}}">{{.}}</time>{{end}}
+    </p>
+    {{end}} {{if .DecidedBy}}
+    <p class="muted">
+      Approved by {{.DecidedBy}}{{with .DecidedAt}} ·
+      <time datetime="{{.}}">{{.}}</time>{{end}}
+    </p>
+    {{end}} {{end}} {{if .CanRequest}}
+    <form
+      method="post"
+      action="{{.ApprovalURL}}/request"
+      hx-post="{{.ApprovalURL}}/request"
+      hx-target="#site-integrations"
+      hx-swap="outerHTML"
+    >
+      <label for="integration-{{.Name}}-reason"
+        >Why does this site need {{.Title}}?</label
+      >
+      <textarea
+        id="integration-{{.Name}}-reason"
+        name="reason"
+        rows="2"
+        maxlength="2000"
+      >
+{{with .Approval}}{{.Reason}}{{end}}</textarea>
+      <button class="button button-secondary" type="submit">
+        {{if .Admin}}Approve for site{{else if .Approval}}Update
+        request{{else}}Request approval{{end}}
+      </button>
+    </form>
+    {{end}}
+    <div class="row-actions">
+      {{if .CanApprove}}
+      <form
+        method="post"
+        action="{{.ApprovalURL}}/approve"
+        hx-post="{{.ApprovalURL}}/approve"
+        hx-target="#site-integrations"
+        hx-swap="outerHTML"
+      >
+        <button class="button button-secondary button-small" type="submit">
+          Approve
+        </button>
+      </form>
+      {{end}} {{if .CanRemove}}
+      <form
+        method="post"
+        action="{{.ApprovalURL}}/revoke"
+        hx-post="{{.ApprovalURL}}/revoke"
+        hx-target="#site-integrations"
+        hx-swap="outerHTML"
+      >
+        <button class="button button-secondary button-small" type="submit">
+          {{if .Admin}}{{if eq .Approval.Status "approved"}}Revoke
+          approval{{else}}Reject request{{end}}{{else}}Withdraw request{{end}}
+        </button>
+      </form>
+      {{end}}
+    </div>
+    {{end}}
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th scope="col">Operation</th>
+            <th scope="col">Permission</th>
+            <th scope="col">Effect</th>
+            <th scope="col">
+              {{if $.Site}}Site access{{else}}Your grant{{end}}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Endpoints}}
+          <tr>
+            <td>
+              <code>{{.Name}}</code>
+              <p class="muted">{{.Description}}</p>
+            </td>
+            <td><code>{{.Permission}}</code></td>
+            <td>{{if .Write}}Write{{else}}Read{{end}}</td>
+            <td>
+              {{if $.Site}}{{if .Allowed}}Allowed{{else}}Not
+              available{{end}}{{else}}{{if .Allowed}}Granted{{else}}Not
+              granted{{end}}{{end}}
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{if $.Site}}
+    <p class="muted">
+      Access reflects your grant, this site's approval, and any required audit
+      store or connected account.
+    </p>
+    {{end}}
+  </section>
+  {{else}}
+  <p class="muted">No integrations are registered.</p>
+  {{end}}
+</div>
+{{end}} {{define "integration-approvals"}}
+<section
+  id="integration-approvals"
+  class="panel"
+  aria-labelledby="integration-approvals-heading"
+  hx-headers='{"X-Hex-Request":"1"}'
+>
+  <h2 id="integration-approvals-heading">Integration approval review</h2>
+  <p class="muted">
+    Pending requests appear first. Approval lets a site use the integration;
+    each caller still needs a grant.
+  </p>
+  {{if .Approvals}}
+  <ul class="action-list">
+    {{range .Approvals}}
+    <li>
+      <div class="action-main">
+        <strong
+          >{{.Title}} ·
+          <a href="/integrations?site={{.Site}}">{{.Site}}</a></strong
+        >
+        <span
+          >{{if eq .Status "requested"}}Awaiting
+          approval{{else}}Approved{{end}}</span
+        >
+        {{with .Reason}}<span>Reason: {{.}}</span>{{end}} {{if
+        .RequestedBy}}<span class="muted"
+          >Requested by {{.RequestedBy}}{{with .RequestedAt}} ·
+          <time datetime="{{.}}">{{.}}</time>{{end}}</span
+        >{{end}} {{if .DecidedBy}}<span class="muted"
+          >Approved by {{.DecidedBy}}{{with .DecidedAt}} ·
+          <time datetime="{{.}}">{{.}}</time>{{end}}</span
+        >{{end}}
+      </div>
+      <div class="row-actions">
+        {{if eq .Status "requested"}}
+        <form
+          method="post"
+          action="{{.ApprovalURL}}/approve?view=catalog"
+          hx-post="{{.ApprovalURL}}/approve?view=catalog"
+          hx-target="#integration-approvals"
+          hx-swap="outerHTML"
+        >
+          <button class="button button-secondary button-small" type="submit">
+            Approve
+          </button>
+        </form>
+        {{end}}
+        <form
+          method="post"
+          action="{{.ApprovalURL}}/revoke?view=catalog"
+          hx-post="{{.ApprovalURL}}/revoke?view=catalog"
+          hx-target="#integration-approvals"
+          hx-swap="outerHTML"
+        >
+          <button class="button button-secondary button-small" type="submit">
+            {{if eq .Status "approved"}}Revoke approval{{else}}Reject
+            request{{end}}
+          </button>
+        </form>
+      </div>
+    </li>
+    {{end}}
+  </ul>
+  {{else}}
+  <p class="muted">There are no integration approvals to review.</p>
+  {{end}}
+</section>
+{{end}}

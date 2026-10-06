@@ -39,6 +39,7 @@ type AIModel struct {
 // AIProvider answers model requests. Stream returns events until io.EOF;
 // the final events are a "message" event carrying the complete assistant
 // message and a "done" event with the stop reason and usage.
+// Stream errors are potentially billable unless explicitly marked AINoSpendError.
 type AIProvider interface {
 	Models(ctx context.Context) ([]AIModel, error)
 	Stream(ctx context.Context, request AIRequest) (AIStream, error)
@@ -212,6 +213,18 @@ type AIError struct {
 }
 
 func (e *AIError) Error() string { return e.Message }
+
+// AINoSpendError marks a definite pre-work failure or upstream rejection that
+// incurred no usage. Do not use it for timeouts or ambiguous transport failures.
+type AINoSpendError struct{ Err error }
+
+func (e *AINoSpendError) Error() string {
+	if e.Err == nil {
+		return "AI request incurred no usage"
+	}
+	return "AI request incurred no usage: " + e.Err.Error()
+}
+func (e *AINoSpendError) Unwrap() error { return e.Err }
 
 var toolNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 
@@ -422,17 +435,17 @@ func (s *Server) runAI(ctx context.Context, caller integrationCaller, request AI
 	messages := append([]AIMessage(nil), request.Messages...)
 
 	for round := 0; ; round++ {
-		if round > 0 {
-			// Each round is a separate model call, so a tool loop stops
-			// once a budget runs out.
-			if err := s.checkAIBudget(ctx, caller); err != nil {
-				return total, err
-			}
-		}
 		request.Messages = messages
+		call, err := s.reserveAICall(ctx, caller, request)
+		if err != nil {
+			return total, err
+		}
 		assistant, done, usage, err := s.streamModel(ctx, request, emit)
 		total.add(&usage)
-		s.recordAIUsage(caller, request.Model, usage)
+		logAIUsage(caller, request.Model, usage)
+		if settlementErr := s.settleAICall(call, usage); settlementErr != nil {
+			return total, errors.Join(err, settlementErr)
+		}
 		if err != nil {
 			return total, err
 		}
@@ -482,9 +495,20 @@ func (s *Server) runAI(ctx context.Context, caller integrationCaller, request AI
 // the stream ends without the provider's usage, as when the app disconnects,
 // usage is estimated from the request and what was streamed.
 func (s *Server) streamModel(ctx context.Context, request AIRequest, emit func(AIEvent) error) (*AIMessage, *AIEvent, AIUsage, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, AIUsage{}, err
+	}
 	stream, err := s.config.AI.Provider.Stream(ctx, request)
 	if err != nil {
-		return nil, nil, AIUsage{}, err
+		var noSpend *AINoSpendError
+		var rejected *AIError
+		// AIError's request-validation/rate-limit statuses denote definite
+		// rejection. Other provider failures may follow billable work.
+		if errors.As(err, &noSpend) || (errors.As(err, &rejected) &&
+			(rejected.Status == 400 || rejected.Status == 403 || rejected.Status == 422 || rejected.Status == 429)) {
+			return nil, nil, AIUsage{}, err
+		}
+		return nil, nil, estimateUsage(request, 0), err
 	}
 	defer func() {
 		if err := stream.Close(); err != nil {

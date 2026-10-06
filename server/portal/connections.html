@@ -61,7 +61,7 @@
                   <button
                     type="button"
                     class="button button-secondary button-small"
-                    hx-delete="/api/hex/manage/connections/{{.Connector}}/{{.Owner}}"
+                    hx-delete="{{.RemoveURL}}"
                     hx-confirm="Remove {{.Person}}'s {{.Title}} connection?"
                     hx-target="closest tr"
                     hx-swap="outerHTML"

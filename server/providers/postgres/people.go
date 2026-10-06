@@ -35,13 +35,13 @@ func (d *Database) FindPeople(ctx context.Context, query string, limit int) ([]h
 func (d *Database) GetPeople(ctx context.Context, keys []string) ([]hex.Person, error) {
 	const statement = `
 		SELECT id, name, email FROM hex_people
-		WHERE lower(id) = ANY($1) OR lower(email) = ANY($1)`
+		WHERE id = ANY($1) OR (email <> '' AND lower(email) = ANY($2))`
 
 	lowered := make([]string, len(keys))
 	for i, key := range keys {
 		lowered[i] = strings.ToLower(key)
 	}
-	return d.queryPeople(ctx, statement, lowered)
+	return d.queryPeople(ctx, statement, keys, lowered)
 }
 
 func (d *Database) queryPeople(ctx context.Context, statement string, arguments ...any) ([]hex.Person, error) {

@@ -33,9 +33,11 @@ The pages are written for everyone who looks after a site, not only developers:
   are not expanded into their members. User activity is refreshed at most hourly
   and is platform activity, not an identity-provider sign-in audit.
 - Publishing: creation, successful publication and unpublishing events, with
-  actor and timestamp. These records survive taking down the site. When an admin
-  first opens the dashboard, existing metadata and available publication history
-  are imported idempotently. Previously deleted sites/history cannot be recovered.
+  actor and timestamp. These records survive taking down the site. Successful
+  publications import existing metadata and all available publication history
+  idempotently; deletion recovers that history before removing site records.
+  The dashboard also imports existing sites, including read-only directories.
+  Previously deleted sites/history cannot be recovered.
 - Traffic: requests, page views, unique authenticated visitors, visits, HTTP
   errors, bytes transferred, mean request duration and last visited. Date filters
   use inclusive UTC calendar days, for up to 366 days at a time. Daily trends,
@@ -76,6 +78,18 @@ work; implement this interface to enable card counts and popularity controls.
 An unavailable aggregate query omits the optional counters while leaving the
 directory usable.
 
+Built-in stores also implement `AnalyticsSummaryReader` (headline counts and
+daily trends without inventories, event payloads or identities) and
+`AnalyticsVisitorReader` (storage-side visitor search, ordering and pagination).
+Site reports and previous-period comparisons use these narrow queries. Custom
+stores can retain `QueryAnalytics` as the fallback. PostgreSQL performs report
+aggregation in SQL rather than loading daily visitor buckets into the server.
+Each PostgreSQL report or visitor page uses one read-only snapshot, keeping
+headline/daily totals and pagination counts/labels consistent during collection.
+Lifetime card/site totals use maintained in-memory aggregates in the memory
+provider and a bounded PostgreSQL cache, refreshed within one minute. The cache
+contains only site totals, never visitor labels, and retains at most 1,024 sites.
+
 ## Storage and configuration
 
 Analytics uses `Config.Analytics`, an optional `AnalyticsStore`, independently of
@@ -111,6 +125,27 @@ people are imported with an unknown first-seen date, rather than pretending thei
 last-seen timestamp was their first use.
 When a document database already holds access policies, choosing a separate
 analytics connection preserves that policy/directory database.
+
+PostgreSQL migrations are scoped: `MigrateAnalytics` creates only the five
+`hex_analytics_*` tables and optionally imports an existing people directory.
+`MigrateDocuments`, `MigratePeople`, `MigrateAccess`, `MigrateIntegrations`,
+`MigrateAutomations`, `MigrateAIUsage` and `MigrateIntegrationAudit` prepare their
+respective stores. `MigratePlatform` composes platform stores without app
+documents; `Migrate` remains the full-schema convenience method for embedders.
+All public migration methods share a database-wide PostgreSQL advisory lock,
+preventing concurrent first-boot table/index creation races. Composed migrations
+take the lock once; a dedicated temporary connection keeps one-connection
+runtime pools usable and releases the lock on cancellation or failure.
+The reference executable and development environment compose migrations for the
+stores they select. Development platform stores (including integrations,
+automations and AI usage) use PostgreSQL analytics when documents are disabled
+or ephemeral, instead of falling back to memory.
+
+Read-only site directories may implement `SiteMetadataReader` and
+`SiteRecordReader` (`ReadSiteFile`) to supply metadata and publication history.
+Recovery does not require publishing/write permissions. Embedders must recover
+available history before deleting records; a recovery error must leave those
+records intact so recovery can be retried.
 
 The Azure example enables durable analytics and traffic when a managed/external
 document database is selected. Its site-only profile has analytics disabled until
@@ -151,6 +186,11 @@ static requests; proxied app APIs supply the same internal response header, whic
 nginx hides from clients. The collector never uses a browser-supplied user ID.
 Only completed main requests for site hostnames are collected; platform pages,
 health checks and authorization subrequests are excluded.
+API classification follows nginx's final decoded, normalized URI, including
+internal index redirects. Encoded or dot-segment API paths therefore use the
+proxied identity and cannot be mistaken for static page views.
+The classification/identity maps are re-evaluated after rewrites and authorization
+subrequests, so early evaluation cannot cache another request context's values.
 
 Page views are successful GET document loads (2xx or identifiable 304), using
 Fetch Metadata and HTML response types. Redirects, errors, assets, HEAD and API

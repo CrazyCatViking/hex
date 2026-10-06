@@ -63,7 +63,7 @@ func (s *PeopleStore) GetPeople(ctx context.Context, keys []string) ([]hex.Perso
 	found := []hex.Person{}
 	for _, person := range s.people {
 		matches := slices.ContainsFunc(keys, func(key string) bool {
-			return strings.EqualFold(key, person.ID) || (person.Email != "" && strings.EqualFold(key, person.Email))
+			return key == person.ID || (person.Email != "" && strings.EqualFold(key, person.Email))
 		})
 		if matches {
 			found = append(found, person)

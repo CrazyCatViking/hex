@@ -52,6 +52,7 @@ const (
 	defaultIntegrationAuditRetention = 365 * 24 * time.Hour
 	integrationAuditCleanupInterval  = time.Hour
 	maxAuditedRecords                = 1000
+	integrationAuditWriteTimeout     = 10 * time.Second
 )
 
 // integrationOutcome is how one endpoint call ended, for its log line and
@@ -121,7 +122,9 @@ func (s *Server) finishIntegrationCall(ctx context.Context, caller integrationCa
 	if !outcome.failed && endpoint.endpoint.AuditRecords != nil {
 		record.Records = auditedRecords(endpoint.endpoint.AuditRecords(outcome.output))
 	}
-	if err := s.config.IntegrationAudit.RecordIntegrationAudit(ctx, record); err != nil {
+	auditContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), integrationAuditWriteTimeout)
+	defer cancel()
+	if err := s.config.IntegrationAudit.RecordIntegrationAudit(auditContext, record); err != nil {
 		slog.Error("record integration audit", "endpoint", endpoint.qualifiedName(), "caller", record.Caller, "error", err)
 		return unauditedError(integration)
 	}

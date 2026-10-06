@@ -221,3 +221,99 @@ func TestSiteOnlyConfiguration(t *testing.T) {
 		t.Fatal("unexpected provider configuration")
 	}
 }
+
+func TestConnectionConfigurationFailsAtStartup(t *testing.T) {
+	for name, settings := range map[string]map[string]string{
+		"mixed modern and legacy": {"HEX_AUTH_CONFIG": `{"type":"none"}`, "HEX_API_RESOURCE": "api://legacy"},
+		"invalid legacy client":   {"HEX_API_RESOURCE": "api://legacy", "HEX_CLI_CLIENT_ID": "not-a-guid", "HEX_CLI_TENANT_ID": "tenant"},
+		"missing legacy resource": {"HEX_CLI_CLIENT_ID": "11111111-2222-3333-4444-555555555555", "HEX_CLI_TENANT_ID": "tenant"},
+		"malformed modern auth":   {"HEX_AUTH_CONFIG": `{"type":"oidc","issuer":"https://issuer.test","clientId":"public","scopes":[]}`},
+		"credentials in origin":   {"HEX_PUBLIC_URL": "https://user:secret@hex.test"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			settings["HEX_SITES_PROVIDER"] = "none"
+			settings["HEX_FILES_PROVIDER"] = "none"
+			settings["HEX_DATABASE_PROVIDER"] = "none"
+			settings["HEX_REALTIME_PROVIDER"] = "none"
+			if _, _, err := configure(context.Background(), func(key string) string { return settings[key] }); err == nil {
+				t.Fatal("invalid connection accepted at startup")
+			}
+		})
+	}
+}
+
+func TestLogoutConfiguration(t *testing.T) {
+	for _, test := range []struct{ identity, configured, want string }{
+		{"easyauth", "", "/.auth/logout"},
+		{"easyauth", "/custom-logout", "/custom-logout"},
+		{"static", "", ""},
+		{"static", "https://identity.test/logout", "https://identity.test/logout"},
+	} {
+		settings := map[string]string{"HEX_SITES_PROVIDER": "none", "HEX_FILES_PROVIDER": "none", "HEX_DATABASE_PROVIDER": "none", "HEX_REALTIME_PROVIDER": "none", "HEX_IDENTITY_PROVIDER": test.identity, "HEX_LOGOUT_URL": test.configured}
+		config, close, err := configure(context.Background(), func(key string) string { return settings[key] })
+		if err != nil {
+			t.Fatal(err)
+		}
+		close()
+		if config.LogoutURL != test.want {
+			t.Fatalf("logout for %s = %q, want %q", test.identity, config.LogoutURL, test.want)
+		}
+	}
+}
+
+func TestStaticPathComparisonConfiguration(t *testing.T) {
+	for _, test := range []struct {
+		name, share, override string
+		want                  bool
+	}{
+		{"local", "", "", false},
+		{"azure read-only", "https://account.file.core.windows.net/sites", "", true},
+		{"explicit exact", "https://account.file.core.windows.net/sites", "false", false},
+		{"explicit insensitive", "", "true", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			values := map[string]string{
+				"HEX_SITES_PROVIDER": "filesystem", "HEX_PUBLISHER_PROVIDER": "none", "HEX_SITES_DIR": t.TempDir(),
+				"HEX_FILES_PROVIDER": "none", "HEX_DATABASE_PROVIDER": "none", "HEX_ANALYTICS_PROVIDER": "none", "HEX_REALTIME_PROVIDER": "none",
+				"AZURE_FILES_SHARE_URL": test.share, "HEX_SITE_PATH_CASE_INSENSITIVE": test.override,
+			}
+			config, close, err := configure(context.Background(), func(key string) string { return values[key] })
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer close()
+			if config.PathCaseInsensitive != test.want {
+				t.Fatalf("case mode=%v, want %v", config.PathCaseInsensitive, test.want)
+			}
+		})
+	}
+	if _, _, err := configure(context.Background(), func(key string) string {
+		if key == "HEX_SITE_PATH_CASE_INSENSITIVE" {
+			return "invalid"
+		}
+		return ""
+	}); err == nil {
+		t.Fatal("invalid path mode accepted")
+	}
+}
+
+func TestEasyAuthCompositionCanonicalizesOnlyEntraGUIDs(t *testing.T) {
+	const upper = "ABCDEF01-2345-6789-ABCD-EF0123456789"
+	const lower = "abcdef01-2345-6789-abcd-ef0123456789"
+	values := map[string]string{
+		"HEX_SITES_PROVIDER": "none", "HEX_PUBLISHER_PROVIDER": "none", "HEX_FILES_PROVIDER": "none",
+		"HEX_DATABASE_PROVIDER": "none", "HEX_ANALYTICS_PROVIDER": "none", "HEX_REALTIME_PROVIDER": "none",
+		"HEX_IDENTITY_PROVIDER": "easyauth", "HEX_ADMIN_GROUPS": "group:" + upper + ",role:Ops.Admin",
+		"HEX_PUBLISHER_GROUPS": "user:" + upper + ",role:Publish", "HEX_GROUPS": "Team=" + upper,
+	}
+	config, close, err := configure(context.Background(), func(key string) string { return values[key] })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer close()
+	if len(config.AdminGroups) != 2 || config.AdminGroups[0] != "group:"+lower || config.AdminGroups[1] != "role:Ops.Admin" ||
+		len(config.PublisherGroups) != 2 || config.PublisherGroups[0] != "user:"+lower || config.PublisherGroups[1] != "role:Publish" ||
+		len(config.Groups) != 1 || config.Groups[0].ID != lower {
+		t.Fatalf("incorrect principal canonicalization: %+v", config)
+	}
+}
