@@ -1,0 +1,133 @@
+{{define "admin-integration-audit"}}
+<!doctype html>
+<html lang="en">
+  <head>
+    {{template "head" (printf "%s · Integration audit" .Platform)}}
+  </head>
+  <body>
+    {{template "header" .Chrome}}
+    <main id="main" class="page">
+      <section class="page-heading">
+        <div>
+          <p class="eyebrow">Admin</p>
+          <h1>Integration audit</h1>
+          <p class="lead">
+            Every call of an audited integration: who made it, from which site,
+            with what input and which records the result showed. Cached results
+            are included.
+          </p>
+        </div>
+      </section>
+      <nav class="tabs" aria-label="Admin sections">
+        {{if .Analytics}}<a href="/admin" aria-current="false">Overview</a>
+        <a href="/admin/sites" aria-current="false">Sites</a>
+        <a href="/admin/users" aria-current="false">People</a>{{end}} {{if
+        .AISpend}}<a href="/admin/ai" aria-current="false">AI spend</a>{{end}}
+        <a href="/admin/integration-audit" aria-current="page"
+          >Integration audit</a
+        >
+      </nav>
+      <section class="panel" aria-labelledby="audit-heading">
+        <div class="panel-heading">
+          <h2 id="audit-heading">Calls</h2>
+          <a class="link-button" href="{{.CSVLink}}">Download CSV</a>
+        </div>
+        <form
+          class="audit-filters"
+          action="/admin/integration-audit"
+          method="get"
+        >
+          <label class="field"
+            ><span class="field-label">From</span
+            ><input type="date" name="since" value="{{.Since}}"
+          /></label>
+          <label class="field"
+            ><span class="field-label">To</span
+            ><input type="date" name="until" value="{{.Until}}"
+          /></label>
+          <label class="field"
+            ><span class="field-label">Who</span
+            ><input
+              name="caller"
+              value="{{.Caller}}"
+              placeholder="Name, email or user:&lt;id&gt;"
+              autocomplete="off"
+          /></label>
+          <label class="field"
+            ><span class="field-label">Site</span
+            ><input name="site" value="{{.Site}}" autocomplete="off"
+          /></label>
+          <label class="field"
+            ><span class="field-label">Endpoint</span
+            ><select name="endpoint">
+              {{range .Endpoints}}
+              <option value="{{.Value}}" {{.Attr}}>{{.Label}}</option>
+              {{end}}
+            </select></label
+          >
+          <label class="field"
+            ><span class="field-label">Record</span
+            ><input
+              name="record"
+              value="{{.Record}}"
+              placeholder="ticket:123"
+              autocomplete="off"
+          /></label>
+          <button class="button button-small" type="submit">Show</button>
+        </form>
+        {{with .ErrorText}}
+        <p class="banner banner-error" role="alert">{{.}}</p>
+        {{else}} {{if .Rows}}
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th scope="col">Time (UTC)</th>
+                <th scope="col">Who</th>
+                <th scope="col">Site</th>
+                <th scope="col">Endpoint</th>
+                <th scope="col">Records</th>
+                <th scope="col">Input</th>
+              </tr>
+            </thead>
+            <tbody>
+              {{range .Rows}}
+              <tr>
+                <td><time datetime="{{.ISO}}">{{.At}}</time></td>
+                <td>
+                  {{.Who}}{{with .WhoDetail}}<br /><span class="muted"
+                    >{{.}}</span
+                  >{{end}}
+                </td>
+                <td>{{.Site}}</td>
+                <td>
+                  {{.Endpoint}}{{if .Cached}}
+                  <span class="tag">Cached</span>{{end}}{{if .Failed}}
+                  <span class="tag">Failed</span>{{end}}
+                </td>
+                <td>
+                  {{range .Records}}<span class="tag">{{.}}</span>
+                  {{else}}—{{end}} {{if .MoreRecords}}<span class="muted"
+                    >and {{.MoreRecords}} more</span
+                  >{{end}}
+                </td>
+                <td class="preview">{{.Input}}</td>
+              </tr>
+              {{end}}
+            </tbody>
+          </table>
+        </div>
+        {{if .Limited}}
+        <p class="field-hint">
+          Showing the newest {{.Limit}} calls. Narrow the filters or download
+          the CSV for more.
+        </p>
+        {{end}} {{else}}
+        <p class="muted">No audited calls match these filters.</p>
+        {{end}} {{end}}
+      </section>
+    </main>
+    {{template "footer" .Chrome}}
+  </body>
+</html>
+{{end}}

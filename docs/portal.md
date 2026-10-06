@@ -11,6 +11,7 @@ Each Hex server includes a portal at the main domain, for example **https://hex.
 | Site | `/manage/<site>` | Tabs for **Overview** (who created and last published it, and its audience), **Sharing**, **Data**, **History** and **Settings** (taking the site down). |
 | Build & publish | `/start` | The installer for the detected OS and three steps: install, share a file or folder, and build an app with a coding agent. |
 | Admin | `/admin`, `/admin/sites`, `/admin/users` | Platform-wide inventory, user activity, publishing history and nginx traffic, with date ranges and site/user drill-downs. Requires analytics and platform-admin access. |
+| Integration audit | `/admin/integration-audit` | Every call of audited integrations, cached answers included: when, who, from which site, the endpoint, the input and the records it showed, filterable and downloadable as CSV. Requires an integration audit store and platform-admin access; see [Auditing](integrations.md#auditing). |
 
 The account menu in the header shows the person's name, email, their configured groups and whether they are a platform admin, and links to sign out through `/.auth/logout`.
 

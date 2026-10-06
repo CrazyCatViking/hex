@@ -25,6 +25,10 @@ import (
 // Endpoints call with either a platform credential owned by the integration
 // (the default) or, when the integration names a Connector, with the caller's
 // own account, which they connect once through the platform's OAuth broker.
+//
+// Integrations with Audit set record every call in Config.IntegrationAudit,
+// cached results included, so admins can see who saw which records; such
+// calls fail when the record cannot be written.
 
 // Integration describes one third-party system and its endpoints.
 type Integration struct {
@@ -37,6 +41,11 @@ type Integration struct {
 	// Connector names a registered Connector; its endpoints then call with
 	// the caller's connected account instead of a platform credential.
 	Connector string
+	// Audit records every call of the integration's endpoints in
+	// Config.IntegrationAudit, cached results included: who called, from
+	// which site, the input and the records the result showed. Calls fail
+	// when the record cannot be written.
+	Audit     bool
 	Endpoints []IntegrationEndpoint
 }
 
@@ -59,6 +68,10 @@ type IntegrationEndpoint struct {
 	OutputSchema json.RawMessage
 	CacheTTL     time.Duration
 	Handler      func(context.Context, IntegrationCall, json.RawMessage) (any, error)
+	// AuditRecords names the third-party records a result shows, such as
+	// "ticket:123", for the audit log of integrations with Audit set. It
+	// receives the validated JSON output, also for cached results.
+	AuditRecords func(output json.RawMessage) []string
 }
 
 // IntegrationCall describes who an endpoint runs for. Identity is nil when
@@ -327,7 +340,7 @@ func (i *registeredIntegration) sortedEndpoints() []*registeredEndpoint {
 }
 
 // ParseIntegrationGrants reads grants as a JSON object mapping principals to
-// permission lists, e.g. {"role:Data.Sales": ["hubspot.*"], "*": ["slack.users"]}.
+// permission lists, e.g. {"role:hubspot.deals": ["hubspot.deals"], "*": ["slack.users"]}.
 func ParseIntegrationGrants(value string) ([]IntegrationGrant, error) {
 	if strings.TrimSpace(value) == "" {
 		return nil, nil

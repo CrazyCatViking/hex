@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"os"
 	"sync"
@@ -238,5 +239,64 @@ func TestAIUsageStoreAgainstPostgres(t *testing.T) {
 	}
 	if err := database.DeleteAIBudget(ctx, hex.BudgetSite, site); !errors.Is(err, hex.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestIntegrationAuditStoreAgainstPostgres(t *testing.T) {
+	database, ctx := openTestDatabase(t)
+	site := "test-" + rand.Text()
+	day := time.Date(2026, time.October, 3, 12, 0, 0, 0, time.UTC)
+	records := []hex.IntegrationAuditRecord{
+		{ID: rand.Text(), At: day, Site: site, Integration: "crm", Endpoint: "tickets", Caller: "user:alice", CallerName: "Alice",
+			Input: json.RawMessage(`{"status":"open"}`), Records: []string{"ticket:1", "ticket:2"}},
+		{ID: rand.Text(), At: day.Add(time.Hour), Site: site, Integration: "crm", Endpoint: "contacts", Caller: "user:bob",
+			Input: json.RawMessage(`{}`), Records: []string{"contact:7"}, Cached: true},
+		{ID: rand.Text(), At: day.AddDate(0, 0, 1), Site: site, Integration: "chat", Endpoint: "channels", Caller: "user:alice",
+			Input: json.RawMessage(`{}`), Failed: true},
+	}
+	for _, record := range records {
+		if err := database.RecordIntegrationAudit(ctx, record); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for name, entry := range map[string]struct {
+		filter hex.IntegrationAuditFilter
+		want   []int
+	}{
+		"newest first": {hex.IntegrationAuditFilter{Site: site}, []int{2, 1, 0}},
+		"limit":        {hex.IntegrationAuditFilter{Site: site, Limit: 2}, []int{2, 1}},
+		"range":        {hex.IntegrationAuditFilter{Site: site, Since: day, Until: day.Add(time.Hour)}, []int{0}},
+		"caller":       {hex.IntegrationAuditFilter{Site: site, Caller: "user:alice"}, []int{2, 0}},
+		"endpoint":     {hex.IntegrationAuditFilter{Site: site, Endpoint: "crm.tickets"}, []int{0}},
+		"integration":  {hex.IntegrationAuditFilter{Site: site, Endpoint: "crm.*"}, []int{1, 0}},
+		"record":       {hex.IntegrationAuditFilter{Site: site, Record: "ticket:2"}, []int{0}},
+	} {
+		listed, err := database.ListIntegrationAudit(ctx, entry.filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(listed) != len(entry.want) {
+			t.Errorf("%s: got %d records, want %d", name, len(listed), len(entry.want))
+			continue
+		}
+		for index, want := range entry.want {
+			if listed[index].ID != records[want].ID {
+				t.Errorf("%s: record %d is %s, want %s", name, index, listed[index].ID, records[want].ID)
+			}
+		}
+	}
+	listed, err := database.ListIntegrationAudit(ctx, hex.IntegrationAuditFilter{Site: site, Endpoint: "crm.tickets"})
+	if err != nil || len(listed) != 1 || listed[0].CallerName != "Alice" || string(listed[0].Input) != `{"status": "open"}` ||
+		len(listed[0].Records) != 2 || !listed[0].At.Equal(day) {
+		t.Fatalf("unexpected stored record %+v %v", listed, err)
+	}
+
+	if _, err := database.DeleteIntegrationAuditBefore(ctx, day.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	remaining, err := database.ListIntegrationAudit(ctx, hex.IntegrationAuditFilter{Site: site})
+	if err != nil || len(remaining) != 2 || !remaining[1].Cached || !remaining[0].Failed {
+		t.Fatalf("unexpected records after removal %+v %v", remaining, err)
 	}
 }

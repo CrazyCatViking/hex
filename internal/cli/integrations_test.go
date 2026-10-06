@@ -79,6 +79,7 @@ func startIntegrationPlatform(t *testing.T, calls *atomic.Int32) testPlatform {
 		config.Database = memory.NewDatabase()
 		config.Integrations = registry
 		config.IntegrationStore = memory.NewIntegrationStore()
+		config.IntegrationAudit = memory.NewIntegrationAuditStore()
 		config.CredentialKey = make([]byte, 32)
 		config.IntegrationGrants = []hex.IntegrationGrant{
 			{Principal: "*", Permissions: []string{"*"}},

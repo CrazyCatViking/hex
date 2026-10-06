@@ -250,6 +250,10 @@ func (s *Server) callIntegration(ctx context.Context, caller integrationCaller, 
 	if err := validateActionJSON(endpoint.input, input); err != nil {
 		return nil, false, &IntegrationError{Status: http.StatusBadRequest, Message: "invalid input: " + err.Error()}
 	}
+	if integration.Audit && s.config.IntegrationAudit == nil {
+		slog.Error("audited integration called without an integration audit store", "endpoint", endpoint.qualifiedName())
+		return nil, false, unauditedError(integration)
+	}
 
 	call := IntegrationCall{Site: caller.site, Identity: caller.identity, Automation: caller.automation}
 	cacheOwner := ""
@@ -266,26 +270,22 @@ func (s *Server) callIntegration(ctx context.Context, caller integrationCaller, 
 	cacheKey := integrationCacheKey(endpoint, cacheOwner, input)
 	if endpoint.endpoint.CacheTTL > 0 {
 		if output, ok := s.integrationCache.get(cacheKey); ok {
+			outcome := integrationOutcome{output: output, cached: true}
+			if err := s.finishIntegrationCall(ctx, caller, endpoint, input, outcome); err != nil {
+				return nil, false, err
+			}
 			return output, true, nil
 		}
 	}
 
 	started := time.Now()
-	callContext, cancel := context.WithTimeout(ctx, integrationCallTimeout)
-	defer cancel()
-	result, err := endpoint.endpoint.Handler(callContext, call, input)
-	slog.Info("integration call", "site", caller.site, "endpoint", endpoint.qualifiedName(),
-		"caller", caller.label(), "duration", time.Since(started).Round(time.Millisecond), "failed", err != nil)
+	output, err := s.runIntegrationHandler(ctx, call, endpoint, input)
+	outcome := integrationOutcome{output: output, failed: err != nil, duration: time.Since(started)}
+	if auditErr := s.finishIntegrationCall(ctx, caller, endpoint, input, outcome); auditErr != nil {
+		return nil, false, auditErr
+	}
 	if err != nil {
 		return nil, false, err
-	}
-
-	output, err := json.Marshal(result)
-	if err != nil {
-		return nil, false, fmt.Errorf("encode %s result: %w", endpoint.qualifiedName(), err)
-	}
-	if err := validateActionJSON(endpoint.output, output); err != nil {
-		return nil, false, fmt.Errorf("%s returned an invalid result: %w", endpoint.qualifiedName(), err)
 	}
 	if endpoint.endpoint.CacheTTL > 0 {
 		s.integrationCache.put(cacheKey, output, endpoint.endpoint.CacheTTL)
@@ -293,13 +293,28 @@ func (s *Server) callIntegration(ctx context.Context, caller integrationCaller, 
 	return output, false, nil
 }
 
-func integrationCacheKey(endpoint *registeredEndpoint, owner string, input json.RawMessage) string {
-	var compact bytes.Buffer
-	if err := json.Compact(&compact, input); err != nil {
-		compact.Reset()
-		compact.Write(input)
+// runIntegrationHandler calls the endpoint's handler and checks its result
+// against the output contract.
+func (s *Server) runIntegrationHandler(ctx context.Context, call IntegrationCall, endpoint *registeredEndpoint, input json.RawMessage) (json.RawMessage, error) {
+	callContext, cancel := context.WithTimeout(ctx, integrationCallTimeout)
+	defer cancel()
+	result, err := endpoint.endpoint.Handler(callContext, call, input)
+	if err != nil {
+		return nil, err
 	}
-	digest := sha256.Sum256(compact.Bytes())
+
+	output, err := json.Marshal(result)
+	if err != nil {
+		return nil, fmt.Errorf("encode %s result: %w", endpoint.qualifiedName(), err)
+	}
+	if err := validateActionJSON(endpoint.output, output); err != nil {
+		return nil, fmt.Errorf("%s returned an invalid result: %w", endpoint.qualifiedName(), err)
+	}
+	return output, nil
+}
+
+func integrationCacheKey(endpoint *registeredEndpoint, owner string, input json.RawMessage) string {
+	digest := sha256.Sum256(compactJSON(input))
 	return endpoint.qualifiedName() + "\x00" + owner + "\x00" + hex.EncodeToString(digest[:])
 }
 
