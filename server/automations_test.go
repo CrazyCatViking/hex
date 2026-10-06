@@ -95,7 +95,7 @@ func TestAutomationsNeedSiteGrants(t *testing.T) {
 		hex.IntegrationGrant{Principal: "site:other", Permissions: []string{"*"}},
 		hex.IntegrationGrant{Principal: "user:owner", Permissions: []string{"*"}})
 	response := requestAs(t, server, roleHeaders("owner"), "POST", "/api/hex/sites/demo/automations/test?dryRun=false",
-		[]byte(`{"name":"post","steps":[{"id":"x","call":"chat.post","input":{"text":"hi"}}]}`), 202)
+		[]byte(`{"name":"post","script":{"source":"export default hex => hex.call('chat.post',{text:'hi'});"}}`), 202)
 	var started hex.AutomationRun
 	if err := json.Unmarshal(response.Body.Bytes(), &started); err != nil {
 		t.Fatal(err)
@@ -106,17 +106,22 @@ func TestAutomationsNeedSiteGrants(t *testing.T) {
 	}
 }
 
-const weeklyReport = `[{
-	"name": "weekly-report",
-	"schedule": "0 8 * * MON",
-	"timezone": "Europe/Oslo",
-	"steps": [
-		{"id": "counts", "call": "defects.counts", "input": {"period": "7d"}},
-		{"id": "post", "if": "steps.counts.output.total | gt(0)", "call": "chat.post",
-		 "input": {"text": "Week {{ now.week }}: {{ steps.counts.output.total }} issues ({{ steps.counts.output.byLevel.error }} errors)"}},
-		{"id": "archive", "save": {"collection": "reports", "id": "week-{{ now.week }}", "data": {"total": "{{ steps.counts.output.total }}"}}}
-	]
-}]`
+const weeklyReportSource = `export default async hex => {
+	const counts = await hex.call("defects.counts", {period:"7d"});
+	if (counts.total > 0) {
+		await hex.call("chat.post", {text:"Week "+hex.now.week+": "+counts.total+" issues ("+counts.byLevel.error+" errors)"});
+	}
+	await hex.db.save("reports", {total:counts.total}, {id:"week-"+hex.now.week});
+	return {total:counts.total};
+};`
+
+var weeklyReport = func() string {
+	data, err := json.Marshal([]hex.Automation{{Name: "weekly-report", Schedule: "0 8 * * MON", Timezone: "Europe/Oslo", Script: &hex.AutomationScript{File: "weekly-report.js", Source: weeklyReportSource}}})
+	if err != nil {
+		panic(err)
+	}
+	return string(data)
+}()
 
 func waitForRun(t *testing.T, server *hex.Server, path string) hex.AutomationRun {
 	t.Helper()
@@ -135,13 +140,13 @@ func waitForRun(t *testing.T, server *hex.Server, path string) hex.AutomationRun
 	return hex.AutomationRun{}
 }
 
-func TestAutomationRunsStepsWithSiteGrants(t *testing.T) {
+func TestAutomationRunsScriptWithSiteGrants(t *testing.T) {
 	server, store, database, posted := setupAutomations(t, demoGrant)
 	owner := roleHeaders("owner")
 	base := "/api/hex/sites/demo/automations"
 
 	requestAs(t, server, roleHeaders("stranger"), "PUT", base, []byte(weeklyReport), 403)
-	requestAs(t, server, owner, "PUT", base, []byte(`[{"name":"x","schedule":"* * * * *","steps":[{"id":"a","call":"defects.counts"}]}]`), 400)
+	requestAs(t, server, owner, "PUT", base, []byte(`[{"name":"x","schedule":"* * * * *","script":{"source":"export default () => 1;"}}]`), 400)
 	listed := requestAs(t, server, owner, "PUT", base, []byte(weeklyReport), 200)
 	if !strings.Contains(listed.Body.String(), `"nextRun":"`) {
 		t.Fatal(listed.Body.String())
@@ -153,11 +158,11 @@ func TestAutomationRunsStepsWithSiteGrants(t *testing.T) {
 		t.Fatal(err)
 	}
 	run := waitForRun(t, server, "/api/hex/sites/demo/automation-runs/"+started.ID)
-	if run.Status != hex.RunSucceeded || run.Steps[1].Status != hex.StepDryRun || run.Steps[2].Status != hex.StepDryRun {
+	if run.Status != hex.RunSucceeded || run.Operations[1].Status != hex.OperationDryRun || run.Operations[2].Status != hex.OperationDryRun {
 		t.Fatalf("unexpected dry run: %+v", run)
 	}
-	if len(posted.all()) != 0 || !strings.Contains(string(run.Steps[1].Output), "issues (5 errors)") {
-		t.Fatalf("dry run posted or rendered wrongly: %s", run.Steps[1].Output)
+	if len(posted.all()) != 0 || !strings.Contains(string(run.Operations[1].Output), "issues (5 errors)") {
+		t.Fatalf("dry run posted wrongly: %s", run.Operations[1].Output)
 	}
 
 	real := requestAs(t, server, owner, "POST", base+"/weekly-report/run", nil, 202)
@@ -197,10 +202,7 @@ func TestAutomationBirthdaysLoopAndFailures(t *testing.T) {
 		}
 	}
 
-	birthdays := `{"name":"birthdays","steps":[
-		{"id":"today","query":{"collection":"people","where":{"birthday":"{{ now.monthDay }}"}}},
-		{"id":"greet","forEach":"steps.today.output","call":"chat.post","input":{"text":"Happy birthday {{ item.data.name }}!"}}
-	]}`
+	birthdays := `{"name":"birthdays","script":{"source":"export default async hex => { const people = await hex.db.query('people',{where:{birthday:hex.now.monthDay}}); for (const person of people) await hex.call('chat.post',{text:'Happy birthday '+person.data.name+'!'}); }"}}`
 	response := requestAs(t, server, owner, "POST", "/api/hex/sites/demo/automations/test?dryRun=false", []byte(birthdays), 202)
 	var started hex.AutomationRun
 	if err := json.Unmarshal(response.Body.Bytes(), &started); err != nil {
@@ -212,7 +214,7 @@ func TestAutomationBirthdaysLoopAndFailures(t *testing.T) {
 		t.Fatalf("unexpected birthday run %+v: %v", run, messages)
 	}
 
-	response = requestAs(t, server, owner, "POST", "/api/hex/sites/demo/automations/test", []byte(`{"name":"bad","steps":[{"id":"x","call":"defects.missing"}]}`), 202)
+	response = requestAs(t, server, owner, "POST", "/api/hex/sites/demo/automations/test", []byte(`{"name":"bad","script":{"source":"export default hex => hex.call('defects.missing');"}}`), 202)
 	if err := json.Unmarshal(response.Body.Bytes(), &started); err != nil {
 		t.Fatal(err)
 	}

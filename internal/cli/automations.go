@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"net/url"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
+	"unicode"
 
 	hex "github.com/crazycatviking/hex/server"
 	"github.com/spf13/cobra"
@@ -39,6 +41,11 @@ func projectAutomations(directory string, project Project) (*[]hex.Automation, e
 		if err := decodeStrict(project.Automations, &automations); err != nil {
 			return nil, fmt.Errorf("hex.json automations: %w", err)
 		}
+		for index := range automations {
+			if err := resolveAutomationScript(directory, &automations[index]); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	folder := filepath.Join(directory, automationsDirectory)
@@ -57,6 +64,7 @@ func projectAutomations(directory string, project Project) (*[]hex.Automation, e
 		if err != nil {
 			return nil, err
 		}
+		automation.Script.File = filepath.ToSlash(filepath.Join(automationsDirectory, automation.Script.File))
 		automations = append(automations, automation)
 	}
 	if !defined {
@@ -88,7 +96,49 @@ func readAutomationFile(path string) (hex.Automation, error) {
 	if automation.Name == "" {
 		automation.Name = strings.TrimSuffix(filepath.Base(path), ".json")
 	}
+	if err := resolveAutomationScript(filepath.Dir(path), &automation); err != nil {
+		return automation, err
+	}
 	return automation, nil
+}
+
+func resolveAutomationScript(directory string, automation *hex.Automation) error {
+	script := automation.Script
+	if script == nil {
+		return fmt.Errorf("automation %s requires a JavaScript script", automation.Name)
+	}
+	if script.Source != "" {
+		return fmt.Errorf("automation %s: project metadata must reference a .js file, not contain script source", automation.Name)
+	}
+	if !filepath.IsLocal(script.File) || filepath.Ext(script.File) != ".js" {
+		return fmt.Errorf("automation %s: script file must be a local .js path", automation.Name)
+	}
+	if err := readAutomationScript(directory, script); err != nil {
+		return fmt.Errorf("automation %s script %s: %w", automation.Name, script.File, err)
+	}
+	return nil
+}
+
+func readAutomationScript(directory string, script *hex.AutomationScript) error {
+	root, err := os.OpenRoot(directory)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	file, err := root.Open(script.File)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, (128<<10)+1))
+	if err != nil {
+		return err
+	}
+	if len(data) > 128<<10 {
+		return errors.New("script source exceeds 128 KiB")
+	}
+	script.Source = string(data)
+	return nil
 }
 
 type automationOptions struct {
@@ -367,7 +417,7 @@ func (a *App) startAndFollowRun(ctx context.Context, project Project, site, path
 	if err := json.Unmarshal(data, &run); err != nil {
 		return fmt.Errorf("unexpected run: %w", err)
 	}
-	fmt.Fprintf(a.Err, "Started run %s of %s\n", run.ID, run.Automation)
+	fmt.Fprintf(a.Err, "Started run %s of %s\n", terminalText(run.ID), terminalText(run.Automation))
 
 	deadline := time.Now().Add(runWaitLimit)
 	for run.Status == hex.RunRunning {
@@ -396,16 +446,15 @@ func (a *App) startAndFollowRun(ctx context.Context, project Project, site, path
 		return err
 	}
 	if run.Status == hex.RunFailed {
-		return fmt.Errorf("the run failed: %s", run.Error)
+		return fmt.Errorf("the run failed: %s", terminalText(run.Error))
 	}
 	return nil
 }
 
-var stepMarks = map[string]string{
-	hex.StepSucceeded: "✓",
-	hex.StepSkipped:   "-",
-	hex.StepDryRun:    "~",
-	hex.StepFailed:    "✗",
+var operationMarks = map[string]string{
+	hex.OperationSucceeded: "✓",
+	hex.OperationDryRun:    "~",
+	hex.OperationFailed:    "✗",
 }
 
 func printRun(a *App, run hex.AutomationRun) error {
@@ -414,14 +463,20 @@ func printRun(a *App, run hex.AutomationRun) error {
 		kind += ", dry run"
 	}
 	duration := run.FinishedAt.Sub(run.StartedAt).Round(time.Millisecond)
-	fmt.Fprintf(a.Out, "%s (%s): %s in %s\n", run.Automation, kind, run.Status, duration)
+	fmt.Fprintf(a.Out, "%s (%s): %s in %s\n", terminalText(run.Automation), terminalText(kind), terminalText(run.Status), duration)
 	table := tabwriter.NewWriter(a.Out, 0, 4, 2, ' ', 0)
-	for _, step := range run.Steps {
-		detail := step.Error
-		if detail == "" && len(step.Output) > 0 {
-			detail = outputPreview(step.Output)
+	if len(run.Output) > 0 {
+		fmt.Fprintf(table, "  output\t%s\n", outputPreview(run.Output))
+	}
+	for _, log := range run.Logs {
+		fmt.Fprintf(table, "  log\t%s\t\t%s\n", terminalText(log.Message), outputPreview(log.Data))
+	}
+	for _, operation := range run.Operations {
+		detail := operation.Error
+		if detail == "" {
+			detail = outputPreview(operation.Output)
 		}
-		fmt.Fprintf(table, "  %s %s\t%s\t%dms\t%s\n", stepMarks[step.Status], step.ID, step.Status, step.DurationMS, detail)
+		fmt.Fprintf(table, "  %s %s %s\t%s\t%dms\t%s\n", operationMarks[operation.Status], terminalText(operation.Kind), terminalText(operation.Target), terminalText(operation.Status), operation.DurationMS, terminalText(detail))
 	}
 	return table.Flush()
 }
@@ -436,5 +491,17 @@ func outputPreview(output json.RawMessage) string {
 	if len(preview) > 160 {
 		preview = preview[:160] + "…"
 	}
-	return preview
+	return terminalText(preview)
+}
+
+func terminalText(text string) string {
+	var safe strings.Builder
+	for _, character := range text {
+		if unicode.IsControl(character) || character == 0x061c || character == 0x200e || character == 0x200f || (character >= 0x202a && character <= 0x202e) || (character >= 0x2066 && character <= 0x2069) {
+			fmt.Fprintf(&safe, "\\u%04x", character)
+		} else {
+			safe.WriteRune(character)
+		}
+	}
+	return safe.String()
 }

@@ -353,8 +353,19 @@ func (s *Server) readPublishRequest(w http.ResponseWriter, r *http.Request) (pub
 		return request, false
 	}
 	if request.Automations != nil {
-		if err := ValidateAutomations(*request.Automations); err != nil {
+		var raw struct {
+			Automations json.RawMessage `json:"automations"`
+		}
+		if err := json.Unmarshal(data, &raw); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
+			return request, false
+		}
+		if err := decodeAutomationJSON(raw.Automations, request.Automations); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid automation metadata: "+err.Error())
+			return request, false
+		}
+		if err := ValidateAutomationsContext(r.Context(), *request.Automations); err != nil {
+			writeAutomationValidationError(w, err)
 			return request, false
 		}
 		if len(*request.Automations) > 0 && !s.automationsEnabled() {

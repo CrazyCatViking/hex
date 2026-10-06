@@ -174,15 +174,29 @@ func fileDigest(path string) (int64, string, error) {
 // publish publishes the project in directory with the metadata and access
 // policy from its hex.json.
 func (a *App) publish(ctx context.Context, project Project, directory, name string, assumeYes bool) (publishResult, error) {
+	var err error
+	project.automations, err = projectAutomations(directory, project)
+	if err != nil {
+		return publishResult{}, err
+	}
 	source, err := readSource(directory, project.Directory)
 	if err != nil {
 		return publishResult{}, err
 	}
-	if err := a.checkPublication(ctx, source.Files, nil, assumeYes); err != nil {
-		return publishResult{}, err
+	if project.automations != nil {
+		root, err := filepath.EvalSymlinks(directory)
+		if err != nil {
+			return publishResult{}, err
+		}
+		private := make(map[string]bool)
+		for _, automation := range *project.automations {
+			if automation.Script != nil && automation.Script.File != "" {
+				private[filepath.Clean(filepath.Join(root, automation.Script.File))] = true
+			}
+		}
+		source.Files = slices.DeleteFunc(source.Files, func(file sourceFile) bool { return private[filepath.Clean(file.Path)] })
 	}
-	project.automations, err = projectAutomations(directory, project)
-	if err != nil {
+	if err := a.checkPublication(ctx, source.Files, nil, assumeYes); err != nil {
 		return publishResult{}, err
 	}
 	metadata := &hex.SiteMetadata{

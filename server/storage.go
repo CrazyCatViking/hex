@@ -13,6 +13,9 @@ var ErrNotFound = errors.New("not found")
 // a document created by someone else under a creator-only rule.
 var ErrForbidden = errors.New("forbidden")
 
+// ErrDocumentReadLimit reports a document too large for a bounded read.
+var ErrDocumentReadLimit = errors.New("document exceeds read byte limit")
+
 type SiteDirectory interface {
 	ListSites(ctx context.Context) ([]string, error)
 }
@@ -54,6 +57,9 @@ type ListOptions struct {
 	After     string
 	Limit     int
 	CreatedBy string
+	// MaxDocumentBytes rejects oversized documents before copying their data.
+	// Zero means unrestricted. Providers must honor this limit when nonzero.
+	MaxDocumentBytes int
 }
 
 type Database interface {

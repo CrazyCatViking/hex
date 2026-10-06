@@ -118,7 +118,7 @@ func (a *registeredAction) execute(ctx context.Context, caller ActionContext, in
 	if err != nil {
 		return nil, err
 	}
-	output, err := json.Marshal(result)
+	output, err := marshalHostResult(ctx, result)
 	if err == nil {
 		err = validateActionJSON(a.output, output)
 	}

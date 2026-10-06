@@ -27,7 +27,7 @@ type automationCard struct {
 	Timezone    string
 	Disabled    bool
 	NextRuns    []runTime
-	Steps       []stepSummary
+	Script      string
 	LastRun     *runSummary
 }
 
@@ -35,13 +35,6 @@ type runTime struct {
 	When     string
 	ISO      string
 	Relative string
-}
-
-type stepSummary struct {
-	ID     string
-	Kind   string
-	Target string
-	Notes  []string
 }
 
 type runSummary struct {
@@ -62,16 +55,26 @@ type automationRunView struct {
 	Automation string
 	Run        runSummary
 	Running    bool
-	Steps      []stepRunRow
+	Output     string
+	Truncated  bool
+	SourceHash string
+	Logs       []scriptLogRow
+	Operations []scriptOperationRow
 }
 
-type stepRunRow struct {
-	ID       string
-	Status   string
-	Tone     string
-	Duration string
-	Output   string
-	Error    string
+type scriptLogRow struct {
+	Message string
+	Data    string
+}
+
+type scriptOperationRow struct {
+	Kind      string
+	Target    string
+	Status    string
+	Duration  string
+	Output    string
+	Error     string
+	Truncated bool
 }
 
 type automationRunsView struct {
@@ -132,8 +135,8 @@ func automationCardFor(entry ScheduledAutomation, now time.Time) automationCard 
 	if !entry.NextRun.IsZero() {
 		card.NextRuns = upcomingRuns(automation, entry.NextRun, location, now)
 	}
-	for _, step := range automation.Steps {
-		card.Steps = append(card.Steps, summarizeStep(step))
+	if automation.Script != nil {
+		card.Script = scriptFilename(*automation.Script, automation.Name)
 	}
 	return card
 }
@@ -226,32 +229,6 @@ func describeSchedule(schedule string) string {
 	}
 }
 
-func summarizeStep(step AutomationStep) stepSummary {
-	summary := stepSummary{ID: step.ID}
-	switch {
-	case step.Call != "":
-		summary.Kind, summary.Target = "Calls", step.Call
-	case step.Action != "":
-		summary.Kind, summary.Target = "Runs action", step.Action
-	case step.AI != nil:
-		summary.Kind, summary.Target = "Asks", step.AI.Model
-		if len(step.AI.Tools) > 0 {
-			summary.Notes = append(summary.Notes, "tools "+strings.Join(step.AI.Tools, ", "))
-		}
-	case step.Query != nil:
-		summary.Kind, summary.Target = "Reads", step.Query.Collection
-	case step.Save != nil:
-		summary.Kind, summary.Target = "Saves to", step.Save.Collection
-	}
-	if step.ForEach != "" {
-		summary.Notes = append(summary.Notes, "for each of "+step.ForEach)
-	}
-	if step.If != "" {
-		summary.Notes = append(summary.Notes, "only if "+step.If)
-	}
-	return summary
-}
-
 func summarizeRun(run AutomationRun, now time.Time) runSummary {
 	summary := runSummary{
 		ID: run.ID, Status: run.Status, Trigger: run.Trigger, DryRun: run.DryRun,
@@ -270,7 +247,7 @@ func runTone(status string) string {
 		return "ok"
 	case RunFailed:
 		return "danger"
-	case RunRunning, StepDryRun:
+	case RunRunning, OperationDryRun:
 		return "warning"
 	default:
 		return "muted"
@@ -307,9 +284,9 @@ func (s *Server) manageRunAutomation(w http.ResponseWriter, r *http.Request) {
 	if dryRun {
 		trigger = TriggerTest
 	}
-	run, err := s.startRun(site, stored[index].Automation, trigger, dryRun, identity)
+	run, err := s.startRun(site, stored[index].Automation, stored[index].Revision, trigger, dryRun, identity)
 	if err != nil {
-		writeServerError(w, err)
+		writeAutomationStartError(w, err)
 		return
 	}
 	s.renderFragment(w, "automation-run", runView(site, run))
@@ -332,12 +309,16 @@ func runView(site string, run AutomationRun) automationRunView {
 	view := automationRunView{
 		Site: site, Automation: run.Automation, Run: summarizeRun(run, time.Now()),
 		Running: run.Status == RunRunning,
+		Output:  prettyOutput(run.Output), Truncated: run.Truncated, SourceHash: run.SourceHash,
 	}
-	for _, step := range run.Steps {
-		view.Steps = append(view.Steps, stepRunRow{
-			ID: step.ID, Status: step.Status, Tone: runTone(step.Status),
-			Duration: formatDuration(time.Duration(step.DurationMS) * time.Millisecond),
-			Output:   prettyOutput(step.Output), Error: step.Error,
+	for _, log := range run.Logs {
+		view.Logs = append(view.Logs, scriptLogRow{Message: log.Message, Data: prettyOutput(log.Data)})
+	}
+	for _, operation := range run.Operations {
+		view.Operations = append(view.Operations, scriptOperationRow{
+			Kind: operation.Kind, Target: operation.Target, Status: operation.Status,
+			Duration: formatDuration(time.Duration(operation.DurationMS) * time.Millisecond),
+			Output:   prettyOutput(operation.Output), Error: operation.Error, Truncated: operation.Truncated,
 		})
 	}
 	return view

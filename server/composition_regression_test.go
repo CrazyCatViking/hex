@@ -46,7 +46,7 @@ func TestAutomationAIDryRunCannotWrite(t *testing.T) {
 		IntegrationGrants: []hex.IntegrationGrant{{Principal: "site:demo", Permissions: []string{"ai", "chat.post"}}},
 	})
 	response := requestAs(t, server, roleHeaders("owner"), "POST", "/api/hex/sites/demo/automations/test",
-		[]byte(`{"name":"preview","steps":[{"id":"ai","ai":{"model":"general","prompt":"Post","tools":["chat.post"]}}]}`), 202)
+		[]byte(`{"name":"preview","script":{"source":"export default hex => hex.ai.complete({model:'general',prompt:'Post',tools:['chat.post']});"}}`), 202)
 	var started hex.AutomationRun
 	if err := json.Unmarshal(response.Body.Bytes(), &started); err != nil {
 		t.Fatal(err)

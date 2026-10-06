@@ -79,6 +79,7 @@ type Server struct {
 	analyticsBootstrapped bool
 	integrationCache      responseCache
 	automationRuns        sync.WaitGroup
+	automationSlots       chan struct{}
 }
 
 func New(config Config) *Server {
@@ -107,9 +108,10 @@ func New(config Config) *Server {
 		}
 	}
 	server := &Server{
-		config: config,
-		mux:    http.NewServeMux(),
-		seen:   peopleSeen{entries: make(map[string]seenPerson)},
+		config:          config,
+		mux:             http.NewServeMux(),
+		seen:            peopleSeen{entries: make(map[string]seenPerson)},
+		automationSlots: make(chan struct{}, maxConcurrentRuns),
 	}
 	server.registerRoutes()
 	server.warnAboutUnauditedIntegrations()

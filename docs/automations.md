@@ -1,101 +1,222 @@
 # Automations
 
-Automations let an app run work on a schedule or on demand without deploying server code: a weekly report posted to Slack, birthday greetings, a nightly sync into the app's documents. An automation is JSON — in the app's `hex.json` or one file per automation under `automations/` — listing steps that call integration endpoints, run the site's actions, ask a model and read or save the site's own documents. Templates pass values between steps. App code never runs on the server.
+Every automation is a **JavaScript module** that performs its workflow. JSON
+definitions contain only the metadata Hex needs to identify, schedule and deploy
+that module. Branching, loops, transformations, integration calls, AI requests,
+and document operations are all ordinary JavaScript inside the script.
+
+## Project layout
+
+`automations/weekly-report.json`:
 
 ```json
 {
-  "name": "weekly-sdi-report",
-  "description": "Post last week's defect index to #dev.",
+  "description": "Post a weekly issue report.",
   "schedule": "0 8 * * MON",
   "timezone": "Europe/Oslo",
-  "steps": [
-    { "id": "counts", "call": "sentry.issue-counts", "input": { "statsPeriod": "7d" } },
-    {
-      "id": "summary",
-      "ai": {
-        "model": "claude-opus-5-5",
-        "prompt": "Summarize this week's defects in three bullet points for developers: {{ steps.counts.output | json }}"
-      }
-    },
-    {
-      "id": "post",
-      "if": "steps.counts.output.total | gt(0)",
-      "call": "slack.post-message",
-      "input": { "channel": "#dev", "text": "*SDI week {{ now.week }}*\n{{ steps.summary.output.text }}" }
-    },
-    { "id": "archive", "save": { "collection": "reports", "id": "week-{{ now.weekYear }}-{{ now.week }}", "data": { "counts": "{{ steps.counts.output }}" } } }
-  ]
+  "script": { "file": "weekly-report.js" }
 }
 ```
 
-## Definitions
+`automations/weekly-report.js`:
 
-| Field | Meaning |
-| --- | --- |
-| `name` | Letters, digits, `-` and `_`; unique per site. In `automations/<name>.json` it defaults to the file name |
-| `schedule` | Five-field cron (`minute hour day month weekday`) or `@hourly`, `@daily`, `@weekly`, `@monthly`. Without it the automation only runs when triggered. Schedules may not run more often than every five minutes |
-| `timezone` | IANA time zone for the schedule and `now`, UTC by default |
-| `disabled` | Keeps the automation without scheduling it |
-| `steps` | 1–20 steps, run in order; the run stops at the first failing step |
+```js
+// @ts-check
 
-Each step has an `id` and exactly one action:
+/** @param {import("@crazycatviking/hex/automations").AutomationContext} hex */
+export default async function run(hex) {
+  const issues = await hex.db.query("issues");
+  const minimum = 5;
+  const totals = new Map();
 
-| Step | Does | Output |
-| --- | --- | --- |
-| `call` + `input` | Calls `<integration>.<endpoint>` | The endpoint's result |
-| `action` + `input` | Runs one of the site's [actions](agents.md) as an owner | The action's result |
-| `ai` | `model`, `prompt`, optional `system`, `maxTokens`, `thinking` and `tools` (integration tools) | `{ text, stopReason, usage }` |
-| `query` | Up to `limit` (default 100, max 1000) documents of `collection` whose top-level fields equal every `where` value | `[{ id, data }]` |
-| `save` | Creates a document in `collection`, or replaces the one with `id` | `{ id, collection }` |
+  for (const { data } of issues) {
+    const count = Number(data.count);
+    if (count < minimum) continue;
+    const team = String(data.team ?? "unassigned");
+    totals.set(team, (totals.get(team) ?? 0) + count);
+  }
 
-`if` skips the step when its template is falsy (`false`, `null`, `""`, `0`, empty list or object). `forEach` repeats the step for each item of a list (at most 100), exposing `item` and `index`; the step's output is then the list of outputs.
+  for (const [team, count] of totals) {
+    await hex.call("slack.post-message", {
+      channel: "#reports",
+      text: `${team}: ${count} issues in week ${hex.now.week}`,
+    });
+  }
 
-## Templates
-
-Strings may contain `{{ expression }}`. A string that is exactly one placeholder becomes the expression's JSON value (a number stays a number, a list stays a list); otherwise placeholders are replaced by their text. `if` and `forEach` may omit the braces.
-
-Values: `steps.<id>.output…`, `steps.<id>.status`, `item`, `index`, `site`, `automation`, `run.id`, `run.trigger`, `run.dryRun`, literals (`"text"`, `3`, `true`, `null`), and `now` in the automation's time zone: `iso`, `date`, `time`, `year`, `month`, `day`, `monthDay` (`MM-DD`), `weekday`, `week`, `weekYear`, `yesterday`, `weekStart`, `previousWeekStart`, `previousWeekEnd`, `unix`. Paths support list indexes (`items[0].title`); missing paths are `null`.
-
-Filters, applied left to right with `|`: `length`, `json`, `join(", ")`, `default("x")`, `first`, `last`, `limit(n)`, `upper`, `lower`, `truncate(n)`, `map("field")`, `where("field", value)` (or `where("field")` for truthy), `sum` / `sum("field")`, `round(digits)`, `eq(v)`, `ne(v)`, `gt(n)`, `lt(n)`, `not`, `date("DD.MM.YYYY")`.
-
-```json
-{ "id": "today", "query": { "collection": "people", "where": { "birthday": "{{ now.monthDay }}" } } },
-{ "id": "greet", "forEach": "steps.today.output", "call": "slack.post-message",
-  "input": { "channel": "#general", "text": ":tada: Happy birthday {{ item.data.name }}!" } }
+  hex.log("Report finished", { teams: totals.size });
+  return { teams: totals.size };
+}
 ```
 
-## Identity and permissions
+Metadata can also be declared in the `automations` array of `hex.json`. Both
+sources are combined; duplicate names are rejected. Project metadata must
+reference a `.js` file; script source is supplied by the CLI's deployment payload.
 
-Automations run as their **site**, never as a person. Integration grants name them with `site:<name>` (or `*`); integrations that require approval need the site's approval; connected accounts are unavailable. Within the site they act as an owner: they can run its actions and read and write its documents, which record `createdBy` as `automation:<name>`. The platform admin therefore decides which integrations each site's automations may use, independently of who published them.
+| Metadata | Meaning |
+| --- | --- |
+| `name` | Unique within the site; up to 64 letters, digits, `-` or `_`, starting with a letter or digit. Defaults to the JSON filename under `automations/` |
+| `description` | Optional description shown in the portal; up to 500 characters |
+| `schedule` | Optional five-field cron or descriptor such as `@daily`; no more frequent than every five minutes. Omit for manual-only execution |
+| `timezone` | IANA timezone for scheduling and the run's clock snapshot; UTC by default |
+| `disabled` | Suppresses scheduled execution while keeping the definition; manual/test runs remain available |
+| `script` | Required `{ "file": "path.js" }` reference to the JavaScript module |
 
-## Deploying and testing
+Paths are relative to the JSON definition's directory, or the project root for
+definitions in `hex.json`, and must stay inside that directory. Referenced
+scripts are excluded from static publication files. The CLI reads JavaScript
+without transpiling, bundling or executing it, and includes its source in the
+deployment. Each run uses the deployed source snapshot, not a server file or the
+author's local file.
 
-Publishing sends the project's automations and replaces the site's set (`[]` removes them all). Projects without any automation definitions leave existing ones unchanged. Owners can also manage them without republishing:
+Definitions with `steps`, `if`, `forEach`, templated inputs or other workflow
+fields are rejected. Put that logic in JavaScript. There is no template language
+and no separate declarative workflow runner.
+
+## Editor support
+
+JavaScript is the supported language. Install `@crazycatviking/hex` in the app
+project to get declarations from `@crazycatviking/hex/automations`. JSDoc imports
+provide editor hints without runtime imports; `// @ts-check` enables checking in
+supporting editors. No TypeScript transpilation is involved.
+
+For a dedicated automation `jsconfig.json`, use `checkJs: true`,
+`target: "ES2022"`, `module: "NodeNext"`, `moduleResolution: "NodeNext"`,
+`lib: ["ES2022"]`, and `include: ["automations/**/*.js"]`. Runtime imports,
+package installation and native extensions are unavailable.
+
+## Script API
+
+Export a default function taking `hex`. It can return a JSON value or a promise
+of one; an omitted return becomes `null`. `hex` is also available globally.
+
+The frozen context contains `site`, `automation`, `run` (`id`, `trigger`,
+`dryRun`), and `now`, a snapshot of the run's start time in its timezone:
+`iso`, `date`, `time`, `year`, `month`, `day`, `monthDay`, `weekday`, `week`,
+`weekYear`, `yesterday`, `weekStart`, `previousWeekStart`, `previousWeekEnd`,
+and `unix`. The week fields use ISO weeks and Monday week starts. Script-local
+variables and functions hold all workflow state.
+
+| API | Behavior |
+| --- | --- |
+| `await hex.call("integration.endpoint", input)` | Calls an endpoint with the site's grants and approvals, validating its input and output contracts |
+| `await hex.action("name", input)` | Runs a site action as the automation's owner identity |
+| `await hex.ai.complete({ model, prompt, system?, maxTokens?, thinking?, tools? })` | Uses the shared AI provider, permissions, model restrictions and budgets; returns `{ text, stopReason, usage }` |
+| `await hex.db.query("collection", { where?, limit? })` | Reads this site's documents. Top-level fields must equal every `where` value, including its JSON type. Default limit 100; maximum 1000 |
+| `await hex.db.save("collection", data, { id? })` | Creates a document, or replaces the document with `id`, attributed to the automation |
+| `hex.log("message", data?)` | Records bounded, structured JSON in run history |
+
+`console.log/info/warn/error` also record script logs. API values are JSON. Calls
+execute sequentially, including when collected with `Promise.all`. Errors throw
+JavaScript exceptions that can be handled with `try`/`catch`. An uncaught handler
+error fails the run; completed effects are not rolled back. Strings such as
+`"{{ value }}"` are literal data.
+
+## Identity, isolation and limits
+
+Automations act as their **site**, never as their deployer or the person who
+triggers a run. Integration grants match `site:<name>` or `*`; required site
+approvals are checked on every call. Personal connected accounts are unavailable.
+Within the site, the automation acts as an owner, and documents record its
+identity as `automation:<name>`.
+
+Every run executes in a fresh QuickJS WebAssembly instance. There is no host
+filesystem, server environment, credential access, unrestricted networking,
+process execution, OS module or native Go object access. Hex's Go bridge fixes
+the site, identity and dry-run mode and authorizes external operations. Finer
+restrictions, such as allowed Slack channels, belong in endpoint policy or its
+handler.
+
+- At most 32 automations per site; every one requires a script, even if disabled.
+- Script source: 128 KiB maximum.
+- Guest memory: 64 MiB, including a JavaScript heap capped at 32 MiB and stack at
+  1 MiB.
+- Computation: five seconds per run, excluding authorized host operations. The
+  ten-minute run deadline still applies while waiting on those operations.
+- Script API calls, including logs: 100 per run. AI tools additionally follow the
+  platform's tool-round and token limits.
+- Operation input/output and final return value: 1 MiB maximum; stored output
+  previews are truncated to 16 KiB.
+- Logs: 32 KiB per run.
+- Database scanning: at most 1,000 documents and 4 MiB of document data per run,
+  including nonmatching documents. Providers reject oversized documents before
+  copying their data; query reads fetch one bounded document at a time. Exhausted
+  scan budgets fail the run even if JavaScript catches the operation error.
+- Host operations: 30 seconds per operation, with two minutes of cumulative host
+  work per run. Registered Go handlers must honor cancellation and bound their
+  own result generation. Results are preflighted for size and complexity before
+  JSON encoding; custom result marshalers are unavailable on the automation path
+  except standard `time.Time` and `json.RawMessage` values.
+- Scheduled, manual and test executions share four run slots per server instance.
+  Manual/test starts return HTTP 503 with `Retry-After` when those slots are busy.
+  Compile-only validation has a separate bounded lane so deployment can proceed
+  while execution slots are occupied.
+  At most four validations may be admitted or waiting; additional requests
+  receive HTTP 503. Validation follows HTTP request cancellation.
+
+Dry runs execute JavaScript, reads, queries and AI, but the Go bridge suppresses
+integration writes, actions and saves. These operations still validate inputs
+and permissions and return previews: `{ wouldCall, input }`, `{ wouldRun, input }`,
+or `{ wouldSave, id, data }`. A preview is not the real write's return value;
+use `hex.run.dryRun` when a branch depends on that result.
+
+## Deployment, testing and history
 
 ```sh
-hex automations test weekly-sdi-report     # runs the local definition as a dry run
-hex automations deploy                     # replaces the site's automations
+hex automations test weekly-report       # local script, dry run
+hex automations test weekly-report --live
+hex automations deploy                  # replace metadata and scripts
 hex automations list
-hex automations run weekly-sdi-report      # run now
-hex automations runs weekly-sdi-report
+hex automations run weekly-report        # deployed script, live run
+hex automations run weekly-report --dry-run
+hex automations runs weekly-report
 ```
 
-In the portal, a site's **Automations** tab (owners and admins) shows each automation's schedule in words, its next three runs in its time zone, its steps and its last result, with **Test** (a dry run), **Run now** and the run history, including each step's output. The portal does not edit definitions.
+Publishing deploys the project's definitions and replaces the entire site set.
+An explicit `automations: []`, or an existing empty `automations/` directory,
+removes them. Projects without automation metadata or the directory preserve
+existing deployments. Unpublishing removes future schedules.
 
-**Dry runs** perform reads, queries and AI steps but skip write endpoints, actions and saves, recording the input they would have used. Every run records each step's status, duration, error and output (truncated to 16 KiB); the latest 50 runs per automation are kept. Unpublishing a site removes its automations.
+The owner/admin portal shows each automation's script, schedule, next three
+occurrences and latest result, with **Test**, **Run now** and **History**.
+Definitions are edited in the project, not in the portal.
+
+Run history directly records the script's result, error, logs and host-operation
+trace (kind, target, status, duration and output preview), including operations
+whose errors the script catches. It also records the source SHA-256 and deployed
+definition revision. The latest 50 runs per automation are retained. There are
+no step records; progress is saved at run start and completion.
+Internal provider errors are logged server-side and redacted from script errors
+and history. Human-readable CLI output escapes terminal control characters.
 
 | Method | Path | Result |
 | --- | --- | --- |
-| GET/PUT | `/api/hex/sites/{site}/automations` | Owners: list with next and last run / replace the set |
-| POST | `/api/hex/sites/{site}/automations/test?dryRun=false` | Run the posted definition (dry run by default) → run (202) |
-| POST | `/api/hex/sites/{site}/automations/{name}/run?dryRun=true` | Run a deployed automation now → run (202) |
+| GET/PUT | `/api/hex/sites/{site}/automations` | Owners: list with next/last run, or replace the set |
+| POST | `/api/hex/sites/{site}/automations/test?dryRun=false` | Execute the posted definition; dry-run by default; returns 202 |
+| POST | `/api/hex/sites/{site}/automations/{name}/run?dryRun=true` | Execute a deployed automation; live by default; returns 202 |
 | GET | `/api/hex/sites/{site}/automations/{name}/runs?limit=` | Recent runs, newest first |
-| GET | `/api/hex/sites/{site}/automation-runs/{id}` | One run; poll until `status` is not `running` |
+| GET | `/api/hex/sites/{site}/automation-runs/{id}` | Poll until `status` is not `running` |
+
+API deployment supplies the script source in the definition's `script` object:
+`{ "file": "report.js", "source": "export default () => 42;" }`. `file` is an
+optional diagnostic label on the API; it never causes server-side file access.
 
 ## Scheduling
 
-Hosts call `server.RunBackground(ctx)` once per instance. Every 30 seconds it finds due automations and claims each occurrence atomically in the `AutomationStore`. `ClaimAutomation(ctx, site, name, revision, expectedNextRun, nextRun)` compares both the stored revision and next run before advancing it, so several instances never run the same occurrence twice and a snapshot of an older definition cannot claim a new deployment's occurrence. At most four runs execute concurrently per instance; the scheduler reserves capacity before claiming. A run may take ten minutes. Occurrences missed while no instance was running run once when the scheduler resumes and are not caught up. A run interrupted by a restart stays recorded as `running`.
+Hosts call `server.RunBackground(ctx)` once per instance. The scheduler checks
+immediately, then every 30 seconds, finding up to 20 due automations and reserving
+shared run capacity before claiming each occurrence. Atomic claims compare the
+stored revision and expected `nextRun` before advancing it, so multiple instances
+sharing a store do not admit the same occurrence twice.
 
-Replacing definitions preserves the current stored `nextRun` when `schedule`, `timezone` and `disabled` are unchanged, including a zero next run. The caller proposes next times only for new or changed schedules; preservation happens atomically in the store, after any preceding claim. This prevents a deployment prepared before a scheduler claim from restoring an already claimed occurrence. Changing the steps or description keeps the schedule's place but invalidates pending snapshots through a fresh revision. Every replacement assigns new opaque revisions, including identical redeployments and delete/recreate cycles, so returning to an older definition never restores an older claim token. Runs claimed before a replacement may finish with their claimed definition; replacement does not revoke work already admitted.
+Replacement preserves the authoritative current `nextRun` when `schedule`,
+`timezone` and `disabled` are unchanged, including a zero next run. Script or
+description edits preserve schedule position but assign fresh, non-reusable
+revisions to invalidate stale snapshots. Already claimed work may finish using
+its claimed source. Memory uses a mutex; PostgreSQL serializes replacements and
+claims with a transaction-scoped site advisory lock and row locks.
 
-Custom `AutomationStore` implementations must serialize whole-site replacement with claims, assign non-reusable revisions, preserve unchanged schedules using `hex.SameAutomationSchedule`, and return detached definition snapshots. Comparing only a timestamp, preserving a schedule from a caller's earlier read, or locking only rows that already exist is insufficient. The memory provider uses one mutex; PostgreSQL uses a transaction-scoped site advisory lock plus row locks and reads the authoritative `next_run` column in the replacement transaction. PostgreSQL stores revisions inside the existing JSON entry, so no schema change is needed; legacy entries without a revision can be claimed using their empty revision until their next replacement assigns one. Upgrade custom store implementations and scheduler callers together to the revision-aware claim signature.
+Missed occurrences execute once when scheduling resumes, without replaying every
+missed time. Execution is in-process, with no automatic retry or restart recovery;
+an interrupted persisted run remains `running`. Manual runs do not move the
+schedule, and overlapping runs of the same automation are possible. Shutdown
+stops scheduling and waits for admitted runs to finish.

@@ -253,13 +253,15 @@ func (d *Database) Get(ctx context.Context, site, collection, id string) (hex.Do
 
 func (d *Database) List(ctx context.Context, site, collection string, options hex.ListOptions) ([]hex.Document, error) {
 	const query = `
-		SELECT id, data, created_by FROM hex_documents
+		SELECT id,
+		  CASE WHEN $6 = 0 OR octet_length(data::text) <= $6 THEN data ELSE NULL END,
+		  created_by FROM hex_documents
 		WHERE site = $1 AND collection = $2 AND id > $3
 		AND ($5 = '' OR created_by = $5)
 		ORDER BY id
 		LIMIT $4`
 
-	rows, err := d.pool.Query(ctx, query, site, collection, options.After, options.Limit, options.CreatedBy)
+	rows, err := d.pool.Query(ctx, query, site, collection, options.After, options.Limit, options.CreatedBy, options.MaxDocumentBytes)
 	if err != nil {
 		return nil, fmt.Errorf("list documents in %s/%s: %w", site, collection, err)
 	}
@@ -270,6 +272,9 @@ func (d *Database) List(ctx context.Context, site, collection string, options he
 		var document hex.Document
 		if err := rows.Scan(&document.ID, &document.Data, &document.CreatedBy); err != nil {
 			return nil, fmt.Errorf("decode document row: %w", err)
+		}
+		if document.Data == nil {
+			return nil, hex.ErrDocumentReadLimit
 		}
 		documents = append(documents, document)
 	}

@@ -702,16 +702,9 @@ it.{{end}} {{end}} {{define "person"}}
             >{{$run.When}}</time
           >{{if eq $index 0}} ({{$run.Relative}}){{end}}{{end}}</span
         >
-        {{end}}
-        <ol class="automation-steps">
-          {{range .Steps}}
-          <li>
-            <code>{{.ID}}</code> {{.Kind}} <code>{{.Target}}</code>{{range
-            .Notes}} <span class="muted">· {{.}}</span>{{end}}
-          </li>
-          {{end}}
-        </ol>
-        {{with .LastRun}}
+        {{end}} {{with .Script}}<span class="muted"
+          >JavaScript: <code>{{.}}</code></span
+        >{{end}} {{with .LastRun}}
         <span class="automation-last"
           ><span class="status-dot status-{{.Tone}}" aria-hidden="true"></span>
           Last run {{.Status}}{{if .DryRun}} (test){{end}}
@@ -777,20 +770,34 @@ it.{{end}} {{end}} {{define "person"}}
   </p>
   {{with .Run.Error}}
   <p class="automation-error">{{.}}</p>
-  {{end}} {{if .Steps}}
+  {{end}} {{with .SourceHash}}
+  <p class="muted">Script SHA-256: <code>{{.}}</code></p>
+  {{end}} {{with .Output}}
+  <h4>Result</h4>
+  <pre>{{.}}</pre>
+  {{end}} {{if .Truncated}}
+  <p class="muted">Output truncated.</p>
+  {{end}} {{if .Logs}}
+  <h4>Script logs</h4>
+  {{range .Logs}}
+  <p>{{.Message}}</p>
+  {{with .Data}}
+  <pre>{{.}}</pre>
+  {{end}}{{end}} {{end}} {{if .Operations}}
+  <h4>Script operations</h4>
   <ol class="automation-results">
-    {{range .Steps}}
+    {{range .Operations}}
     <li>
       <details>
         <summary>
-          <span class="status-dot status-{{.Tone}}" aria-hidden="true"></span>
-          <code>{{.ID}}</code> {{.Status}}
-          <span class="muted">{{.Duration}}</span>
+          {{.Kind}} <code>{{.Target}}</code> · {{.Status}} · {{.Duration}}
         </summary>
         {{with .Error}}
         <p class="automation-error">{{.}}</p>
         {{end}} {{with .Output}}
         <pre>{{.}}</pre>
+        {{end}} {{if .Truncated}}
+        <p class="muted">Output truncated.</p>
         {{end}}
       </details>
     </li>

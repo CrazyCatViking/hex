@@ -79,13 +79,22 @@ func (d *Database) List(ctx context.Context, site, collection string, options he
 
 	var ids []string
 	for key, stored := range d.documents {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if key.site != site || key.collection != collection || key.id <= options.After {
 			continue
 		}
 		if options.CreatedBy != "" && stored.createdBy != options.CreatedBy {
 			continue
 		}
-		ids = append(ids, key.id)
+		if len(ids) < options.Limit {
+			ids = append(ids, key.id)
+			slices.Sort(ids)
+		} else if len(ids) > 0 && key.id < ids[len(ids)-1] {
+			ids[len(ids)-1] = key.id
+			slices.Sort(ids)
+		}
 	}
 
 	slices.Sort(ids)
@@ -96,6 +105,9 @@ func (d *Database) List(ctx context.Context, site, collection string, options he
 	documents := make([]hex.Document, 0, len(ids))
 	for _, id := range ids {
 		stored := d.documents[documentKey{site: site, collection: collection, id: id}]
+		if options.MaxDocumentBytes > 0 && len(stored.data) > options.MaxDocumentBytes {
+			return nil, hex.ErrDocumentReadLimit
+		}
 		documents = append(documents, hex.Document{
 			ID:        id,
 			Data:      slices.Clone(stored.data),

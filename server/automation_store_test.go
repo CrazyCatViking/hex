@@ -3,7 +3,6 @@ package hex_test
 import (
 	"context"
 	"crypto/rand"
-	"encoding/json"
 	"os"
 	"sync"
 	"testing"
@@ -70,9 +69,7 @@ func TestAutomationStoreReplacementAndClaims(t *testing.T) {
 func automationStoreFixture(site string) hex.ScheduledAutomation {
 	return hex.ScheduledAutomation{
 		Site: site, NextRun: time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC),
-		Automation: hex.Automation{Name: "report", Schedule: "@daily", Steps: []hex.AutomationStep{
-			{ID: "save", Save: &hex.AutomationSave{Collection: "reports", Data: json.RawMessage(`{"version":"A"}`)}},
-		}},
+		Automation: hex.Automation{Name: "report", Schedule: "@daily", Script: &hex.AutomationScript{Source: `export default () => ({version:"A"});`}},
 	}
 }
 
@@ -139,7 +136,7 @@ func testAutomationReplacementBeforeClaim(t *testing.T, ctx context.Context, sto
 	replaceStoredAutomation(t, ctx, store, site, automationStoreFixture(site))
 	stale := storedAutomation(t, ctx, store, site)
 	changed := automationStoreFixture(site)
-	changed.Automation.Steps[0].Save.Data = json.RawMessage(`{"version":"B"}`)
+	changed.Automation.Script.Source = `export default () => ({version:"B"});`
 	changed.NextRun = stale.NextRun.Add(24 * time.Hour)
 	// Keep the schedule, change the executable definition, then let the
 	// scheduler try the snapshot it obtained before the replacement.
@@ -206,9 +203,9 @@ func testAutomationScheduleChanges(t *testing.T, ctx context.Context, store hex.
 func testAutomationDefinitionSnapshots(t *testing.T, ctx context.Context, store hex.AutomationStore, site string) {
 	input := automationStoreFixture(site)
 	replaceStoredAutomation(t, ctx, store, site, input)
-	input.Automation.Steps[0].Save.Data = json.RawMessage(`{"version":"mutated input"}`)
+	input.Automation.Script.Source = `export default () => "mutated input";`
 	listed := storedAutomation(t, ctx, store, site)
-	listed.Automation.Steps[0].Save.Data = json.RawMessage(`{"version":"mutated listing"}`)
+	listed.Automation.Script.Source = `export default () => "mutated listing";`
 	due, err := store.DueAutomations(ctx, input.NextRun, 10000)
 	if err != nil {
 		t.Fatal(err)
@@ -217,16 +214,15 @@ func testAutomationDefinitionSnapshots(t *testing.T, ctx context.Context, store 
 	for _, entry := range due {
 		if entry.Site == site {
 			found = true
-			entry.Automation.Steps[0].Save.Data = json.RawMessage(`{"version":"mutated due snapshot"}`)
+			entry.Automation.Script.Source = `export default () => "mutated due snapshot";`
 		}
 	}
 	if !found {
 		t.Fatal("the automation did not appear in due snapshots")
 	}
 	current := storedAutomation(t, ctx, store, site)
-	var data map[string]string
-	if err := json.Unmarshal(current.Automation.Steps[0].Save.Data, &data); err != nil || data["version"] != "A" {
-		t.Fatalf("a detached snapshot changed the stored definition: %+v %v", current, err)
+	if current.Automation.Script.Source != automationStoreFixture(site).Automation.Script.Source {
+		t.Fatalf("a detached snapshot changed the stored definition: %+v", current)
 	}
 }
 

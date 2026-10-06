@@ -1979,7 +1979,6 @@ textarea:focus {
 .automation-list .action-main {
   gap: 4px;
 }
-.automation-steps,
 .automation-results {
   margin: 4px 0;
   padding-left: 20px;

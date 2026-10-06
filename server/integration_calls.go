@@ -328,7 +328,7 @@ func (s *Server) runIntegrationHandler(ctx context.Context, call IntegrationCall
 		return nil, err
 	}
 
-	output, err := json.Marshal(result)
+	output, err := marshalHostResult(callContext, result)
 	if err != nil {
 		return nil, fmt.Errorf("encode %s result: %w", endpoint.qualifiedName(), err)
 	}

@@ -145,7 +145,7 @@ A platform can register **integrations** — typed endpoints over third-party sy
 
 The **AI** capability streams model responses — text, thinking and tool calls — through `hex.ai.stream(...)` and `hex.ai.conversation(...)`, with the platform's provider (Azure AI Foundry, Anthropic or OpenAI-compatible). Models can use integration endpoints as tools, run on the server with the caller's own grants. See [AI](docs/ai.md).
 
-**Automations** are JSON definitions in an app's hex.json or `automations/` directory that run on a schedule or on demand: they call integration endpoints, run the site's actions, ask a model, and read or save the site's documents, passing values between steps with templates. They run as the site, with grants of their own. See [Automations](docs/automations.md).
+**Automations** are required JavaScript modules that run on a schedule or on demand. JSON definitions in an app's hex.json or `automations/` directory contain only metadata and a script reference; all workflow logic lives in JavaScript. Scripts run in isolated QuickJS WebAssembly instances and access integrations, actions, AI and the site's documents only through authorized Hex APIs. Editor types are available from `@crazycatviking/hex/automations`; no TypeScript transpilation is involved. Automations run as the site, with grants of their own. See [Automations](docs/automations.md).
 
 ```sh
 hex integrations list --site my-app

@@ -42,7 +42,18 @@ func run() error {
 	environment.Config.Actions = actions
 
 	mux := http.NewServeMux()
-	mux.Handle("/", hex.New(environment.Config))
+	platform := hex.New(environment.Config)
+	background, cancelBackground := context.WithCancel(ctx)
+	backgroundDone := make(chan struct{})
+	go func() {
+		platform.RunBackground(background)
+		close(backgroundDone)
+	}()
+	defer func() {
+		cancelBackground()
+		<-backgroundDone
+	}()
+	mux.Handle("/", platform)
 	mux.HandleFunc("GET /api/platform", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if _, err := w.Write([]byte(`{"name":"custom-server"}`)); err != nil {

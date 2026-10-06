@@ -100,16 +100,34 @@ func TestIntegrationStoreAgainstPostgres(t *testing.T) {
 	}
 }
 
+func TestBoundedDocumentReadAgainstPostgres(t *testing.T) {
+	database, ctx := openTestDatabase(t)
+	site := "read-limit-" + rand.Text()
+	if _, err := database.Put(ctx, site, "values", "one", json.RawMessage(`{"value":"larger than the budget"}`), hex.WriteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := database.Delete(ctx, site, "values", "one", hex.WriteOptions{}); err != nil {
+			t.Error(err)
+		}
+	})
+	if _, err := database.List(ctx, site, "values", hex.ListOptions{Limit: 1, MaxDocumentBytes: 8}); !errors.Is(err, hex.ErrDocumentReadLimit) {
+		t.Fatalf("read limit not enforced: %v", err)
+	}
+	page, err := database.List(ctx, site, "values", hex.ListOptions{Limit: 1, MaxDocumentBytes: 1024})
+	if err != nil || len(page) != 1 {
+		t.Fatalf("bounded read failed: %+v %v", page, err)
+	}
+}
+
 func TestAutomationStoreAgainstPostgres(t *testing.T) {
 	database, ctx := openTestDatabase(t)
 	site := "test-" + rand.Text()
 	due := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
-	automation := hex.Automation{Name: "report", Schedule: "@daily", Steps: []hex.AutomationStep{
-		{ID: "a", Query: &hex.AutomationQuery{Collection: "people"}},
-	}}
+	automation := hex.Automation{Name: "report", Schedule: "@daily", Script: &hex.AutomationScript{Source: `export default hex => hex.db.query("people");`}}
 	if err := database.ReplaceSiteAutomations(ctx, site, []hex.ScheduledAutomation{
 		{Site: site, Automation: automation, NextRun: due},
-		{Site: site, Automation: hex.Automation{Name: "manual", Steps: automation.Steps}},
+		{Site: site, Automation: hex.Automation{Name: "manual", Script: automation.Script}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +174,7 @@ func TestAutomationStoreAgainstPostgres(t *testing.T) {
 	for index := range 55 {
 		run := hex.AutomationRun{
 			ID: rand.Text(), Site: site, Automation: "report", Status: hex.RunSucceeded,
-			StartedAt: time.Now().UTC().Add(time.Duration(index) * time.Second), Steps: []hex.AutomationStepRun{},
+			StartedAt: time.Now().UTC().Add(time.Duration(index) * time.Second), Output: json.RawMessage(`{"count":1}`),
 		}
 		if err := database.RecordAutomationRun(ctx, run); err != nil {
 			t.Fatal(err)

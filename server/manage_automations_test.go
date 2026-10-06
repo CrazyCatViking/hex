@@ -22,7 +22,7 @@ func TestPortalShowsAndTestsAutomations(t *testing.T) {
 	}
 
 	listing := requestAs(t, server, owner, "GET", "/api/hex/manage/sites/demo/automations", nil, 200).Body.String()
-	for _, expected := range []string{"weekly-report", "Every Monday at 08:00", "Europe/Oslo", "Next:", "defects.counts", "only if", "Saves to"} {
+	for _, expected := range []string{"weekly-report", "Every Monday at 08:00", "Europe/Oslo", "Next:", "JavaScript:", "weekly-report.js"} {
 		if !strings.Contains(listing, expected) {
 			t.Fatalf("the listing lacks %q: %s", expected, listing)
 		}

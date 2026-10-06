@@ -99,7 +99,7 @@ type Project struct {
 	// Actions are operations the app exposes to the CLI and agents, performed
 	// by the platform on the app's documents. The platform validates them.
 	Actions json.RawMessage `json:"actions,omitempty"`
-	// Automations are scheduled or on-demand step lists the platform runs
+	// Automations are metadata for scheduled or on-demand JavaScript scripts run
 	// as the site; more can live one per file in automations/*.json.
 	Automations json.RawMessage `json:"automations,omitempty"`
 	// automations is what publishing sends: nil when the project defines

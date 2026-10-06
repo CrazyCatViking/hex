@@ -15,6 +15,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./automations": {
+      "types": "./dist/automations.d.ts",
+      "import": "./dist/automations.js"
     }
   },
   "files": [

@@ -51,21 +51,6 @@ func actionExecutionServer(t *testing.T, handler func(context.Context, hex.Actio
 	}), database
 }
 
-func runActionAutomation(t *testing.T, server *hex.Server, steps []hex.AutomationStep, dryRun bool) hex.AutomationRun {
-	t.Helper()
-	definition, err := json.Marshal(hex.Automation{Name: "action-contract", Steps: steps})
-	if err != nil {
-		t.Fatal(err)
-	}
-	response := requestAs(t, server, roleHeaders("owner"), http.MethodPost,
-		fmt.Sprintf("/api/hex/sites/demo/automations/test?dryRun=%t", dryRun), definition, http.StatusAccepted)
-	var started hex.AutomationRun
-	if err := json.Unmarshal(response.Body.Bytes(), &started); err != nil {
-		t.Fatal(err)
-	}
-	return waitForRun(t, server, "/api/hex/sites/demo/automation-runs/"+started.ID)
-}
-
 type failingActionResult struct {
 	err error
 }
@@ -113,24 +98,22 @@ func TestSharedActionExecutionTransportContracts(t *testing.T) {
 			})
 			response := requestAs(t, server, roleHeaders("editor"), http.MethodPost,
 				"/api/sites/demo/actions/check", []byte(`{"value":"valid"}`), test.httpStatus)
-			run := runActionAutomation(t, server, []hex.AutomationStep{{
-				ID: "invoke", Action: "check", Input: json.RawMessage(`{"value":"valid"}`),
-			}}, false)
+			run := runScriptAutomation(t, server, `export default hex => hex.action("check", {value:"valid"});`, false)
 			if calls.Load() != 2 {
 				t.Fatalf("expected one HTTP and one automation invocation, got %d", calls.Load())
 			}
-			if len(run.Steps) != 1 {
-				t.Fatalf("unexpected action steps: %+v", run)
+			if len(run.Operations) != 1 {
+				t.Fatalf("unexpected action operations: %+v", run)
 			}
 			if test.runError == "" {
-				if run.Status != hex.RunSucceeded || run.Steps[0].Status != hex.StepSucceeded || string(run.Steps[0].Output) != `{"ok":true}` {
+				if run.Status != hex.RunSucceeded || run.Operations[0].Status != hex.OperationSucceeded || string(run.Output) != `{"ok":true}` {
 					t.Fatalf("valid automation output disagrees with HTTP: %+v", run)
 				}
 				var output map[string]bool
 				if err := json.Unmarshal(response.Body.Bytes(), &output); err != nil || !output["ok"] {
 					t.Fatalf("invalid HTTP output: %s, %v", response.Body.String(), err)
 				}
-			} else if run.Status != hex.RunFailed || run.Steps[0].Status != hex.StepFailed || run.Steps[0].Error != test.runError {
+			} else if run.Status != hex.RunFailed || run.Operations[0].Status != hex.OperationFailed || run.Operations[0].Error != test.runError {
 				t.Fatalf("automation did not enforce the action contract or map its error: %+v", run)
 			}
 			if strings.Contains(response.Body.String(), "private") || strings.Contains(run.Error, "private") {
@@ -143,7 +126,7 @@ func TestSharedActionExecutionTransportContracts(t *testing.T) {
 	}
 }
 
-func TestSharedActionExecutionRejectsOversizedRenderedInput(t *testing.T) {
+func TestSharedActionExecutionRejectsOversizedScriptInput(t *testing.T) {
 	for _, dryRun := range []bool{false, true} {
 		t.Run(fmt.Sprintf("dryRun=%t", dryRun), func(t *testing.T) {
 			var calls atomic.Int32
@@ -165,15 +148,15 @@ func TestSharedActionExecutionRejectsOversizedRenderedInput(t *testing.T) {
 			}
 			requestAs(t, server, roleHeaders("editor"), http.MethodPost,
 				"/api/sites/demo/actions/check", input, http.StatusBadRequest)
-			run := runActionAutomation(t, server, []hex.AutomationStep{
-				{ID: "source", Query: &hex.AutomationQuery{Collection: "source", Limit: 1}},
-				{ID: "invoke", Action: "check", Input: json.RawMessage(`{"value":"{{ steps.source.output[0].data.value }}{{ steps.source.output[0].data.value }}"}`)},
-			}, dryRun)
+			run := runScriptAutomation(t, server, `export default async hex => {
+			  const source = await hex.db.query("source", {limit:1});
+			  return await hex.action("check", {value:source[0].data.value.repeat(2)});
+			}`, dryRun)
 			if calls.Load() != 0 {
 				t.Fatal("oversized action input invoked the handler")
 			}
-			if run.Status != hex.RunFailed || len(run.Steps) != 2 || run.Steps[0].Status != hex.StepSucceeded || run.Steps[1].Status != hex.StepFailed || !strings.Contains(run.Steps[1].Error, "action input exceeds 1 MiB") {
-				t.Fatalf("oversized template expansion was not rejected: %+v", run)
+			if run.Status != hex.RunFailed || !strings.Contains(run.Error, "input exceeds") {
+				t.Fatalf("oversized script input was not rejected: %+v", run)
 			}
 		})
 	}
@@ -189,22 +172,22 @@ func TestSharedActionExecutionValidatesDryRunInputWithoutInvocation(t *testing.T
 		requestAs(t, server, roleHeaders("editor"), http.MethodPost,
 			"/api/sites/demo/actions/check", []byte(input), http.StatusBadRequest)
 		for _, dryRun := range []bool{false, true} {
-			run := runActionAutomation(t, server, []hex.AutomationStep{{ID: "invoke", Action: "check", Input: json.RawMessage(input)}}, dryRun)
+			run := runScriptAutomation(t, server, "export default hex => hex.action('check', "+input+");", dryRun)
 			if run.Status != hex.RunFailed || !strings.Contains(run.Error, "invalid input for action check") {
 				t.Fatalf("invalid action input passed validation (dryRun=%t): %+v", dryRun, run)
 			}
 		}
 	}
-	run := runActionAutomation(t, server, []hex.AutomationStep{{ID: "invoke", Action: "check", Input: json.RawMessage(`{"value":"valid"}`)}}, true)
-	if run.Status != hex.RunSucceeded || len(run.Steps) != 1 || run.Steps[0].Status != hex.StepDryRun {
+	run := runScriptAutomation(t, server, `export default hex => hex.action("check", {value:"valid"});`, true)
+	if run.Status != hex.RunSucceeded || len(run.Operations) != 1 || run.Operations[0].Status != hex.OperationDryRun {
 		t.Fatalf("valid dry run did not return a preview: %+v", run)
 	}
 	var preview struct {
 		WouldRun string            `json:"wouldRun"`
 		Input    map[string]string `json:"input"`
 	}
-	if err := json.Unmarshal(run.Steps[0].Output, &preview); err != nil || preview.WouldRun != "check" || preview.Input["value"] != "valid" {
-		t.Fatalf("incorrect action preview: %s, %v", run.Steps[0].Output, err)
+	if err := json.Unmarshal(run.Output, &preview); err != nil || preview.WouldRun != "check" || preview.Input["value"] != "valid" {
+		t.Fatalf("incorrect action preview: %s, %v", run.Output, err)
 	}
 	if calls.Load() != 0 {
 		t.Fatal("invalid inputs or a valid dry run invoked the action handler")
@@ -234,10 +217,19 @@ func TestSharedActionExecutionAcceptsInputAtSizeLimit(t *testing.T) {
 	}
 	requestAs(t, server, roleHeaders("editor"), http.MethodPost,
 		"/api/sites/demo/actions/check", input, http.StatusOK)
-	run := runActionAutomation(t, server, []hex.AutomationStep{
-		{ID: "source", Query: &hex.AutomationQuery{Collection: "source", Limit: 1}},
-		{ID: "invoke", Action: "check", Input: json.RawMessage(`{"value":"{{ steps.source.output[0].data.value }}{{ steps.source.output[0].data.value }}"}`)},
-	}, false)
+	// The bridge also caps its complete request envelope at 1 MiB.
+	bridgeValue := strings.Repeat("x", (hex.MaxActionInputBytes-len(`{"name":"check","input":{"value":""}}`))/2)
+	bridgeDocument, err := json.Marshal(map[string]string{"value": bridgeValue})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Put(t.Context(), "demo", "source", "one", bridgeDocument, hex.WriteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	run := runScriptAutomation(t, server, `export default async hex => {
+	  const source = await hex.db.query("source", {limit:1});
+	  return await hex.action("check", {value:source[0].data.value.repeat(2)+"x"});
+	}`, false)
 	if run.Status != hex.RunSucceeded || calls.Load() != 2 {
 		t.Fatalf("input at the limit was rejected: calls %d, run %+v", calls.Load(), run)
 	}

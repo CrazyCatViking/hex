@@ -1,0 +1,83 @@
+The embedded engine also links runtime code from WASI SDK 27. QuickJS-NG's
+license is in LICENSE in this directory. Additional runtime notices follow.
+
+WASI libc
+---------
+https://github.com/WebAssembly/wasi-libc
+
+WASI libc is multi-licensed under Apache-2.0 WITH LLVM-exception, Apache-2.0,
+and MIT. The MIT option is used here. Its musl and Cloudlibc components retain
+the notices below. The dlmalloc component is dedicated to the public domain
+under CC0; see dlmalloc/malloc.c in the upstream source.
+
+musl
+----
+Copyright © 2005-2020 Rich Felker, et al.
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+The above MIT terms also cover WASI libc's original contributions. Upstream
+musl author attribution and file-level notices are available at:
+https://github.com/WebAssembly/wasi-libc/blob/main/libc-top-half/musl/COPYRIGHT
+
+Math-library portions additionally include work attributed to:
+Copyright © 1993,2004 Sun Microsystems
+Copyright © 2003-2011 David Schultz
+Copyright © 2003-2009 Steven G. Kargl
+Copyright © 2003-2009 Bruce D. Evans
+Copyright © 2008 Stephen L. Moshier
+Copyright © 2017-2018 Arm Limited
+
+Sun Microsystems' notice permits use, copying, modification and distribution
+of its software freely, provided that its notice is preserved.
+
+Cloudlibc
+---------
+Copyright (c) 2015-2017 Nuxi (https://nuxi.nl/) and contributors.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+1. Redistributions of source code must retain the above copyright
+   notice, this list of conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright
+   notice, this list of conditions and the following disclaimer in the
+   documentation and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+SUCH DAMAGE.
+
+LLVM compiler runtime
+---------------------
+https://github.com/llvm/llvm-project/blob/llvmorg-20.1.0/compiler-rt/LICENSE.TXT
+
+LLVM compiler-rt is licensed under Apache-2.0 WITH LLVM-exception. Its exception
+permits redistribution of runtime portions embedded in compiled object code
+without the conditions of Sections 4(a), 4(b), and 4(d). The LLVM source and
+complete license are available at the upstream URL above.

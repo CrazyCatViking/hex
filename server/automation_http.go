@@ -1,8 +1,10 @@
 package hex
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -10,6 +12,26 @@ import (
 	"strconv"
 	"time"
 )
+
+var errAutomationBusy = errors.New("all automation run slots are busy; try again shortly")
+
+func writeAutomationStartError(w http.ResponseWriter, err error) {
+	if errors.Is(err, errAutomationBusy) {
+		w.Header().Set("Retry-After", "30")
+		writeError(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	writeServerError(w, err)
+}
+
+func writeAutomationValidationError(w http.ResponseWriter, err error) {
+	if errors.Is(err, ErrAutomationValidationBusy) {
+		w.Header().Set("Retry-After", "5")
+		writeError(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	writeError(w, http.StatusBadRequest, err.Error())
+}
 
 const (
 	schedulerInterval      = 30 * time.Second
@@ -99,8 +121,8 @@ func (s *Server) putAutomations(w http.ResponseWriter, r *http.Request) {
 	if !readAutomationBody(w, r, &automations) {
 		return
 	}
-	if err := ValidateAutomations(automations); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+	if err := ValidateAutomationsContext(r.Context(), automations); err != nil {
+		writeAutomationValidationError(w, err)
 		return
 	}
 	if err := s.replaceAutomations(r.Context(), site, automations, identity); err != nil {
@@ -117,11 +139,23 @@ func readAutomationBody(w http.ResponseWriter, r *http.Request, value any) bool 
 		writeError(w, http.StatusRequestEntityTooLarge, "automation definitions are limited to 1 MiB")
 		return false
 	}
-	if err := json.Unmarshal(data, value); err != nil {
+	if err := decodeAutomationJSON(data, value); err != nil {
 		writeError(w, http.StatusBadRequest, "expected JSON automation definitions: "+err.Error())
 		return false
 	}
 	return true
+}
+
+func decodeAutomationJSON(data []byte, value any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(value); err != nil {
+		return err
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return errors.New("expected one JSON value")
+	}
+	return nil
 }
 
 // testAutomation runs a definition sent in the request, by default as a dry
@@ -135,14 +169,14 @@ func (s *Server) testAutomation(w http.ResponseWriter, r *http.Request) {
 	if !readAutomationBody(w, r, &automation) {
 		return
 	}
-	if err := validateAutomation(automation); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+	if err := validateAutomationContext(r.Context(), automation); err != nil {
+		writeAutomationValidationError(w, err)
 		return
 	}
 	dryRun := r.URL.Query().Get("dryRun") != "false"
-	run, err := s.startRun(site, automation, TriggerTest, dryRun, identity)
+	run, err := s.startRun(site, automation, "", TriggerTest, dryRun, identity)
 	if err != nil {
-		writeServerError(w, err)
+		writeAutomationStartError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, run)
@@ -166,9 +200,9 @@ func (s *Server) triggerAutomation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dryRun := r.URL.Query().Get("dryRun") == "true"
-	run, err := s.startRun(site, automations[index].Automation, TriggerManual, dryRun, identity)
+	run, err := s.startRun(site, automations[index].Automation, automations[index].Revision, TriggerManual, dryRun, identity)
 	if err != nil {
-		writeServerError(w, err)
+		writeAutomationStartError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, run)
@@ -176,21 +210,27 @@ func (s *Server) triggerAutomation(w http.ResponseWriter, r *http.Request) {
 
 // startRun records a running run and performs it in the background, so
 // long runs outlive the request; callers poll the run.
-func (s *Server) startRun(site string, automation Automation, trigger string, dryRun bool, identity *Identity) (AutomationRun, error) {
+func (s *Server) startRun(site string, automation Automation, revision, trigger string, dryRun bool, identity *Identity) (AutomationRun, error) {
 	id, err := newID()
 	if err != nil {
 		return AutomationRun{}, err
 	}
+	select {
+	case s.automationSlots <- struct{}{}:
+	default:
+		return AutomationRun{}, errAutomationBusy
+	}
 	run := AutomationRun{
 		ID: id, Site: site, Automation: automation.Name, Trigger: trigger, DryRun: dryRun,
 		Status: RunRunning, StartedAt: time.Now().UTC(), StartedBy: personOf(identity),
-		Steps: []AutomationStepRun{},
+		Revision: revision,
 	}
 	s.recordRun(run)
 	started := run
 	s.automationRuns.Add(1)
 	go func() {
 		defer s.automationRuns.Done()
+		defer func() { <-s.automationSlots }()
 		s.runAutomation(context.Background(), site, automation, &run)
 	}()
 	return started, nil
@@ -237,7 +277,7 @@ func (s *Server) getAutomationRun(w http.ResponseWriter, r *http.Request) {
 // during a restart, run once and are not caught up.
 func (s *Server) runAutomationScheduler(ctx context.Context) {
 	defer s.automationRuns.Wait()
-	slots := make(chan struct{}, maxConcurrentRuns)
+	slots := s.automationSlots
 	ticker := time.NewTicker(schedulerInterval)
 	defer ticker.Stop()
 	for {
@@ -293,7 +333,8 @@ func (s *Server) startScheduledRun(entry ScheduledAutomation, slots chan struct{
 	}
 	run := AutomationRun{
 		ID: id, Site: entry.Site, Automation: entry.Automation.Name, Trigger: TriggerSchedule,
-		Status: RunRunning, StartedAt: time.Now().UTC(), Steps: []AutomationStepRun{},
+		Status: RunRunning, StartedAt: time.Now().UTC(),
+		Revision: entry.Revision,
 	}
 	s.recordRun(run)
 	s.automationRuns.Add(1)
