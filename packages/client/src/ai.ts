@@ -11,7 +11,8 @@ export interface AIModel {
   images: boolean;
   contextTokens?: number;
   maxOutputTokens?: number;
-  permission?: string;
+  /** Only on sites a platform admin has enabled it for. */
+  restricted?: boolean;
 }
 
 /**

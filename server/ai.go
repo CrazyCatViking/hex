@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -18,10 +19,10 @@ import (
 // offered to the model as tools: the server runs them with the caller's own
 // grants, so a model never sees more than the person could.
 
-// AIModel describes a model apps can choose. Permission defaults to "ai";
-// expensive models can require a narrower permission granted through
-// Config.IntegrationGrants. Price is needed to count the model's spending
-// against budgets.
+// AIModel describes a model apps can choose. A Restricted model, such as an
+// expensive one, works only on sites a platform admin has enabled it for;
+// everyone on such a site, and its automations, may use it. Price is needed
+// to count the model's spending against budgets.
 type AIModel struct {
 	ID              string   `json:"id"`
 	Name            string   `json:"name"`
@@ -31,7 +32,7 @@ type AIModel struct {
 	Images          bool     `json:"images"`
 	ContextTokens   int      `json:"contextTokens,omitempty"`
 	MaxOutputTokens int      `json:"maxOutputTokens,omitempty"`
-	Permission      string   `json:"permission,omitempty"`
+	Restricted      bool     `json:"restricted,omitempty"`
 	Price           *AIPrice `json:"price,omitempty"`
 }
 
@@ -204,13 +205,6 @@ func (c *AIConfig) maxToolRounds() int {
 	return c.MaxToolRounds
 }
 
-func modelPermission(model AIModel) string {
-	if model.Permission == "" {
-		return "ai"
-	}
-	return model.Permission
-}
-
 // AIError is a request problem the app should see, such as an unknown model.
 type AIError struct {
 	Status  int
@@ -240,22 +234,29 @@ func (s *Server) aiEnabled() bool {
 	return s.config.AI != nil && s.config.AI.Provider != nil
 }
 
-// availableModels lists the provider's models the caller may use.
-func (s *Server) availableModels(ctx context.Context, caller integrationCaller) ([]AIModel, error) {
+// availableModels lists the provider's models the caller may use on its
+// site, and the restricted models the site is not enabled for.
+func (s *Server) availableModels(ctx context.Context, caller integrationCaller) (allowed, blocked []AIModel, err error) {
 	models, err := s.config.AI.Provider.Models(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("list AI models: %w", err)
+		return nil, nil, fmt.Errorf("list AI models: %w", err)
 	}
 	if !s.granted(caller, s.config.AI.permission()) {
-		return []AIModel{}, nil
+		return []AIModel{}, nil, nil
 	}
-	allowed := make([]AIModel, 0, len(models))
+	enabled, err := s.siteRestrictedModels(ctx, caller.site)
+	if err != nil {
+		return nil, nil, err
+	}
+	allowed = make([]AIModel, 0, len(models))
 	for _, model := range models {
-		if s.granted(caller, modelPermission(model)) {
-			allowed = append(allowed, model)
+		if model.Restricted && !slices.Contains(enabled, model.ID) {
+			blocked = append(blocked, model)
+			continue
 		}
+		allowed = append(allowed, model)
 	}
-	return allowed, nil
+	return allowed, blocked, nil
 }
 
 // serverTool maps a tool name offered to the model back to its endpoint.
@@ -274,7 +275,7 @@ func (s *Server) prepareAIRequest(ctx context.Context, caller integrationCaller,
 		return AIRequest{}, nil, err
 	}
 
-	models, err := s.availableModels(ctx, caller)
+	models, blocked, err := s.availableModels(ctx, caller)
 	if err != nil {
 		return AIRequest{}, nil, err
 	}
@@ -282,6 +283,11 @@ func (s *Server) prepareAIRequest(ctx context.Context, caller integrationCaller,
 	for index := range models {
 		if models[index].ID == request.Model {
 			model = &models[index]
+		}
+	}
+	for _, restricted := range blocked {
+		if restricted.ID == request.Model {
+			return AIRequest{}, nil, &AIError{Status: 403, Message: fmt.Sprintf("%s is not enabled for this site; a platform admin can enable it in the site's AI tab", restricted.Name)}
 		}
 	}
 	if model == nil {

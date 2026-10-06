@@ -89,8 +89,9 @@ const (
 // AIBudget is one stored budget. Scopes:
 //   - platform: every model call on the platform
 //   - site-default: each site without its own limit
-//   - site: one site (Subject); a nil Limit uses the default, and Disabled
-//     turns AI off for the site
+//   - site: one site (Subject); a nil Limit uses the default, Disabled
+//     turns AI off for the site and Models lists the restricted models
+//     enabled for it
 //   - person-default: each person without an override
 //   - person: people matching the principal in Subject (user:, group: or
 //     role:); the highest matching override applies
@@ -101,6 +102,7 @@ type AIBudget struct {
 	Subject     string    `json:"subject,omitempty"`
 	LimitMicros *int64    `json:"limitMicros"`
 	Disabled    bool      `json:"disabled,omitempty"`
+	Models      []string  `json:"models,omitempty"`
 	UpdatedBy   *Person   `json:"updatedBy,omitempty"`
 	UpdatedAt   time.Time `json:"updatedAt"`
 }
@@ -221,6 +223,19 @@ func (b aiBudgets) personLimit(identity *Identity) *int64 {
 		return best
 	}
 	return b.personDefault
+}
+
+// siteRestrictedModels lists the restricted models enabled for a site. They
+// are stored with its budget, so without Config.AIUsage none are enabled.
+func (s *Server) siteRestrictedModels(ctx context.Context, site string) ([]string, error) {
+	if !s.aiAccountingEnabled() {
+		return nil, nil
+	}
+	budgets, err := s.loadAIBudgets(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return budgets.sites[site].Models, nil
 }
 
 type budgetCheck struct {

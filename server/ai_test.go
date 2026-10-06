@@ -26,7 +26,7 @@ type scriptedProvider struct {
 func (p *scriptedProvider) Models(context.Context) ([]hex.AIModel, error) {
 	return []hex.AIModel{
 		{ID: "general", Name: "General", Thinking: true, Tools: true, MaxOutputTokens: 4000, Price: &hex.AIPrice{Input: 1, Output: 5}},
-		{ID: "premium", Name: "Premium", Tools: true, Permission: "ai.premium"},
+		{ID: "premium", Name: "Premium", Tools: true, Restricted: true},
 	}, nil
 }
 
@@ -95,7 +95,6 @@ func setupAI(t *testing.T, provider hex.AIProvider, limits hex.AILimits) (*hex.S
 		Integrations: registry, IntegrationStore: memory.NewIntegrationStore(),
 		IntegrationGrants: []hex.IntegrationGrant{
 			{Principal: "*", Permissions: []string{"ai", "crm.deals"}},
-			{Principal: "role:Premium", Permissions: []string{"ai.premium"}},
 		},
 		AI:      &hex.AIConfig{Provider: provider, MaxToolRounds: 3, Limits: limits},
 		AIUsage: usage,
@@ -248,7 +247,37 @@ func TestAIReturnsAppToolsAndEnforcesLimits(t *testing.T) {
 
 	requestAs(t, server, person, "POST", "/api/sites/demo/ai/complete", []byte(body), 429)
 	requestAs(t, server, roleHeaders("other"), "POST", "/api/sites/demo/ai/complete",
-		[]byte(`{"model":"premium","messages":[{"role":"user","content":[{"type":"text","text":"Hi"}]}]}`), 400)
+		[]byte(`{"model":"missing","messages":[{"role":"user","content":[{"type":"text","text":"Hi"}]}]}`), 400)
 	requestAs(t, server, roleHeaders("rich", "Premium"), "POST", "/api/sites/demo/ai/complete",
 		[]byte(`{"model":"general","messages":[{"role":"assistant","content":[{"type":"text","text":"Hi"}]}]}`), 400)
+}
+
+func TestRestrictedModelsAreEnabledPerSite(t *testing.T) {
+	provider := &scriptedProvider{turns: [][]hex.AIEvent{
+		assistantTurn(hex.StopEndTurn, hex.AIContent{Type: hex.ContentText, Text: "Hello"}),
+		assistantTurn(hex.StopEndTurn, hex.AIContent{Type: hex.ContentText, Text: "Hello"}),
+	}}
+	server, usage := setupAI(t, provider, hex.AILimits{})
+	body := []byte(`{"model":"premium","messages":[{"role":"user","content":[{"type":"text","text":"Hi"}]}]}`)
+
+	refused := requestAs(t, server, roleHeaders("alice"), "POST", "/api/sites/demo/ai/complete", body, 403).Body.String()
+	if !strings.Contains(refused, "Premium is not enabled for this site") {
+		t.Fatalf("unexpected refusal: %s", refused)
+	}
+
+	if err := usage.PutAIBudget(context.Background(), hex.AIBudget{Scope: hex.BudgetSite, Subject: "demo", Models: []string{"premium"}}); err != nil {
+		t.Fatal(err)
+	}
+	// Everyone on the enabled site may use it, whatever their roles.
+	for _, person := range []string{"alice", "bob"} {
+		headers := roleHeaders(person)
+		if models := requestAs(t, server, headers, "GET", "/api/sites/demo/ai/models", nil, 200).Body.String(); !strings.Contains(models, "premium") {
+			t.Fatalf("the enabled model is not listed: %s", models)
+		}
+		requestAs(t, server, headers, "POST", "/api/sites/demo/ai/complete", body, 200)
+	}
+	if models := requestAs(t, server, roleHeaders("alice"), "GET", "/api/sites/other/ai/models", nil, 200).Body.String(); strings.Contains(models, "premium") {
+		t.Fatalf("the model is listed on a site it is not enabled for: %s", models)
+	}
+	requestAs(t, server, roleHeaders("alice"), "POST", "/api/sites/other/ai/complete", body, 403)
 }
