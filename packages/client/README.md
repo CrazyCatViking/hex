@@ -74,7 +74,7 @@ Exclude the generated file from formatters so `--check` can compare it. Without 
 
 ## AI
 
-`hex.ai` streams model responses with text, readable thinking and tool calls in one shape, whichever model answers. `models()` lists the models the viewer may use.
+`hex.ai` streams model responses with text, readable thinking and tool calls in one shape, whichever model answers. `models()` lists the models the app may use on its site.
 
 ```ts
 const stream = hex.ai.stream({

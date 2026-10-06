@@ -3,6 +3,7 @@ package hex_test
 import (
 	"context"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -58,6 +59,9 @@ func TestSiteAITab(t *testing.T) {
 			t.Fatalf("the AI tab lacks %q: %s", expected, page)
 		}
 	}
+	if !strings.Contains(page, "Restricted models on this site: Premium (not") {
+		t.Fatalf("the owner does not see the restricted models: %s", page)
+	}
 	if strings.Contains(page, `name="limit"`) {
 		t.Fatal("a site owner can edit the AI budget")
 	}
@@ -66,20 +70,25 @@ func TestSiteAITab(t *testing.T) {
 	}
 	requestAs(t, server, roleHeaders("stranger"), "GET", "/manage/demo?tab=ai", nil, 403)
 
-	form := url.Values{"limit": {"1.50"}, "enabled": {"off"}}
+	form := url.Values{"limit": {"1.50"}, "enabled": {"off"}, "model.premium": {"on"}, "model.general": {"on"}}
 	requestAs(t, server, owner, "PUT", "/api/hex/manage/sites/demo/ai/budget", []byte(form.Encode()), 403)
 	saved := formRequest(t, server, admin, "PUT", "/api/hex/manage/sites/demo/ai/budget", form, 200)
 	if !strings.Contains(saved, "Saved") || !strings.Contains(saved, "AI is turned off") || !strings.Contains(saved, "Budget used up") {
 		t.Fatalf("unexpected saved budget: %s", saved)
 	}
 	budgets, err := usage.ListAIBudgets(context.Background())
-	if err != nil || len(budgets) != 1 || !budgets[0].Disabled || *budgets[0].LimitMicros != 1_500_000 {
+	if err != nil || len(budgets) != 1 || !budgets[0].Disabled || *budgets[0].LimitMicros != 1_500_000 ||
+		!slices.Equal(budgets[0].Models, []string{"premium"}) {
 		t.Fatalf("the site budget was not stored: %+v %v", budgets, err)
 	}
 
 	invalid := formRequest(t, server, admin, "PUT", "/api/hex/manage/sites/demo/ai/budget", url.Values{"limit": {"lots"}, "enabled": {"on"}}, 200)
 	if !strings.Contains(invalid, "enter an amount in dollars") {
 		t.Fatalf("an invalid limit was accepted: %s", invalid)
+	}
+
+	if adminPage := requestAs(t, server, admin, "GET", "/admin/ai", nil, 200).Body.String(); !strings.Contains(adminPage, `<span class="tag">premium</span>`) {
+		t.Fatalf("the admin page does not show the enabled model: %s", adminPage)
 	}
 
 	formRequest(t, server, admin, "PUT", "/api/hex/manage/sites/demo/ai/budget", url.Values{"limit": {""}, "enabled": {"on"}}, 200)

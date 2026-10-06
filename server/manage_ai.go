@@ -218,6 +218,29 @@ type siteAIView struct {
 	ErrorText  string
 	TabLink    string
 	PlatformAI bool
+	Restricted []siteAIModel
+}
+
+// siteAIModel is a restricted model and whether it is enabled for the site.
+type siteAIModel struct {
+	ID      string
+	Name    string
+	Enabled bool
+}
+
+// restrictedModels lists the provider's restricted models.
+func (s *Server) restrictedModels(ctx context.Context) ([]AIModel, error) {
+	models, err := s.config.AI.Provider.Models(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list AI models: %w", err)
+	}
+	var restricted []AIModel
+	for _, model := range models {
+		if model.Restricted {
+			restricted = append(restricted, model)
+		}
+	}
+	return restricted, nil
 }
 
 func (s *Server) loadSiteAI(ctx context.Context, site string, identity *Identity, values url.Values) (siteAIView, error) {
@@ -240,6 +263,15 @@ func (s *Server) loadSiteAI(ctx context.Context, site string, identity *Identity
 		Site: site, Month: month, Meter: newSpendMeter(spent, limit),
 		Disabled: budgets.sites[site].Disabled, Admin: s.isAdmin(identity),
 		TabLink: "/manage/" + site + "?tab=ai",
+	}
+	restricted, err := s.restrictedModels(ctx)
+	if err != nil {
+		return siteAIView{}, err
+	}
+	for _, model := range restricted {
+		view.Restricted = append(view.Restricted, siteAIModel{
+			ID: model.ID, Name: model.Name, Enabled: slices.Contains(budgets.sites[site].Models, model.ID),
+		})
 	}
 	switch {
 	case own:
@@ -275,7 +307,8 @@ func (s *Server) loadSiteAI(ctx context.Context, site string, identity *Identity
 	return view, nil
 }
 
-// manageSiteAIBudget saves a site's limit and whether AI is on for it.
+// manageSiteAIBudget saves a site's limit, whether AI is on for it and the
+// restricted models enabled for it.
 func (s *Server) manageSiteAIBudget(w http.ResponseWriter, r *http.Request) {
 	identity, site, _, _, ok := s.manageCaller(w, r)
 	if !ok {
@@ -289,15 +322,26 @@ func (s *Server) manageSiteAIBudget(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid form")
 		return
 	}
+	restricted, err := s.restrictedModels(r.Context())
+	if err != nil {
+		writeServerError(w, err)
+		return
+	}
+	var enabled []string
+	for _, model := range restricted {
+		if r.PostFormValue("model."+model.ID) == "on" {
+			enabled = append(enabled, model.ID)
+		}
+	}
 	limit, parseErr := parseDollars(r.PostFormValue("limit"))
 	if parseErr == nil {
 		budget := AIBudget{
 			Scope: BudgetSite, Subject: site, LimitMicros: limit,
-			Disabled:  r.PostFormValue("enabled") != "on",
+			Disabled: r.PostFormValue("enabled") != "on", Models: enabled,
 			UpdatedBy: personOf(identity), UpdatedAt: time.Now().UTC(),
 		}
 		var err error
-		if budget.LimitMicros == nil && !budget.Disabled {
+		if budget.LimitMicros == nil && !budget.Disabled && len(budget.Models) == 0 {
 			err = s.config.AIUsage.DeleteAIBudget(r.Context(), BudgetSite, site)
 			if errors.Is(err, ErrNotFound) {
 				err = nil
@@ -309,7 +353,7 @@ func (s *Server) manageSiteAIBudget(w http.ResponseWriter, r *http.Request) {
 			writeServerError(w, err)
 			return
 		}
-		slog.Info("AI budget changed", "site", site, "limit", limitInput(limit), "disabled", budget.Disabled, "by", identityName(identity))
+		slog.Info("AI budget changed", "site", site, "limit", limitInput(limit), "disabled", budget.Disabled, "models", budget.Models, "by", identityName(identity))
 	}
 
 	view, err := s.loadSiteAI(r.Context(), site, identity, r.URL.Query())
@@ -353,6 +397,7 @@ type adminAISite struct {
 	Meter    spendMeter
 	Own      bool
 	Disabled bool
+	Models   []string
 	Link     string
 }
 
@@ -456,7 +501,8 @@ func (s *Server) adminAISite(name string, spent int64, budgets aiBudgets) adminA
 	limit, own := budgets.siteLimit(name)
 	return adminAISite{
 		Name: name, Meter: newSpendMeter(spent, limit), Own: own,
-		Disabled: budgets.sites[name].Disabled, Link: "/manage/" + name + "?tab=ai",
+		Disabled: budgets.sites[name].Disabled, Models: budgets.sites[name].Models,
+		Link: "/manage/" + name + "?tab=ai",
 	}
 }
 

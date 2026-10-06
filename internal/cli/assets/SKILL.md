@@ -166,7 +166,7 @@ Never ask users for third-party passwords or tokens.
 
 ## AI models
 
-When `capabilities.ai` is true the platform offers language models through one streaming interface, whichever provider answers. Use it instead of calling model APIs from the browser; never embed API keys.
+When `capabilities.ai` is true the platform offers language models through one streaming interface, whichever provider answers. Use it instead of calling model APIs from the browser; never embed API keys. `hex ai models` lists the models the site may use. Restricted models, typically the expensive ones, work only on sites a platform admin has enabled them for; once enabled they work for every visitor and automation on the site. If an app needs one, tell the user to ask a platform admin to enable it, and prefer the cheaper models where they do the job.
 
 ```sh
 hex ai models --site my-app

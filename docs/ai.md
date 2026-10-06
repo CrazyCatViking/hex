@@ -26,7 +26,7 @@ A platform can implement `hex.AIProvider` itself: `Models` lists models and `Str
 
 ```json
 [
-  { "id": "claude-sonnet-5-5", "name": "Claude Sonnet 5.5", "protocol": "anthropic", "deployment": "claude-sonnet-5-5", "thinking": true, "tools": true, "images": true, "maxOutputTokens": 64000,
+  { "id": "claude-sonnet-5-5", "name": "Claude Sonnet 5.5", "protocol": "anthropic", "deployment": "claude-sonnet-5-5", "thinking": true, "tools": true, "images": true, "maxOutputTokens": 64000, "restricted": true,
     "price": { "input": 2, "cachedInput": 0.2, "cacheWrite": 2.5, "output": 10 } },
   { "id": "gpt-6-luna", "name": "GPT-6 Luna", "protocol": "openai-responses", "deployment": "gpt-6-luna", "thinking": true, "tools": true, "images": true,
     "price": { "input": 0.11, "cachedInput": 0.011, "output": 0.55 } },
@@ -37,7 +37,11 @@ A platform can implement `hex.AIProvider` itself: `Models` lists models and `Str
 
 Use `openai-responses` for OpenAI reasoning models (GPT-5, GPT-6 and later). Over Chat Completions (`openai`) they refuse function tools together with a reasoning effort, stream no readable reasoning, and lose their reasoning between tool rounds. The Responses API streams reasoning summaries as `thinking` when the app sets `show`, and carries the model's encrypted reasoning in `thinking` blocks so it continues after tool calls; requests are sent with `store: false`, so the service keeps nothing between turns. `openai` remains for models and services that offer only Chat Completions.
 
-Using AI needs the `ai` permission (`AIConfig.Permission`), granted like any [integration permission](integrations.md#grants); a model's `permission` can require more. `MaxOutputTokens` (default 16000) caps each model call and `MaxToolRounds` (default 8) the server-side tool loop.
+Using AI needs the `ai` permission (`AIConfig.Permission`), granted like any [integration permission](integrations.md#grants). `MaxOutputTokens` (default 16000) caps each model call and `MaxToolRounds` (default 8) the server-side tool loop.
+
+## Restricted models
+
+A model marked `restricted`, typically an expensive one, works only on sites a platform admin has enabled it for in the site's **AI** tab. On an enabled site it works for everyone who may use AI there and for the site's automations, so an app built around it behaves the same for every visitor. Elsewhere it is left out of `/ai/models`, and a request for it is refused with 403. The budgets below still cap what the site and each person spend. The enabled models are stored with the site's budget, so restricted models need `Config.AIUsage`; without it they are unavailable.
 
 ## Usage, cost and budgets
 
@@ -49,14 +53,14 @@ Monthly budgets in US dollars (calendar months, UTC) are checked before every mo
 | --- | --- |
 | Platform | All AI spending |
 | Site default, or a site's own limit | Each site, including its automations; a site can also have AI turned off |
-| Person default, or the highest matching override | Each person across all sites; overrides name a `role:`, `group:` or `user:` principal, such as `role:AI.Premium` |
+| Person default, or the highest matching override | Each person across all sites; overrides name a `role:`, `group:` or `user:` principal, such as `group:<object id>` |
 
-A call is refused with 429 (403 when AI is off for the site) once any budget that applies is used up; the message says which. A call that starts below a limit can end slightly above it. `AIConfig.Limits` sets the starting budgets; platform admins change them, set each site's limit, turn AI off for a site and add overrides in the portal, where saved budgets take precedence.
+A call is refused with 429 (403 when AI is off for the site) once any budget that applies is used up; the message says which. A call that starts below a limit can end slightly above it. `AIConfig.Limits` sets the starting budgets; platform admins change them, set each site's limit, turn AI off for a site, enable restricted models for it and add overrides in the portal, where saved budgets take precedence.
 
 The portal shows spending:
 
 - **Admin → AI spend** (`/admin/ai`): the platform's month against its budget, daily spending, every site against its limit, spending by model and the top spenders, and the budget forms.
-- Each site's **AI** tab: the site's month against its limit, daily spending, and spending by person, automation and model. Owners see it; platform admins can also change the site's limit and turn AI off.
+- Each site's **AI** tab: the site's month against its limit, daily spending, and spending by person, automation and model. Owners see it and which restricted models are enabled; platform admins can also change the site's limit, turn AI off and enable restricted models.
 
 Costs are what the configured prices say. Reconcile them monthly with Azure Cost Management (Claude in Foundry appears as Marketplace charges); a difference of more than a few percent means a price is out of date. Azure cannot attribute spending to sites or people, which is what these records are for.
 
@@ -66,7 +70,7 @@ The Anthropic provider (and Claude through Foundry) caches prompts: one breakpoi
 
 ## Requests and events
 
-`POST /api/sites/{site}/ai/stream` answers with server-sent events; `POST /api/sites/{site}/ai/complete` waits and returns every message the turn added. `GET /api/sites/{site}/ai/models` lists the models the caller may use.
+`POST /api/sites/{site}/ai/stream` answers with server-sent events; `POST /api/sites/{site}/ai/complete` waits and returns every message the turn added. `GET /api/sites/{site}/ai/models` lists the models the caller may use on the site.
 
 ```json
 {

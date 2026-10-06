@@ -158,7 +158,13 @@
   <p class="muted">
     {{.LimitFrom}}. Spending is counted per calendar month (UTC).
   </p>
-  {{if .Admin}}
+  {{if and .Restricted (not .Admin)}}
+  <p class="muted">
+    Restricted models on this site: {{range $index, $model := .Restricted}}{{if
+    $index}}, {{end}}{{$model.Name}} ({{if $model.Enabled}}enabled{{else}}not
+    enabled{{end}}){{end}}. A platform admin can enable them.
+  </p>
+  {{end}} {{if .Admin}}
   <form
     class="ai-budget-form"
     hx-put="/api/hex/manage/sites/{{.Site}}/ai/budget?month={{.Month.Param}}"
@@ -181,10 +187,26 @@
         <option value="off" {{if .Disabled}}selected{{end}}>Off</option>
       </select></label
     >
+    {{range .Restricted}}
+    <label class="field"
+      ><span class="field-label">{{.Name}} (restricted)</span
+      ><select name="model.{{.ID}}">
+        <option value="off" {{if not .Enabled}}selected{{end}}>
+          Not enabled
+        </option>
+        <option value="on" {{if .Enabled}}selected{{end}}>Enabled</option>
+      </select></label
+    >
+    {{end}}
     <button class="button" type="submit">Save</button>
     {{with .Message}}<span class="muted" role="status">{{.}}</span>{{end}}
   </form>
-  {{with .ErrorText}}
+  {{if .Restricted}}
+  <p class="muted">
+    Restricted models work only on sites they are enabled for, for everyone on
+    the site and its automations.
+  </p>
+  {{end}} {{with .ErrorText}}
   <p class="banner banner-error" role="alert">{{.}}</p>
   {{end}} {{end}}
 </div>
@@ -260,7 +282,8 @@
                     class="status-dot status-{{.Meter.Tone}}"
                     aria-hidden="true"
                   ></span>
-                  {{.Meter.Status}}{{else}}—{{end}}
+                  {{.Meter.Status}}{{else}}—{{end}} {{range .Models}}
+                  <span class="tag">{{.}}</span>{{end}}
                 </td>
               </tr>
               {{end}}

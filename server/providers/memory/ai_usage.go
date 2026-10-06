@@ -136,6 +136,7 @@ func (s *AIUsageStore) ListAIBudgets(ctx context.Context) ([]hex.AIBudget, error
 	defer s.mu.Unlock()
 	budgets := make([]hex.AIBudget, 0, len(s.budgets))
 	for _, budget := range s.budgets {
+		budget.Models = slices.Clone(budget.Models)
 		budgets = append(budgets, budget)
 	}
 	slices.SortFunc(budgets, func(a, b hex.AIBudget) int {
@@ -150,6 +151,7 @@ func (s *AIUsageStore) PutAIBudget(ctx context.Context, budget hex.AIBudget) err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	budget.Models = slices.Clone(budget.Models)
 	s.budgets[budgetKey(budget.Scope, budget.Subject)] = budget
 	return nil
 }

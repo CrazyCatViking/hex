@@ -29,7 +29,7 @@ func siteCaller(r *http.Request) integrationCaller {
 }
 
 func (s *Server) listAIModels(w http.ResponseWriter, r *http.Request) {
-	models, err := s.availableModels(r.Context(), siteCaller(r))
+	models, _, err := s.availableModels(r.Context(), siteCaller(r))
 	if err != nil {
 		writeServerError(w, err)
 		return
