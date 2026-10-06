@@ -386,6 +386,7 @@ type adminAIView struct {
 	MonthNav       monthNav
 	Chart          trendChart
 	Analytics      bool
+	Audit          bool
 	Message        string
 	ErrorText      string
 	OverrideError  string
@@ -437,6 +438,7 @@ func (s *Server) loadAdminAI(ctx context.Context, identity *Identity, values url
 		Chrome: s.chromeFor(identity, "admin"), Month: month, Meter: newSpendMeter(spent, budgets.platform),
 		Platform: limitInput(budgets.platform), SiteDefault: limitInput(budgets.siteDefault),
 		PersonDefault: limitInput(budgets.personDefault), Analytics: s.config.Analytics != nil,
+		Audit: s.integrationAuditEnabled(),
 	}
 	fromConfig, err := s.configuredDefaults(ctx)
 	if err != nil {

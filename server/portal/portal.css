@@ -2081,7 +2081,8 @@ td .status-dot {
   flex-wrap: wrap;
 }
 .ai-budget-form,
-.ai-override-form {
+.ai-override-form,
+.audit-filters {
   display: flex;
   flex-wrap: wrap;
   align-items: end;

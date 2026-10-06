@@ -101,6 +101,7 @@ type adminView struct {
 	UserRow      *adminUserRow
 	SectionLinks map[string]string
 	AISpend      bool
+	Audit        bool
 	QueryText    string
 	Sort         string
 	SortChoices  []choice
@@ -418,6 +419,7 @@ func (s *Server) describeAdminReport(view *adminView, report, previous Analytics
 	view.CustomAttr = flag("open", view.CustomPeriod)
 	dates := url.Values{"from": {view.From}, "until": {view.Until}}.Encode()
 	view.AISpend = s.aiAccountingEnabled() && s.manageEnabled()
+	view.Audit = s.integrationAuditEnabled()
 	view.SectionLinks = map[string]string{
 		"overview": "/admin?" + dates,
 		"sites":    "/admin/sites?" + dates,

@@ -99,6 +99,10 @@
             >People</a
           >
           {{if .AISpend}}<a href="/admin/ai" aria-current="false">AI spend</a
+          >{{end}} {{if .Audit}}<a
+            href="/admin/integration-audit"
+            aria-current="false"
+            >Integration audit</a
           >{{end}}
         </nav>
         {{end}}

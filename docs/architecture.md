@@ -96,6 +96,7 @@ As browser request hygiene, state-changing API requests require `X-Hex-Request: 
 | POST | `/api/sites/{site}/ai/stream`, `/api/sites/{site}/ai/complete` | A model turn as server-sent events, or its complete result |
 | GET | `/api/hex/integrations`, `/api/hex/integration-approvals` | Integration catalog; admins' approval list |
 | POST/PUT/DELETE | `/api/hex/sites/{site}/integrations/{integration}/approval` | Request, approve or revoke an integration for a site |
+| GET | `/api/hex/manage/integration-audit` | Admins: the integration audit log; see [Auditing](integrations.md#auditing) |
 | GET/DELETE | `/api/hex/connections`, `/api/hex/connections/{connector}` | The caller's connected accounts; disconnect |
 | GET | `/api/hex/connections/{connector}/start`, `.../callback` | OAuth authorization code flow for connected accounts |
 | GET/PUT | `/api/hex/sites/{site}/automations` | Owners: list or replace automations; see [Automations](automations.md) |

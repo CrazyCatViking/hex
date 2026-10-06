@@ -229,12 +229,15 @@
           </p>
         </div>
       </section>
-      {{if .Analytics}}
+      {{if or .Analytics .Audit}}
       <nav class="tabs" aria-label="Admin sections">
-        <a href="/admin" aria-current="false">Overview</a>
+        {{if .Analytics}}<a href="/admin" aria-current="false">Overview</a>
         <a href="/admin/sites" aria-current="false">Sites</a>
-        <a href="/admin/users" aria-current="false">People</a>
+        <a href="/admin/users" aria-current="false">People</a>{{end}}
         <a href="/admin/ai" aria-current="page">AI spend</a>
+        {{if .Audit}}<a href="/admin/integration-audit" aria-current="false"
+          >Integration audit</a
+        >{{end}}
       </nav>
       {{end}}
       <section class="panel" aria-labelledby="platform-heading">

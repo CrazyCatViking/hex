@@ -25,15 +25,16 @@ Patterns are exact permissions (`hubspot.deals`), prefixes (`hubspot.*`) or `*`.
 ```json
 {
   "*": ["slack.users", "github.members", "ai"],
-  "role:Data.Sales": ["hubspot.*"],
-  "role:Data.Engineering": ["github.*", "sentry.*", "azuredevops.*"],
+  "role:hubspot.read": ["hubspot.owners", "hubspot.companies", "hubspot.tickets"],
+  "role:hubspot.deals": ["hubspot.deals", "hubspot.deal"],
+  "role:sentry.read": ["sentry.projects", "sentry.issues"],
   "site:sdi-report": ["sentry.issue-counts", "slack.post-message"]
 }
 ```
 
 ### Entra ID app roles
 
-With Easy Auth, define **app roles** on the platform's app registration and assign them to groups on the enterprise application; their values arrive as `role:` claims. Roles never overage, so they are the recommended way to drive grants. Grant roles to personas (`Data.Sales`, `Data.Engineering`) rather than creating one role per endpoint: the grant map keeps per-endpoint control in reviewed configuration, while Entra assignments stay coarse. Role changes apply when the person signs in again, and only direct members of an assigned group receive its roles.
+With Easy Auth, define **app roles** on the platform's app registration and assign them to groups on the enterprise application; their values arrive as `role:` claims. Roles never overage, so they are the recommended way to drive grants. Name roles after the integration they open up: `<integration>.read` for its everyday data and a separate role for each more sensitive group of endpoints (`hubspot.deals`, `github.copilot`), rather than one role per endpoint or one per department. Grant each role its endpoints one by one, not with `<integration>.*`, so an endpoint added later stays closed until it is granted; the grant map keeps per-endpoint control in reviewed configuration, while Entra assignments stay coarse. Role changes apply when the person signs in again, and only direct members of an assigned group receive its roles.
 
 ## Approvals
 
@@ -58,7 +59,7 @@ Approvals are stored in the `IntegrationStore` and checked on every call, includ
 | GET | `/api/hex/integration-approvals` | Admins: approvals, optionally `?status=requested` |
 | POST/PUT/DELETE | `/api/hex/sites/{site}/integrations/{integration}/approval` | Owners request (POST, `{"reason"}`), admins approve (PUT) and revoke (DELETE); owners may withdraw a pending request |
 
-Errors: 400 invalid input, 403 missing grant, role or approval, 404 unknown endpoint or third-party 404, 409 account not connected (with a `connect` object, see below), 429 third-party rate limiting, 502 other third-party failures, 504 timeouts. Read results may be cached per input for the endpoint's `CacheTTL` (per person for connected accounts); cached answers carry `X-Hex-Cache: hit`. Every call is logged with site, endpoint, caller and duration.
+Errors: 400 invalid input, 403 missing grant, role or approval, 404 unknown endpoint or third-party 404, 409 account not connected (with a `connect` object, see below), 429 third-party rate limiting, 502 other third-party failures, 503 an audited call that could not be recorded, 504 timeouts. Read results may be cached per input for the endpoint's `CacheTTL` (per person for connected accounts); cached answers carry `X-Hex-Cache: hit`. Every call is logged with site, endpoint, caller, duration and whether it was cached; calls of audited integrations are also [recorded](#auditing).
 
 ```ts
 const deals = await hex.integrations.call('hubspot', 'deals', { pipeline: 'default', limit: 50 });
@@ -76,6 +77,36 @@ hex integrations codegen --catalog catalog.json --out src/hex-integrations.ts --
 ```
 
 Output is deterministic, so `--check` fails a build when the file is stale. Exclude the generated file from formatters, whose line wrapping would otherwise make it differ.
+
+## Auditing
+
+Third-party systems called with a shared platform credential cannot tell who saw what. Integrations registered with `Audit: true` therefore keep their own audit trail in `Config.IntegrationAudit`: one record per call that passed the access checks, with the time, the site, the endpoint, the caller (`user:<id>` or `automation:<site>/<name>`, with their name), the compact input and the records the result showed. Cached answers are recorded too, marked cached, because they show data to a new caller; calls whose handler failed are recorded as failed without records. Calls refused by grants, approvals or input validation never reach data and are only logged.
+
+Auditing fails closed. When a record cannot be written the call fails with 503 and returns no data, and an audited integration refuses every call when no audit store is configured; `hex.New` logs an error for each such integration. The memory and PostgreSQL providers implement the store (PostgreSQL in the `hex_integration_audit` table). `Server.RunBackground` removes records older than `Config.IntegrationAuditRetention`, 365 days by default.
+
+An endpoint's `AuditRecords` names what a result showed. It receives the validated JSON output, also of cached answers, and returns stable IDs such as `ticket:123` or `contact:42`; repeated IDs are dropped and at most 1,000 are kept. Return identifiers only, never names, email addresses or other personal data: the log is kept for a year, and IDs are enough to look the records up in the third-party system. Endpoints without `AuditRecords` are still recorded, without records.
+
+```go
+AuditRecords: func(output json.RawMessage) []string {
+    var result struct{ Tickets []struct{ ID string `json:"id"` } `json:"tickets"` }
+    if err := json.Unmarshal(output, &result); err != nil {
+        return nil
+    }
+    ids := make([]string, 0, len(result.Tickets))
+    for _, ticket := range result.Tickets {
+        ids = append(ids, "ticket:"+ticket.ID)
+    }
+    return ids
+},
+```
+
+Platform admins read the log under **Admin → Integration audit** (`/admin/integration-audit`), which filters by dates, person, site, endpoint and record and downloads the selection as CSV (`?format=csv`, up to 10,000 calls), or through the API:
+
+| Method | Path | Result |
+| --- | --- | --- |
+| GET | `/api/hex/manage/integration-audit` | Admins: audit records, newest first |
+
+Parameters: `since` and `until` (RFC 3339 times, or dates where `until` includes the whole day), `site`, `caller` (a `user:<id>` or `automation:<site>/<name>` key, the exact name or email of a remembered person, or a user ID), `endpoint` (`<integration>.<endpoint>`, or an integration name for all its endpoints), `record` (one exact record ID) and `limit` (200 by default, at most 1,000). Reading and exporting the log is itself logged with the admin's name.
 
 ## Connected accounts
 

@@ -51,6 +51,10 @@ type Config struct {
 	CredentialSealer     CredentialSealer
 	CredentialKey        []byte
 	ConnectionIdleExpiry time.Duration
+	// IntegrationAudit keeps the audit log of integrations with Audit set,
+	// for IntegrationAuditRetention (365 days by default).
+	IntegrationAudit          IntegrationAuditStore
+	IntegrationAuditRetention time.Duration
 
 	// AI enables streaming model access for apps and automations. AIUsage
 	// records each model call's usage and cost and keeps the monthly AI
@@ -88,6 +92,9 @@ func New(config Config) *Server {
 	if config.MaxPublishBytes <= 0 {
 		config.MaxPublishBytes = 2 << 30
 	}
+	if config.IntegrationAuditRetention <= 0 {
+		config.IntegrationAuditRetention = defaultIntegrationAuditRetention
+	}
 
 	if config.CredentialSealer == nil && len(config.CredentialKey) > 0 {
 		sealer, err := NewKeySealer(config.CredentialKey)
@@ -110,6 +117,7 @@ func New(config Config) *Server {
 		stateSealer: stateSealer,
 	}
 	server.registerRoutes()
+	server.warnAboutUnauditedIntegrations()
 
 	return server
 }
@@ -191,6 +199,7 @@ func (s *Server) registerRoutes() {
 	s.registerManageRoutes()
 	s.registerPortalConnectionRoutes()
 	s.registerAIPortalRoutes()
+	s.registerIntegrationAuditRoutes()
 	s.registerAnalyticsRoutes()
 }
 

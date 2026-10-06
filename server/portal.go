@@ -142,6 +142,8 @@ func (s *Server) chromeFor(identity *Identity, active string) Chrome {
 		view.AdminLink = "/admin"
 	case s.aiAccountingEnabled() && s.manageEnabled():
 		view.AdminLink = "/admin/ai"
+	case s.integrationAuditEnabled():
+		view.AdminLink = "/admin/integration-audit"
 	}
 	if identity == nil {
 		return view
