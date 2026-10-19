@@ -9,7 +9,7 @@ This is the [github.com/crazycatviking/hex](https://github.com/crazycatviking/he
 | Path | Purpose |
 | --- | --- |
 | `server/` | Embeddable Go HTTP API framework |
-| `server/providers/` | Local storage, Azure Files publishing, Azure Blob Storage, PostgreSQL, in-memory and Easy Auth identity providers, the Foundry, Anthropic and OpenAI model providers, and the Key Vault credential sealer |
+| `server/providers/` | Local storage, Azure Files publishing, Azure Blob Storage, [optional S3-compatible storage and publishing](server/providers/s3/README.md), PostgreSQL, in-memory and Easy Auth identity providers, the Foundry, Anthropic and OpenAI model providers, and the Key Vault credential sealer |
 | `server/dev/` | Optional local provider adapter for consuming Go applications |
 | `cmd/hex-server/` | Configurable reference server executable |
 | `packages/client/` | `@crazycatviking/hex`, a dependency-free browser JS/TS client |
@@ -213,6 +213,7 @@ The interfaces are defined in `server/storage.go`:
 - `SiteDirectory`: read-only enumeration of actual site directories. The local provider reads the Azure Files share mounted by Go and NGINX, or a local development directory.
 - `SitePublisher` and optional `DirectUploader` (in `server/publishing.go`): writes published site files for authorized publishers. `local.Store` writes a local directory; `azurefiles.Publisher` writes Azure Files with a managed identity and signs per-file upload URLs.
 - `ObjectStore`: uploaded application objects, with writes, reads, prefix listing and deletion. This is separate from publishing; Azure Blob supplies app upload storage in the example.
+- [Optional S3-compatible provider](server/providers/s3/README.md): consuming Go servers can explicitly wire `s3.Store` for `ObjectStore`, `SitePublisher`, `DirectUploader`, `SiteDirectory` and metadata reads, using separate instances/prefixes for site and file storage. It is not a reference-executable default, requires a separate object-serving gateway (no S3 mount), and does not provide atomic deployments.
 - `Database`: site-scoped JSON documents with keyset pagination and server-recorded creators. The PostgreSQL provider works with Azure Database for PostgreSQL or another PostgreSQL installation.
 - `Realtime`: subscriptions and JSON broadcasts, allowing a future distributed broker implementation without changing the browser API.
 - `IdentityResolver` and `AccessStore` (in `server/identity.go` and `server/access.go`): optional gateway-forwarded caller identity and per-site access policies. See [Identity and site access control](docs/access-control.md).
