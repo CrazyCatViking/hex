@@ -21,6 +21,11 @@ import (
 // static URL prefixes further, and Collections, Files and Channels override
 // who may read and write each part of the site's data. Values are typed
 // principals: user:<stable identity id>, group:<id> or role:<value>.
+//
+// Published is server-owned: the access section of the site's last
+// publication, against which the next publication is merged. Nil means no
+// publication has recorded one yet. It is never returned to clients and is
+// ignored in requested policies.
 type SiteAccess struct {
 	Owners      []string            `json:"owners"`
 	Editors     []string            `json:"editors"`
@@ -29,6 +34,7 @@ type SiteAccess struct {
 	Collections map[string]DataRule `json:"collections,omitempty"`
 	Files       map[string]DataRule `json:"files,omitempty"`
 	Channels    map[string]DataRule `json:"channels,omitempty"`
+	Published   *SiteAccess         `json:"published,omitempty"`
 }
 
 // PathRule limits the static assets under Prefix to Viewers. Matching follows
@@ -88,7 +94,7 @@ func (a *Audience) UnmarshalJSON(data []byte) error {
 
 // AccessStore persists site access policies. Implementations return
 // hex.ErrNotFound for sites without a policy; such sites are open to every
-// authenticated user.
+// authenticated user. Stores persist every field, including Published.
 type AccessStore interface {
 	GetSiteAccess(ctx context.Context, site string) (SiteAccess, error)
 	PutSiteAccess(ctx context.Context, site string, access SiteAccess) error
@@ -143,6 +149,10 @@ func CloneSiteAccess(access SiteAccess) SiteAccess {
 	}
 	for _, rule := range access.Paths {
 		cloned.Paths = append(cloned.Paths, PathRule{Prefix: rule.Prefix, Viewers: cloneAudience(rule.Viewers)})
+	}
+	if access.Published != nil {
+		published := CloneSiteAccess(*access.Published)
+		cloned.Published = &published
 	}
 	return NormalizeSiteAccess(cloned)
 }
@@ -292,6 +302,7 @@ func (s *Server) getSiteAccess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	access.Published = nil
 	writeJSON(w, http.StatusOK, access)
 }
 
@@ -324,35 +335,48 @@ func (s *Server) putSiteAccess(w http.ResponseWriter, r *http.Request) {
 // policies may only be replaced by their owners; an unclaimed site may be
 // claimed by anyone allowed to create sites. A policy without owners keeps
 // the current owners, or makes the caller the owner of a new policy, and the
-// result must keep the caller able to manage it. A non-zero status describes
-// a client error; zero means err is a server failure.
+// result must keep the caller able to manage it. The access section of the
+// last publication is kept, so the next publication merges into this change.
+// A non-zero status describes a client error; zero means err is a server
+// failure.
 func (s *Server) replaceSiteAccess(ctx context.Context, identity *Identity, site string, requested SiteAccess) (SiteAccess, int, error) {
 	if err := s.validateSiteAccess(requested); err != nil {
 		return SiteAccess{}, http.StatusBadRequest, err
 	}
+	requested.Published = nil
 
 	var saved SiteAccess
 	status := 0
 	err := s.config.Access.UpdateSiteAccess(ctx, site, func(existing SiteAccess, exists bool) (*SiteAccess, error) {
-		if exists && s.siteRole(identity, existing, true) != roleOwner {
+		if err := s.mayChangeAccess(identity, existing, exists); err != nil {
 			status = http.StatusForbidden
-			return nil, errors.New("only site owners can change the access policy")
-		}
-		if !exists && !s.canCreateSites(identity) {
-			status = http.StatusForbidden
-			return nil, errors.New("you are not allowed to create sites on this platform")
+			return nil, err
 		}
 		saved = s.withOwners(identity, requested, existing, exists)
 		if err := s.keepsCallerOwner(identity, saved); err != nil {
 			status = http.StatusBadRequest
 			return nil, err
 		}
-		return &saved, nil
+		stored := saved
+		stored.Published = existing.Published
+		return &stored, nil
 	})
 	if err != nil {
 		return SiteAccess{}, status, err
 	}
 	return saved, 0, nil
+}
+
+// mayChangeAccess lets owners change an existing policy and anyone allowed
+// to create sites claim an unowned name.
+func (s *Server) mayChangeAccess(identity *Identity, existing SiteAccess, exists bool) error {
+	if exists && s.siteRole(identity, existing, true) != roleOwner {
+		return errors.New("only site owners can change the access policy")
+	}
+	if !exists && !s.canCreateSites(identity) {
+		return errors.New("you are not allowed to create sites on this platform")
+	}
+	return nil
 }
 
 // withOwners fills in the owners of a policy that names none: the current

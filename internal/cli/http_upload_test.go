@@ -100,7 +100,7 @@ func TestHTTPUploadsUseSignedURLsWithoutPlatformCredentials(t *testing.T) {
 	}))
 	defer platform.Close()
 
-	result, err := app.publishFiles(t.Context(), Project{Server: platform.URL}, "demo", sources, nil, nil)
+	result, err := app.publishFiles(t.Context(), Project{Server: platform.URL}, "demo", sources, nil, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -22,7 +22,7 @@ Hidden files/directories and `node_modules` are excluded everywhere. Root publis
 
 1. **Start.** The CLI sends `POST /api/hex/sites/{site}/publish` with a manifest of every file (`{path, size, md5}`, the MD5 as base64), the site metadata from hex.json, its optional `access` policy and its optional [declared actions](agents.md#declare-actions-in-an-app). The server:
    - authorizes the caller: owners may publish; a caller allowed to create sites claims an unowned name and becomes its owner (see [access control](access-control.md));
-   - validates the manifest and declared actions, and validates and saves the access policy before exposing any new content;
+   - validates the manifest and declared actions, and validates, [merges](access-control.md#managing-policies) and saves the access policy before exposing any new content;
    - deletes current files that would block the new layout — a file where the manifest needs a directory, or files inside a directory that becomes a file;
    - compares the manifest with the recorded manifest of the current publication and the files actually present;
    - answers `{uploads, unchanged}`: an upload target for each new or changed file, with `index.html` last.
@@ -43,7 +43,7 @@ Publishing replaces files in place; it is not an atomic whole-site release.
 
 - During a publication, visitors can see a mix of old and new files. Uploading `index.html` last and bundlers' hashed asset names keep this rare; obsolete files are only deleted when the publication completes, so a new page never refers to an asset that has already been removed.
 - A failed upload leaves the files uploaded so far in place; run `hex publish` again. Completion verifies sizes, not contents.
-- Supplied access policies take effect at the start, including for existing files, and remain in effect if uploading or completion fails. Private sites and newly restricted paths are protected before upload targets are returned. Without an `access` section, an existing site's policy is unchanged.
+- Supplied access policies take effect at the start, including for existing files, and remain in effect if uploading or completion fails. Private sites and newly restricted paths are protected before upload targets are returned. Without an `access` section, an existing site's policy is unchanged. An `access` section is merged into changes made in the portal or with `hex access` since the last publication; a conflicting change refuses the publication, and `replaceAccess` (`hex publish --replace-access`) applies the section as it is.
 - Concurrent publications of one site are not coordinated. Serialize deployment jobs for a site in CI.
 - There are no release archives or rollback commands; republish an earlier version from source control instead.
 

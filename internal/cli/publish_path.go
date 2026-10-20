@@ -85,7 +85,7 @@ func (a *App) publishPath(ctx context.Context, project Project, target, title, u
 	if err != nil {
 		return err
 	}
-	result, err := a.publishFiles(ctx, project, name, files, &hex.SiteMetadata{Title: title}, access)
+	result, err := a.publishFiles(ctx, project, name, files, &hex.SiteMetadata{Title: title}, access, false)
 	if err != nil {
 		if update == "" {
 			return fmt.Errorf("%w\nThe site %s was created but not uploaded; retry with hex publish <path> --update %s", err, name, name)

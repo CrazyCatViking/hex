@@ -356,6 +356,38 @@ func TestPublishingAppliesTheAccessPolicy(t *testing.T) {
 	}
 }
 
+func TestRepublishingKeepsAccessChangedOutsideHexJSON(t *testing.T) {
+	directory := t.TempDir()
+	t.Setenv("HEX_CONFIG_DIR", filepath.Join(directory, "profiles"))
+	platform := startPlatform(t, func(config *hex.Config) {
+		config.Identity = hex.StaticIdentity{Identity: hex.Identity{ID: "alex", Name: "alex@example.com"}}
+		config.Access = memory.NewAccessStore()
+	})
+	project := filepath.Join(directory, "project")
+	run(t, directory, "init", project, "--name", "demo", "--server", platform.URL)
+	createBuild(t, project)
+
+	config := Project{Name: "demo", Server: platform.URL, Access: json.RawMessage(`{"viewers":["user:alex","group:sales","group:support"]}`)}
+	if err := writeJSONFile(filepath.Join(project, "hex.json"), config); err != nil {
+		t.Fatal(err)
+	}
+	run(t, project, "publish")
+	run(t, project, "access", "set", "demo", "--viewer", "user:alex", "--viewer", "group:sales", "--server", platform.URL)
+
+	output := run(t, project, "publish")
+	if !strings.Contains(output, "group:support: editor in hex.json, not listed on the site") || !strings.Contains(output, "--replace-access") {
+		t.Fatalf("the difference from hex.json was not reported: %s", output)
+	}
+	if policy := run(t, project, "access", "show", "demo", "--server", platform.URL); strings.Contains(policy, "group:support") {
+		t.Fatalf("republishing re-added a viewer removed with hex access: %s", policy)
+	}
+
+	run(t, project, "publish", "--replace-access")
+	if policy := run(t, project, "access", "show", "demo", "--server", platform.URL); !strings.Contains(policy, "group:support") {
+		t.Fatalf("--replace-access did not apply hex.json: %s", policy)
+	}
+}
+
 func TestDevSettingsAndPorts(t *testing.T) {
 	directory := t.TempDir()
 	config := devSettings{Package: "./cmd/platform", Services: []string{"postgres", "azurite"}, EnvFile: ".env.local", Port: 8088, APIPort: 8081, PostgresPort: 54320, BlobPort: 10000}

@@ -62,7 +62,7 @@ Use same-origin requests in deployed apps; no API keys or identity code is neede
 
 ## Access control
 
-Without an access policy every signed-in user can view and edit a site. Put the policy in the `access` section of hex.json; `hex publish` applies it and the platform enforces it on pages, files, documents and realtime channels. Frontend checks are never enforcement.
+Without an access policy every signed-in user can view and edit a site. Put the policy in the `access` section of hex.json; `hex publish` applies it and the platform enforces it on pages, files, documents and realtime channels. Republishing merges hex.json changes into changes owners made in the portal, so never use `--replace-access` unless the user asks to discard those. Frontend checks are never enforcement.
 
 ```json
 {

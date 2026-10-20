@@ -36,7 +36,10 @@ type publishRequest struct {
 	Files    []hex.SiteFile    `json:"files"`
 	Metadata *hex.SiteMetadata `json:"metadata,omitempty"`
 	Access   json.RawMessage   `json:"access,omitempty"`
-	Actions  json.RawMessage   `json:"actions,omitempty"`
+	// ReplaceAccess applies Access as it is instead of merging it into
+	// changes made in the portal or with hex access.
+	ReplaceAccess bool            `json:"replaceAccess,omitempty"`
+	Actions       json.RawMessage `json:"actions,omitempty"`
 	// Automations is omitted, not empty, for projects without any, so the
 	// platform keeps automations deployed through the API.
 	Automations              *[]hex.Automation `json:"automations,omitempty"`
@@ -54,7 +57,8 @@ type publishPlan struct {
 }
 
 type publishResult struct {
-	URL string `json:"url"`
+	URL         string   `json:"url"`
+	AccessDrift []string `json:"accessDrift"`
 }
 
 const uploadConcurrency = 4
@@ -172,8 +176,9 @@ func fileDigest(path string) (int64, string, error) {
 }
 
 // publish publishes the project in directory with the metadata and access
-// policy from its hex.json.
-func (a *App) publish(ctx context.Context, project Project, directory, name string, assumeYes bool) (publishResult, error) {
+// policy from its hex.json. The platform merges the access policy into
+// changes made since the last publication unless replaceAccess is set.
+func (a *App) publish(ctx context.Context, project Project, directory, name string, assumeYes, replaceAccess bool) (publishResult, error) {
 	var err error
 	project.automations, err = projectAutomations(directory, project)
 	if err != nil {
@@ -205,12 +210,12 @@ func (a *App) publish(ctx context.Context, project Project, directory, name stri
 		Author:       project.Author,
 		Discoverable: project.Discoverable,
 	}
-	return a.publishFiles(ctx, project, name, source.Files, metadata, project.Access)
+	return a.publishFiles(ctx, project, name, source.Files, metadata, project.Access, replaceAccess)
 }
 
 // publishFiles asks the platform for upload targets, uploads the changed
 // files directly to them (index.html last), and completes the publication.
-func (a *App) publishFiles(ctx context.Context, project Project, name string, sources []sourceFile, metadata *hex.SiteMetadata, access json.RawMessage) (publishResult, error) {
+func (a *App) publishFiles(ctx context.Context, project Project, name string, sources []sourceFile, metadata *hex.SiteMetadata, access json.RawMessage, replaceAccess bool) (publishResult, error) {
 	var result publishResult
 	files, err := manifest(sources)
 	if err != nil {
@@ -218,7 +223,7 @@ func (a *App) publishFiles(ctx context.Context, project Project, name string, so
 	}
 
 	request := publishRequest{
-		Files: files, Metadata: metadata, Access: access,
+		Files: files, Metadata: metadata, Access: access, ReplaceAccess: replaceAccess,
 		Actions: project.Actions, Automations: project.automations,
 		SupportedUploadProtocols: []string{"hex", "http", "azure-files"},
 	}
@@ -438,13 +443,15 @@ func uploadToAzureFiles(ctx context.Context, target, path string) error {
 func (a *App) publishCommand() *cobra.Command {
 	var profile, server, baseURL, name, update string
 	var with []string
-	var assumeYes bool
+	var assumeYes, replaceAccess bool
 	command := &cobra.Command{
 		Use:   "publish [path]",
 		Short: "Publish a project, file or folder",
 		Long: "Publish through the platform. A folder with hex.json (by default the current " +
 			"folder) is published as that project's site: the first publisher of a name owns it, " +
-			"and the access policy in hex.json is applied. Any other file or folder is published " +
+			"and changes to the access policy in hex.json since the last publication are merged " +
+			"into the site's policy, keeping changes made in the portal or with hex access; " +
+			"--replace-access applies hex.json as it is. Any other file or folder is published " +
 			"at a new private link with a random name, titled with its file or folder name or " +
 			"--name; --with shares it and --update replaces an earlier one. Publications that " +
 			"include dependency folders, repositories or files that look like secrets are " +
@@ -464,7 +471,10 @@ func (a *App) publishCommand() *cobra.Command {
 				if name != "" || update != "" || len(with) > 0 {
 					return errors.New("--name, --update and --with are for files and folders without hex.json; a project's name and access come from its hex.json")
 				}
-				return a.publishProject(cmd, target, profile, server, baseURL, assumeYes)
+				return a.publishProject(cmd, target, profile, server, baseURL, assumeYes, replaceAccess)
+			}
+			if replaceAccess {
+				return errors.New("--replace-access applies the access policy in hex.json; files and folders are shared with --with")
 			}
 			if len(args) == 0 {
 				return errors.New("no hex.json here: run hex init to create a project, or name a file or folder to publish, such as hex publish ./report.pdf")
@@ -487,6 +497,7 @@ func (a *App) publishCommand() *cobra.Command {
 	flags.StringArrayVar(&with, "with", nil, "Share a file or folder with user:<email or id> or group:<object id> (repeatable)")
 	flags.StringVar(&update, "update", "", "Replace the content of a file or folder published earlier, by its site name")
 	flags.BoolVarP(&assumeYes, "yes", "y", false, "Publish unusually large content without asking")
+	flags.BoolVar(&replaceAccess, "replace-access", false, "Apply the access policy in hex.json as it is, discarding changes made in the portal or with hex access")
 	flags.StringVar(&profile, "platform", "", "Saved platform profile")
 	flags.StringVar(&server, "server", "", "Override the platform origin")
 	flags.StringVar(&baseURL, "site-base-url", "", "Override the parent site origin")
@@ -509,7 +520,7 @@ func projectDirectory(target string) (bool, error) {
 	return err == nil, err
 }
 
-func (a *App) publishProject(cmd *cobra.Command, directory, profile, server, baseURL string, assumeYes bool) error {
+func (a *App) publishProject(cmd *cobra.Command, directory, profile, server, baseURL string, assumeYes, replaceAccess bool) error {
 	project, err := a.commandConfigIn(directory, profile, true)
 	if err != nil {
 		return err
@@ -521,10 +532,11 @@ func (a *App) publishProject(cmd *cobra.Command, directory, profile, server, bas
 		project.Server = server
 	}
 
-	result, err := a.publish(cmd.Context(), project, directory, project.Name, assumeYes)
+	result, err := a.publish(cmd.Context(), project, directory, project.Name, assumeYes, replaceAccess)
 	if err != nil {
 		return err
 	}
+	a.warnAccessDrift(project.Name, result.AccessDrift)
 	website := result.URL
 	if baseURL != "" || website == "" {
 		base := project.SiteBaseURL
@@ -541,6 +553,20 @@ func (a *App) publishProject(cmd *cobra.Command, directory, profile, server, bas
 	}
 	fmt.Fprintln(a.Out, website)
 	return nil
+}
+
+// warnAccessDrift reports where the site's access policy differs from
+// hex.json, which the platform keeps when it was changed in the portal or
+// with hex access.
+func (a *App) warnAccessDrift(site string, drift []string) {
+	if len(drift) == 0 {
+		return
+	}
+	fmt.Fprintf(a.Err, "The access policy of %s differs from hex.json; changes made in the portal or with hex access were kept:\n", site)
+	for _, difference := range drift {
+		fmt.Fprintf(a.Err, "  %s\n", difference)
+	}
+	fmt.Fprintf(a.Err, "Update hex.json to match hex access show %s, or publish with --replace-access to apply hex.json as it is.\n", site)
 }
 
 func (a *App) deleteCommand() *cobra.Command {

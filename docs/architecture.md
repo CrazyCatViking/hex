@@ -71,7 +71,7 @@ As browser request hygiene, state-changing API requests require `X-Hex-Request: 
 | GET | `/api/hex/sites/{site}/permissions` | The caller's role and rule grants on the site; advisory |
 | POST | `/api/hex/sites/{site}/publish` | Manifest → `{uploads, unchanged}`; authorizes the owner or claims an unowned name |
 | PUT | `/api/hex/sites/{site}/publish/files/{path}` | Raw file body for publishers without direct uploads (204) |
-| POST | `/api/hex/sites/{site}/publish/complete` | Manifest → `{name, url, deleted, access?}`; verifies uploads and removes obsolete files |
+| POST | `/api/hex/sites/{site}/publish/complete` | Manifest → `{name, url, deleted, access?, accessDrift?}`; verifies uploads and removes obsolete files |
 | DELETE | `/api/hex/sites/{site}` | Unpublish (204); keeps the access policy |
 | GET | `/api/hex/sites/{site}/history` | Owner- and admin-only publication history, newest first |
 | POST | `/api/hex/artifacts` | `{title?}` → `{name, url, title, viewers}` (201); creates a private artifact with a random name |

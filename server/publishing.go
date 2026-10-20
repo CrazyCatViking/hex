@@ -61,10 +61,13 @@ const (
 )
 
 type publishRequest struct {
-	Files                    []SiteFile    `json:"files"`
-	Metadata                 *SiteMetadata `json:"metadata,omitempty"`
-	Access                   *SiteAccess   `json:"access,omitempty"`
-	SupportedUploadProtocols []string      `json:"supportedUploadProtocols,omitempty"`
+	Files    []SiteFile    `json:"files"`
+	Metadata *SiteMetadata `json:"metadata,omitempty"`
+	Access   *SiteAccess   `json:"access,omitempty"`
+	// ReplaceAccess applies Access as it is instead of merging it into
+	// changes made since the last publication.
+	ReplaceAccess            bool     `json:"replaceAccess,omitempty"`
+	SupportedUploadProtocols []string `json:"supportedUploadProtocols,omitempty"`
 	// Actions are the app's declared actions; omitting them removes
 	// earlier ones.
 	Actions []DeclaredAction `json:"actions,omitempty"`
@@ -83,6 +86,9 @@ type publishResult struct {
 	URL     string      `json:"url"`
 	Deleted int         `json:"deleted"`
 	Access  *SiteAccess `json:"access,omitempty"`
+	// AccessDrift describes how the saved policy still differs from the
+	// published access section.
+	AccessDrift []string `json:"accessDrift,omitempty"`
 }
 
 // startPublish authorizes a publication, claims unclaimed sites for the
@@ -103,7 +109,7 @@ func (s *Server) startPublish(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, ok := s.applyPublishAccess(w, r, site, identity, request.Access); !ok {
+	if _, _, ok := s.applyPublishAccess(w, r, site, identity, request); !ok {
 		return
 	}
 
@@ -167,7 +173,7 @@ func (s *Server) completePublish(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	savedAccess, ok := s.applyPublishAccess(w, r, site, identity, request.Access)
+	savedAccess, drift, ok := s.applyPublishAccess(w, r, site, identity, request)
 	if !ok {
 		return
 	}
@@ -203,7 +209,7 @@ func (s *Server) completePublish(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	result := publishResult{Name: site, Deleted: deleted, Access: savedAccess}
+	result := publishResult{Name: site, Deleted: deleted, Access: savedAccess, AccessDrift: drift}
 	if siteURL, err := s.siteURL(site); err == nil {
 		result.URL = siteURL
 	}
@@ -214,28 +220,35 @@ func (s *Server) completePublish(w http.ResponseWriter, r *http.Request) {
 
 // applyPublishAccess saves restrictions before touching served files or
 // issuing direct-upload URLs. Interrupted uploads retain those restrictions.
-func (s *Server) applyPublishAccess(w http.ResponseWriter, r *http.Request, site string, identity *Identity, requested *SiteAccess) (*SiteAccess, bool) {
-	if requested == nil {
-		return nil, true
-	}
-	if err := s.validateSiteAccess(*requested); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return nil, false
+// Artifacts are shared by their publisher, so their access is replaced
+// rather than merged.
+func (s *Server) applyPublishAccess(w http.ResponseWriter, r *http.Request, site string, identity *Identity, request publishRequest) (*SiteAccess, []string, bool) {
+	if request.Access == nil {
+		if identity == nil {
+			return nil, nil, true
+		}
+		if err := s.rememberUnmanagedAccess(r.Context(), site); err != nil {
+			writeServerError(w, err)
+			return nil, nil, false
+		}
+		return nil, nil, true
 	}
 	if s.config.Access == nil || identity == nil {
 		writeError(w, http.StatusBadRequest, "publishing an access policy requires identity and access control")
-		return nil, false
+		return nil, nil, false
 	}
-	saved, status, err := s.replaceSiteAccess(r.Context(), identity, site, *requested)
+
+	replace := request.ReplaceAccess || s.readSiteMetadata(r.Context(), site).Kind == KindArtifact
+	saved, drift, status, err := s.publishSiteAccess(r.Context(), identity, site, *request.Access, replace)
 	if err != nil {
 		if status == 0 {
 			writeServerError(w, err)
 		} else {
 			writeError(w, status, err.Error())
 		}
-		return nil, false
+		return nil, nil, false
 	}
-	return &saved, true
+	return &saved, drift, true
 }
 
 // unpublishSite deletes the site's files. Its access policy is kept, so the

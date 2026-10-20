@@ -126,6 +126,10 @@ Keep the policy in the `access` section of the app's hex.json. `hex publish` sen
 
 A policy without `owners` keeps the current owners, or makes the caller the owner of a new policy. Every stored policy must keep the caller able to manage it, so you cannot lock yourself out by accident. Without an `access` section, publishing leaves the existing policy unchanged.
 
+**Republishing merges.** Owners also change policies in the portal and with `hex access`, so a publication does not replace the policy. The server remembers the `access` section of the last publication and applies only what hex.json changed since then: principals hex.json added or removed are added to or removed from the live lists, and path, collection, file and channel rules are compared by prefix or name. A principal or rule removed in the portal stays removed while hex.json still lists it; it returns only if hex.json removes and adds it again. When both sides changed the same rule differently, or one side opened a list to everyone (an empty `viewers` or `editors`) while the other changed it, the publication is refused with `409 Conflict` before anything changes. `hex publish --replace-access` applies hex.json as it is.
+
+The publication result lists how the saved policy still differs from hex.json, comparing people by the role they effectively have, and `hex publish` prints it as a warning; update hex.json to match `hex access show`, or use `--replace-access`. A site whose policy predates this behavior adopts the first `access` section published to it as its base without changing its policy, so earlier portal changes are kept; later hex.json changes merge as usual. A site first published without an `access` section starts from an empty base, so a section added later is applied in full. Artifacts are shared with `--with`, which always replaces their viewers.
+
 **Claiming names.** The first publication of an unowned name creates a policy that makes the publisher its owner. `HEX_PUBLISHER_GROUPS` (or `Config.PublisherGroups`) limits who may claim new names; empty lets every signed-in user. Owners can always republish their sites, and admins can reassign squatted names.
 
 The CLI manages policies directly:
@@ -139,7 +143,7 @@ hex access check my-app
 hex access clear my-app
 ```
 
-`hex access set` replaces the whole policy; flags cover owners, editors and viewers, and `--file` accepts the complete JSON shape above. `clear` removes the policy, opening the site to every signed-in user; the name is then unowned. The CLI authenticates like other API commands: `HEX_TOKEN`, or its saved browser sign-in for the platform (see [Publishing](publishing.md#authentication)).
+`hex access set` replaces the whole policy, and the next publication merges hex.json into it; flags cover owners, editors and viewers, and `--file` accepts the complete JSON shape above. `clear` removes the policy, opening the site to every signed-in user; the name is then unowned. The CLI authenticates like other API commands: `HEX_TOKEN`, or its saved browser sign-in for the platform (see [Publishing](publishing.md#authentication)).
 
 The HTTP routes are `GET`/`PUT`/`DELETE /api/hex/sites/{site}/access`, registered when both an identity resolver and an access store are configured. Reading a policy requires owner or admin rights.
 
