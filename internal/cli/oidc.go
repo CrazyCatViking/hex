@@ -73,6 +73,9 @@ func (a *App) oidcProvider(ctx context.Context, project Project) (*oidc.Provider
 		return nil, nil, fmt.Errorf("discover identity provider: %w", err)
 	}
 	endpoint := provider.Endpoint()
+	// The CLI is a public PKCE client. Avoid Basic authentication and auth-style
+	// probing, which can retry a consumed code and hide the original error.
+	endpoint.AuthStyle = oauth2.AuthStyleInParams
 	for _, address := range []string{endpoint.AuthURL, endpoint.TokenURL} {
 		parsed, err := url.Parse(address)
 		if err != nil || parsed.Host == "" || parsed.User != nil || (parsed.Scheme != "https" && !(parsed.Scheme == "http" && isLocalHost(parsed.Hostname()))) {
