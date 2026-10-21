@@ -136,7 +136,7 @@ func (s *Server) registerAnalyticsRoutes() {
 }
 
 func (s *Server) adminCaller(w http.ResponseWriter, r *http.Request) (*Identity, bool) {
-	if !s.platformHost(r.Host) {
+	if !s.platformRequest(r) {
 		http.NotFound(w, r)
 		return nil, false
 	}

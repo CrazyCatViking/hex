@@ -79,7 +79,7 @@ func (s *Server) registerPortalIntegrationRoutes() {
 }
 
 func (s *Server) integrationsPage(w http.ResponseWriter, r *http.Request) {
-	if !s.platformHost(r.Host) {
+	if !s.platformRequest(r) {
 		http.NotFound(w, r)
 		return
 	}
