@@ -17,6 +17,9 @@ type Config struct {
 	Files            ObjectStore
 	Sites            SiteDirectory
 	SiteBaseURL      string
+	// ResolveOrigin optionally classifies trusted hosting origins. Unknown hosts
+	// must return an error; an empty Site explicitly denotes a platform origin.
+	ResolveOrigin func(*http.Request) (RequestOrigin, error)
 	// PathCaseInsensitive must match the static host's path comparison.
 	PathCaseInsensitive bool
 	// LogoutURL is the host-owned sign-out destination; empty hides sign-out.
@@ -205,6 +208,17 @@ func (s *Server) registerRoutes() {
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if s.config.ResolveOrigin != nil {
+		origin, err := s.config.ResolveOrigin(r)
+		if err != nil || (origin.Site != "" && !siteNamePattern.MatchString(origin.Site)) {
+			writeError(w, http.StatusForbidden, "unknown hosting origin")
+			return
+		}
+		if origin.Site != "" && !strings.HasPrefix(r.URL.Path, "/api/") {
+			writeError(w, http.StatusForbidden, "platform pages are not available from an app hostname")
+			return
+		}
+	}
 	if s.config.Analytics != nil && strings.HasPrefix(r.URL.Path, "/api/sites/") {
 		s.analyticsIdentity(w, s.requestIdentity(r))
 	}
@@ -229,6 +243,17 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // API hostnames remain available for the platform and CLI (including hosts
 // configured separately from SiteBaseURL).
 func (s *Server) allowAppAPI(w http.ResponseWriter, r *http.Request) bool {
+	if s.config.ResolveOrigin != nil {
+		origin, err := s.config.ResolveOrigin(r)
+		if err != nil {
+			writeError(w, http.StatusForbidden, "unknown hosting origin")
+			return false
+		}
+		if origin.Site == "" {
+			return true
+		}
+		return allowSiteAPI(w, r, origin.Site)
+	}
 	base, err := parseSiteBaseURL(s.config.SiteBaseURL)
 	if err != nil {
 		writeServerError(w, err)
@@ -241,6 +266,15 @@ func (s *Server) allowAppAPI(w http.ResponseWriter, r *http.Request) bool {
 		return true
 	}
 	site := strings.TrimSuffix(host, suffix)
+	return allowSiteAPI(w, r, site)
+}
+
+// RequestOrigin is supplied by the host, never by public routing headers.
+type RequestOrigin struct {
+	Site string
+}
+
+func allowSiteAPI(w http.ResponseWriter, r *http.Request, site string) bool {
 	path := r.URL.Path
 	isRead := r.Method == http.MethodGet || r.Method == http.MethodHead
 	allowed := siteNamePattern.MatchString(site) && (strings.HasPrefix(path, "/api/sites/"+site+"/") ||

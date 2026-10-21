@@ -44,7 +44,7 @@ func (s *Server) cardForSite(name, siteURL string, metadata *SiteMetadata, now t
 // siteIcon serves a small image preview on the portal origin, where the viewer's
 // existing session and CSP apply. It never fetches publisher-supplied URLs.
 func (s *Server) siteIcon(w http.ResponseWriter, r *http.Request) {
-	if !s.platformHost(r.Host) {
+	if !s.platformRequest(r) {
 		http.NotFound(w, r)
 		return
 	}

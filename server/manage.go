@@ -117,7 +117,7 @@ func (s *Server) registerManageRoutes() {
 // managePage lists the sites and files the viewer owns, filtered by kind and
 // search text; admins can list every site.
 func (s *Server) managePage(w http.ResponseWriter, r *http.Request) {
-	if !s.platformHost(r.Host) {
+	if !s.platformRequest(r) {
 		http.NotFound(w, r)
 		return
 	}
@@ -209,7 +209,7 @@ var siteTabs = []siteTab{
 
 // manageSitePage shows one site on the selected tab.
 func (s *Server) manageSitePage(w http.ResponseWriter, r *http.Request) {
-	if !s.platformHost(r.Host) {
+	if !s.platformRequest(r) {
 		http.NotFound(w, r)
 		return
 	}

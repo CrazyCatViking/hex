@@ -32,6 +32,20 @@ App hostnames can call only `/api/sites/<their-site>/...`, their own `/api/hex/s
 
 These origin restrictions supplement [access policies](access-control.md): each request still needs the caller's permission for its target site. Non-site API hostnames can access multiple namespaces subject to those policies. `SiteBaseURL` must match the site domain configured in NGINX so Hex recognizes every app origin. Hosting authentication must cover every site's assets, API calls and WebSocket upgrades, and the backend must have no bypassing public listener.
 
+## Custom hosting origins
+
+Embedded hosts can optionally set `Config.ResolveOrigin` to classify each trusted
+request as a platform origin (`RequestOrigin{}`) or an application origin
+(`RequestOrigin{Site: "reports"}`). Unknown hosts must return an error. Resolve
+from a host-owned registry or validated gateway context, never from an untrusted
+public routing header. App origins retain their own-site-only API boundary and
+cannot open platform HTML pages. Platform portal routes use the same resolver.
+
+The hook does not configure DNS, certificates, identities, static serving or URL
+generation. Those remain host responsibilities. `SiteBaseURL` still controls
+catalogue and publishing URLs. Without the hook, existing suffix classification
+and NGINX deployments are unchanged.
+
 ## Local development
 
 `hex dev` serves the landing page at `http://localhost:8080/`, sites at `http://<name>.localhost:8080/`, and the management API at `http://localhost:8080/api/`. `npm run dev` in the framework repository delegates to the same tooling. Many browsers resolve the entire `.localhost` suffix to loopback; environments that do not need local DNS/hosts entries. Keep all sites on the same development port to test hostname isolation, rather than relying on different ports.

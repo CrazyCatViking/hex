@@ -186,7 +186,7 @@ func (s *Server) writePortalPage(w http.ResponseWriter, name string, view any) {
 // landingPage is the platform home: what is shared with the viewer, what
 // they own, and the catalogue of apps for everyone.
 func (s *Server) landingPage(w http.ResponseWriter, r *http.Request) {
-	if !s.platformHost(r.Host) {
+	if !s.platformRequest(r) {
 		http.NotFound(w, r)
 		return
 	}
@@ -219,7 +219,7 @@ func firstCards(cards []siteCard) ([]siteCard, int) {
 
 // startPage explains how to build and publish, with the CLI installers.
 func (s *Server) startPage(w http.ResponseWriter, r *http.Request) {
-	if !s.platformHost(r.Host) {
+	if !s.platformRequest(r) {
 		http.NotFound(w, r)
 		return
 	}
@@ -433,6 +433,14 @@ func (s *Server) platformName() string {
 		return s.config.Connection.Name
 	}
 	return "Hex"
+}
+
+func (s *Server) platformRequest(r *http.Request) bool {
+	if s.config.ResolveOrigin != nil {
+		origin, err := s.config.ResolveOrigin(r)
+		return err == nil && origin.Site == ""
+	}
+	return s.platformHost(r.Host)
 }
 
 func (s *Server) platformHost(host string) bool {
