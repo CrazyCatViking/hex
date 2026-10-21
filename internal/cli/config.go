@@ -83,16 +83,17 @@ type Connection struct {
 }
 
 type Project struct {
-	Name         string `json:"name"`
-	Title        string `json:"title,omitempty"`
-	Description  string `json:"description,omitempty"`
-	Author       string `json:"author,omitempty"`
-	Discoverable *bool  `json:"discoverable,omitempty"`
-	Directory    string `json:"directory,omitempty"`
-	Platform     string `json:"platform,omitempty"`
-	Server       string `json:"server,omitempty"`
-	SiteBaseURL  string `json:"siteBaseURL,omitempty"`
-	Resource     string `json:"resource,omitempty"`
+	Workspace    *workspacePin `json:"workspace,omitempty"`
+	Name         string        `json:"name"`
+	Title        string        `json:"title,omitempty"`
+	Description  string        `json:"description,omitempty"`
+	Author       string        `json:"author,omitempty"`
+	Discoverable *bool         `json:"discoverable,omitempty"`
+	Directory    string        `json:"directory,omitempty"`
+	Platform     string        `json:"platform,omitempty"`
+	Server       string        `json:"server,omitempty"`
+	SiteBaseURL  string        `json:"siteBaseURL,omitempty"`
+	Resource     string        `json:"resource,omitempty"`
 	// Access is the site's access policy, applied by the platform when the
 	// site is published. The platform validates it.
 	Access json.RawMessage `json:"access,omitempty"`
@@ -111,6 +112,8 @@ type Project struct {
 	TenantID     string          `json:"-"`
 	Auth         *hex.AuthConfig `json:"-"`
 	Capabilities *Capabilities   `json:"-"`
+
+	directorySession *directorySession
 }
 
 // withResource retains configured auth only for a resource named by its scopes.

@@ -20,16 +20,20 @@ import (
 )
 
 type App struct {
-	Dir         string
-	In          io.Reader
-	Out         io.Writer
-	Err         io.Writer
-	Interactive bool
-	HTTP        *http.Client
-	OpenBrowser func(string) error
-	input       *bufio.Reader
-	writes      *writeState
-	tokens      tokenCache
+	Dir            string
+	In             io.Reader
+	Out            io.Writer
+	Err            io.Writer
+	Interactive    bool
+	HTTP           *http.Client
+	OpenBrowser    func(string) error
+	input          *bufio.Reader
+	writes         *writeState
+	tokens         tokenCache
+	workspace      string
+	directory      string
+	account        string
+	commandContext context.Context
 	// signInHost and signInHTTP replace the Microsoft identity platform in
 	// tests.
 	signInHost string
@@ -96,6 +100,7 @@ func New(in io.Reader, out, stderr io.Writer) (*App, error) {
 }
 
 func (a *App) Execute(ctx context.Context, args []string, version string) error {
+	a.commandContext = ctx
 	root := &cobra.Command{
 		Use:           "hex",
 		Short:         "Build, connect and publish Hex sites",
@@ -108,6 +113,10 @@ func (a *App) Execute(ctx context.Context, args []string, version string) error 
 	root.SetErr(a.Err)
 	root.SetArgs(args)
 	root.CompletionOptions.DisableDefaultCmd = true
+	root.PersistentFlags().StringVar(&a.workspace, "workspace", "", "Directory workspace ID or organization/ID (overrides the project)")
+	root.PersistentFlags().StringVar(&a.directory, "directory", "", "Saved workspace directory")
+	root.PersistentFlags().StringVar(&a.account, "account", "", "Directory account alias (separate saved sign-in)")
+	root.AddCommand(a.workspaceCommand())
 	root.AddCommand(a.setupCommand(), a.initCommand(), a.devCommand())
 	root.AddCommand(a.updateCommand())
 	root.AddCommand(a.publishCommand(), a.deleteCommand(), a.loginCommand(), a.logoutCommand())

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -19,6 +20,8 @@ import (
 )
 
 type setupResult struct {
+	Kind        string `json:"kind,omitempty"`
+	Directory   string `json:"directory,omitempty"`
 	Status      string `json:"status"`
 	Profile     string `json:"profile,omitempty"`
 	Name        string `json:"name,omitempty"`
@@ -57,6 +60,8 @@ func (a *App) setupCommand() *cobra.Command {
 				if err := a.printJSON(result); err != nil {
 					return err
 				}
+			} else if result.Status == "ready" && result.Kind == "workspace-directory" {
+				fmt.Fprintf(a.Out, "Connected to workspace directory %s (%s). Existing workspace selection unchanged.\nNext: %s\n", result.Name, result.Directory, result.NextCommand)
 			} else if result.Status == "ready" {
 				fmt.Fprintf(a.Out, "Connected to %s. Saved default profile: %s\nNext: %s\n", result.Name, result.Profile, result.NextCommand)
 			} else {
@@ -85,7 +90,14 @@ func (a *App) setup(ctx context.Context, server, file, name string, interactive 
 	var connection Connection
 	var err error
 	if file != "" {
-		connection, err = a.readConnectionFile(file, server)
+		var data []byte
+		data, err = a.readSetupFile(file)
+		if err == nil {
+			if result, directory, directoryError := saveDirectory(data, server, name); directory || directoryError != nil {
+				return result, directoryError
+			}
+			connection, err = parseConnection(data, server)
+		}
 	} else {
 		if server == "" && interactive {
 			server, err = a.ask(ctx, "Company Hex URL: ")
@@ -105,9 +117,19 @@ func (a *App) setup(ctx context.Context, server, file, name string, interactive 
 		}
 		server = parsed.String()
 		var browserRequired bool
-		connection, browserRequired, err = a.downloadConnection(ctx, server)
+		var data []byte
+		data, browserRequired, err = a.downloadSetupDocument(ctx, server)
 		if err != nil {
 			return setupResult{}, err
+		}
+		if !browserRequired {
+			if result, directory, directoryError := saveDirectory(data, server, name); directory || directoryError != nil {
+				return result, directoryError
+			}
+			connection, err = parseConnection(data, server)
+			if err != nil {
+				return setupResult{}, err
+			}
 		}
 		if browserRequired {
 			downloadURL := server + connectionPath
@@ -130,7 +152,17 @@ func (a *App) setup(ctx context.Context, server, file, name string, interactive 
 				if err != nil {
 					return setupResult{}, err
 				}
-				connection, err = a.readConnectionFile(path, server)
+				data, err := a.readSetupFile(path)
+				if err == nil {
+					if result, directory, directoryError := saveDirectory(data, server, name); directory {
+						if directoryError == nil {
+							return result, nil
+						}
+						err = directoryError
+					} else {
+						connection, err = parseConnection(data, server)
+					}
+				}
 				if err == nil {
 					break
 				}
@@ -145,6 +177,9 @@ func (a *App) setup(ctx context.Context, server, file, name string, interactive 
 	if err != nil {
 		return setupResult{}, err
 	}
+	if err := clearActiveWorkspace(); err != nil {
+		return setupResult{}, err
+	}
 	result := setupResult{
 		Status:      "ready",
 		Profile:     profile,
@@ -156,13 +191,22 @@ func (a *App) setup(ctx context.Context, server, file, name string, interactive 
 }
 
 func (a *App) downloadConnection(ctx context.Context, server string) (Connection, bool, error) {
-	var connection Connection
+	data, browser, err := a.downloadSetupDocument(ctx, server)
+	if err != nil || browser {
+		return Connection{}, browser, err
+	}
+	connection, err := parseConnection(data, server)
+	return connection, false, err
+}
+
+func (a *App) downloadSetupDocument(ctx context.Context, server string) (json.RawMessage, bool, error) {
+	var connection json.RawMessage
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, server+connectionPath, nil)
 	if err != nil {
 		return connection, false, err
 	}
 	request.Header.Set("Accept", "application/json")
-	response, err := a.HTTP.Do(request)
+	response, err := a.directoryHTTPClient().Do(request)
 	if err != nil {
 		return connection, false, fmt.Errorf("reach platform configuration; check the URL and network/VPN: %w", err)
 	}
@@ -187,8 +231,10 @@ func (a *App) downloadConnection(ctx context.Context, server string) (Connection
 	if err != nil {
 		return connection, false, err
 	}
-	connection, err = parseConnection(data, server)
-	return connection, false, err
+	if len(data) > maxConfigBytes {
+		return nil, false, errors.New("connection settings exceed 64 KiB")
+	}
+	return data, false, nil
 }
 
 func requiresBrowser(status int) bool {
@@ -253,13 +299,21 @@ func droppedFilePath(input string) (string, error) {
 }
 
 func (a *App) readConnectionFile(input, server string) (Connection, error) {
-	path, err := droppedFilePath(input)
-	if err != nil {
-		return Connection{}, err
-	}
-	data, err := readLimitedFile(resolvePath(a.Dir, path), maxConfigBytes)
+	data, err := a.readSetupFile(input)
 	if err != nil {
 		return Connection{}, err
 	}
 	return parseConnection(data, server)
+}
+
+func (a *App) readSetupFile(input string) ([]byte, error) {
+	path, err := droppedFilePath(input)
+	if err != nil {
+		return nil, err
+	}
+	data, err := readLimitedFile(resolvePath(a.Dir, path), maxConfigBytes)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
 }

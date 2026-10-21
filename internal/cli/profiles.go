@@ -185,6 +185,13 @@ func (a *App) commandConfig(profile string, needsProject bool) (Project, error) 
 // commandConfigIn resolves the platform for a command run against
 // directory: its hex.json when present or needed, then the saved profile.
 func (a *App) commandConfigIn(directory, profile string, needsProject bool) (Project, error) {
+	if project, handled, err := a.workspaceConfigIn(directory, profile, needsProject); handled || err != nil {
+		return project, err
+	}
+	return a.directCommandConfigIn(directory, profile, needsProject)
+}
+
+func (a *App) directCommandConfigIn(directory, profile string, needsProject bool) (Project, error) {
 	var project Project
 	var err error
 	if profile == "" || needsProject {

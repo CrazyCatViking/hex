@@ -15,6 +15,21 @@ If a user needs to connect to a platform, run `hex setup <platform-url> --json`.
 
 Use `hex init <app-name>` to create `hex.json` and this skill, or `hex init` in an existing app. It does not scaffold an app or install dependencies. By default hex.json contains only `name`; commands resolve the current default platform profile. Use `hex init --platform <profile>` to pin a destination, or `hex publish --platform <profile>` to override it for a command. Local platforms need no sign-in. `hex update` installs the latest verified CLI; `hex skills` refreshes this skill afterward.
 
+### Optional workspace directories
+
+Direct profiles and `--platform` keep their existing behavior. If setup returns
+`kind: "workspace-directory"`, ask the user to run `hex login --directory <name>
+--account <alias>` in a desktop terminal. Use `hex workspace list --directory
+<name> --account <alias> --json` to discover actual workspace IDs; never invent
+them or assume a superadmin has workspace membership. `hex workspace use <id>`
+explicitly changes the default; setup/listing do not. `hex init` with a directory
+context selected pins the stable directory/workspace identity. For an existing
+project, `hex workspace use <id> --project` pins it without replacing an existing
+direct pin. Use `--workspace <id>` for an explicit one-command override, not
+together with `--platform`. Account aliases have independent sessions; never
+silently switch an app from a personal account to an operator account. Directory
+workspace resolution refreshes membership before use.
+
 ## Using deployed apps
 
 Use the existing CLI sign-in to read protected apps and call their exposed actions. All commands below accept `--platform <profile>`; otherwise the normal project/default platform applies. Start with `hex sites` and, when useful, `hex access check <site>`.
@@ -41,7 +56,7 @@ When building an app whose data people or agents should change from the CLI, dec
 
 ## Building an app
 
-Read `hex.json` for the site name, source directory, and selected platform profile or explicit connection settings. `hex capabilities` reads cached profile capabilities when available; `--refresh` requests them from the API. Discovery is never a prerequisite for publishing. Read the existing app before editing it.
+Read `hex.json` for the site name, source directory, and selected workspace, platform profile or explicit connection settings. `hex capabilities` reads cached profile capabilities when available; `--refresh` requests them from the API. Discovery is not a prerequisite for direct-profile publishing; directory-backed connections resolve current workspace membership first. Read the existing app before editing it.
 
 Choose the app framework and build tooling to fit the project. Install `@crazycatviking/hex` as an application dependency using the project's package manager (for example `npm install @crazycatviking/hex`, `pnpm add @crazycatviking/hex`, or `yarn add @crazycatviking/hex`). Keep its version in package.json and the lockfile; do not copy the client into the app. If the package has not yet been released to the configured registry, ask for its registry or a packed tarball from the Hex checkout (`just pack-client`), then install that tarball through the package manager.
 

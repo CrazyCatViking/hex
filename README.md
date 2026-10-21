@@ -79,6 +79,9 @@ The default `hex.json` contains only the site name. Publishing detects index.htm
 
 ## Connect to a company platform
 
+For one account spanning multiple workspaces, see optional [workspace directories](docs/workspaces.md).
+Direct `hex setup <workspace-url>` connections remain independent and unchanged.
+
 Use `hex update` to install the latest verified CLI binary while preserving platform profiles. Older releases without this command need one more installation from the landing page first.
 
 Visit the platform's main domain, such as **https://hex.smartdok.dev/**. Its Go-rendered portal greets signed-in people with what has been shared with them, the sites they own, and the apps published for everyone; owners share and manage their sites from **Your sites**. The **Build & publish** page offers an installer for the visitor's OS. Download it in the signed-in browser and run the displayed command: it installs the latest CLI and saves the correct platform profile automatically. Employees do not need to run `hex setup` or edit configuration.

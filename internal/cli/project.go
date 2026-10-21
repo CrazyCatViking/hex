@@ -27,6 +27,17 @@ func (a *App) initCommand() *cobra.Command {
 				return err
 			}
 			project := Project{Name: name, Resource: resource}
+			if profile == "" && server == "" && baseURL == "" {
+				resolved, handled, err := a.workspaceConfigIn(directory, "", false)
+				if err != nil {
+					return err
+				}
+				if handled {
+					project.Workspace = resolved.Workspace
+				}
+			} else if a.workspace != "" || a.directory != "" || a.account != "" {
+				return fmt.Errorf("use directory workspace selection or direct platform/server settings, not both")
+			}
 			if profile != "" {
 				_, selected, err := loadProfile(profile, false)
 				if err != nil {

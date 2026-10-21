@@ -30,6 +30,19 @@ func oidcSessionPath(project Project) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if session := project.directorySession; session != nil {
+		settings, err := json.Marshal(struct {
+			Kind      string
+			Directory string
+			Account   string
+			Auth      any
+		}{"workspace-directory", session.Origin, session.Account, project.Auth})
+		if err != nil {
+			return "", err
+		}
+		digest := sha256.Sum256(settings)
+		return filepath.Join(directory, "directory-oidc-"+hex.EncodeToString(digest[:])+".json"), nil
+	}
 	settings, err := json.Marshal(struct {
 		Server string
 		Auth   any
@@ -86,6 +99,9 @@ func (a *App) oidcProvider(ctx context.Context, project Project) (*oidc.Provider
 }
 
 func (a *App) oidcToken(ctx context.Context, project Project, forceLogin bool) (string, error) {
+	if err := validateDirectoryTarget(project); err != nil {
+		return "", err
+	}
 	path, err := oidcSessionPath(project)
 	if err != nil {
 		return "", err
@@ -96,6 +112,9 @@ func (a *App) oidcToken(ctx context.Context, project Project, forceLogin bool) (
 	}
 	if !forceLogin && session.Token != nil && session.Token.Valid() {
 		return session.Token.AccessToken, nil
+	}
+	if project.directorySession != nil && !forceLogin && !a.Interactive && (session.Token == nil || session.Token.RefreshToken == "") {
+		return "", fmt.Errorf("not signed in to directory account %s; run hex login --directory %s --account %s", project.directorySession.Account, project.directorySession.Origin, project.directorySession.Account)
 	}
 	ctx = context.WithValue(ctx, oauth2.HTTPClient, &http.Client{Timeout: 30 * time.Second})
 	provider, config, err := a.oidcProvider(ctx, project)
@@ -114,6 +133,9 @@ func (a *App) oidcToken(ctx context.Context, project Project, forceLogin bool) (
 		fmt.Fprintln(a.Err, "The saved sign-in could not be refreshed; sign in again.")
 	}
 	if !forceLogin && !a.Interactive {
+		if project.directorySession != nil {
+			return "", fmt.Errorf("not signed in to directory account %s; run hex login --directory %s --account %s", project.directorySession.Account, project.directorySession.Origin, project.directorySession.Account)
+		}
 		return "", errors.New("not signed in to the platform; run hex login in a terminal, or set HEX_TOKEN")
 	}
 	session, err = a.oidcBrowserLogin(ctx, provider, config)

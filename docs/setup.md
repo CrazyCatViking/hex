@@ -6,6 +6,9 @@ Visit your company's main Hex domain, such as `https://hex.smartdok.dev`. The la
 
 ## Manual setup and additional platforms
 
+Optional [workspace directories](workspaces.md) add account-based discovery and
+selection without changing the direct-workspace setup described here.
+
 For an already installed CLI, automation, or an additional platform, the explicit setup workflow remains available:
 
 ```sh

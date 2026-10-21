@@ -85,8 +85,11 @@ func (a *App) apiSendWith(ctx context.Context, project Project, withoutTimeout b
 	}
 
 	client := a.HTTP
+	if project.directorySession != nil {
+		client = a.directoryHTTPClient()
+	}
 	if withoutTimeout {
-		streaming := *a.HTTP
+		streaming := *client
 		streaming.Timeout = 0
 		client = &streaming
 	}
@@ -151,6 +154,9 @@ func (a *App) newAPIRequest(ctx context.Context, project Project, method, path s
 // apiToken returns HEX_TOKEN or uses the platform's configured sign-in flow.
 // Profiles without Auth retain the legacy Microsoft/Azure CLI behavior.
 func (a *App) apiToken(ctx context.Context, project Project) (string, error) {
+	if err := validateDirectoryTarget(project); err != nil {
+		return "", err
+	}
 	if token := os.Getenv("HEX_TOKEN"); token != "" {
 		return token, nil
 	}
@@ -393,7 +399,7 @@ func (a *App) loginCommand() *cobra.Command {
 		Short: "Sign in to the platform in your browser",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			project, err := a.commandConfig(profile, false)
+			project, err := a.authCommandConfig(profile)
 			if err != nil {
 				return err
 			}
@@ -422,7 +428,7 @@ func (a *App) logoutCommand() *cobra.Command {
 		Short: "Forget the saved platform sign-in",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			project, err := a.commandConfig(profile, false)
+			project, err := a.authCommandConfig(profile)
 			if err != nil {
 				return err
 			}

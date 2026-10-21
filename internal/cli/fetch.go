@@ -110,6 +110,11 @@ func validateFetchURL(project Project, address string) error {
 }
 
 func (a *App) rawGet(ctx context.Context, project Project, address string) (*http.Response, error) {
+	if project.directorySession != nil {
+		if err := validateFetchURL(project, address); err != nil {
+			return nil, err
+		}
+	}
 	token, err := a.apiToken(ctx, project)
 	if err != nil {
 		return nil, err
@@ -123,6 +128,9 @@ func (a *App) rawGet(ctx context.Context, project Project, address string) (*htt
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
 	client := *a.HTTP
+	if project.directorySession != nil {
+		client.Jar = nil
+	}
 	// Streamed downloads can take longer than JSON API requests.
 	client.Timeout = 5 * time.Minute
 	// Browsers resolve *.localhost themselves; Go's system resolver may not.
