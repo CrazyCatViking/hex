@@ -70,6 +70,9 @@ chmod 755 "$pending_binary"
 mv -f "$pending_binary" "$bin_directory/hex"
 pending_binary=''
 "$bin_directory/hex" setup --file "$temporary/platform.json"
+if ! "$bin_directory/hex" agents install; then
+    printf 'Hex is installed, but harness setup needs attention. Resolve the error above and run: hex agents install\n' >&2
+fi
 
 path_line='export PATH="$HOME/.local/bin:$PATH" # Hex CLI'
 add_path() {
@@ -93,4 +96,4 @@ if [[ "${SHELL:-}" == */fish ]]; then
 fi
 
 printf '\nHex is installed at %s/hex and connected to your platform.\n' "$bin_directory"
-printf 'Open a new terminal, then run: hex init my-app\n'
+printf 'Start a new Claude Code, Codex or OpenCode session and ask it to build an app. For other harnesses, run: hex agents --help\n'

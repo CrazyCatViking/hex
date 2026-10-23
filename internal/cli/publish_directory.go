@@ -68,7 +68,7 @@ func hasBuildScript(project string) (bool, error) {
 
 func rootProjectFile(name string) bool {
 	switch strings.ToLower(name) {
-	case "hex.json", "hex.dev.json", "agents.md", "package.json", "package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb":
+	case "hex.json", "hex.dev.json", "agents.md", "opencode.json", "opencode.jsonc", "package.json", "package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb":
 		return true
 	default:
 		return false

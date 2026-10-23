@@ -26,8 +26,8 @@
             <h3>Install the Hex tool</h3>
             <p>
               Download the installer for your computer and run the command
-              below. It installs Hex and connects it to {{.Platform}}; there is
-              nothing to configure.
+              below. It installs Hex, connects it to {{.Platform}}, and sets up
+              Claude Code, Codex and OpenCode to use Hex for new apps.
             </p>
             <label class="field"
               ><span class="field-label">Your computer</span
@@ -64,7 +64,10 @@
               ></p>
               <p class="muted">
                 Open a terminal, paste the command and press Enter. Already
-                installed? Run <code>hex update</code>.
+                installed before assistant setup was available? Run
+                <code>hex update</code>, then <code>hex agents install</code>
+                once. The connected Hex MCP server checks for updates
+                automatically; new versions take effect in a new session.
               </p>
             </div>
             {{else}}
@@ -95,18 +98,26 @@
           <div>
             <h3>Build an app with your coding agent</h3>
             <p>
-              Start a project, then describe the app you want to your agent:
+              Start a new Claude Code, Codex or OpenCode session in your app
+              folder and describe what you want. Hex is already configured as
+              the default platform for new web apps:
             </p>
-            <pre><code>hex init my-app</code></pre>
+            <pre><code>Build an equipment tracker for our team and publish it.</code></pre>
             <p>
-              Hex adds instructions your agent understands, including how to
-              store data and who may use it. When it is ready, publish it from
-              the project folder:
+              Your assistant creates the project, builds and tests the app,
+              then publishes it through Hex and gives you a link. It needs file
+              editing and build tools; ordinary desktop chat alone is not enough.
             </p>
-            <pre><code>hex publish</code></pre>
+            <p>
+              If sign-in is needed, your assistant starts it for you. Complete
+              company sign-in and MFA in your browser, then return to the
+              conversation. Hex remembers your session.
+            </p>
             <p class="muted">
-              The first time, Hex opens your company sign-in in the browser. The
-              first person to publish a name owns it.
+              Using another coding harness? Run <code>hex agents --help</code>
+              for setup options. Cowork needs a separately configured local MCP
+              connection and a shared project folder. The first person to
+              publish a name owns it.
             </p>
           </div>
         </article>

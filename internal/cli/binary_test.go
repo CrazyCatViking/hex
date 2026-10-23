@@ -46,7 +46,7 @@ func TestStandaloneBinaryNeedsNeitherNodeNorGoAtRuntime(t *testing.T) {
 	}
 	call("init", "demo")
 	entries, err := os.ReadDir(filepath.Join(directory, "demo"))
-	if err != nil || len(entries) != 2 || entries[0].Name() != ".agents" || entries[1].Name() != "hex.json" {
+	if err != nil || len(entries) != 4 || entries[0].Name() != ".agents" || entries[1].Name() != ".claude" || entries[2].Name() != "AGENTS.md" || entries[3].Name() != "hex.json" {
 		t.Fatalf("init must create only configuration and skills: %v %v", entries, err)
 	}
 	if data, err := os.ReadFile(filepath.Join(directory, "demo", ".agents", "skills", "hex", "SKILL.md")); err != nil || !strings.Contains(string(data), "hex publish") {

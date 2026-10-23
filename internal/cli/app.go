@@ -25,6 +25,7 @@ type App struct {
 	Out            io.Writer
 	Err            io.Writer
 	Interactive    bool
+	browserHandoff bool
 	HTTP           *http.Client
 	OpenBrowser    func(string) error
 	input          *bufio.Reader
@@ -119,6 +120,7 @@ func (a *App) Execute(ctx context.Context, args []string, version string) error 
 	root.AddCommand(a.workspaceCommand())
 	root.AddCommand(a.setupCommand(), a.initCommand(), a.devCommand())
 	root.AddCommand(a.updateCommand())
+	root.AddCommand(a.agentsCommand(), a.mcpCommand(version))
 	root.AddCommand(a.publishCommand(), a.deleteCommand(), a.loginCommand(), a.logoutCommand())
 	root.AddCommand(a.sitesCommand(), a.capabilitiesCommand(), a.skillsCommand())
 	root.AddCommand(a.accessCommand(), a.whoamiCommand())

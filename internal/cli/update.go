@@ -106,7 +106,10 @@ func (a *App) updateCommand() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("locate the installed CLI: %w", err)
 			}
-			return a.updateExecutable(cmd.Context(), executable, releaseURL)
+			if err := a.updateExecutable(cmd.Context(), executable, releaseURL); err != nil {
+				return err
+			}
+			return a.refreshInstalledGuidance(cmd.Context(), executable)
 		},
 	}
 	command.Flags().StringVar(&releaseURL, "release-url", "", "Override the CLI release download directory")

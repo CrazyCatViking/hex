@@ -43,6 +43,10 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw 'Hex could not import the platform configuration. Resolve the reported error and rerun the installer.'
     }
+    & $binary agents install
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning 'Hex is installed, but harness setup needs attention. Resolve the error above and run: hex agents install'
+    }
 
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
     $entries = @($userPath -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
@@ -51,7 +55,7 @@ try {
     }
     $env:Path = "$binDirectory;$env:Path"
     Write-Host "`nHex is installed at $binary and connected to your platform."
-    Write-Host 'Open a new terminal, then run: hex init my-app'
+    Write-Host 'Start a new Claude Code, Codex or OpenCode session and ask it to build an app. For other harnesses, run: hex agents --help'
 } finally {
     Remove-Item -LiteralPath $temporary -Recurse -Force
 }

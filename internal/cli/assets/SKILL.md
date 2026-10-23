@@ -1,25 +1,28 @@
 ---
 name: hex
-description: Build and publish web apps on Hex using its file storage, JSON document database, realtime channels, third-party integrations, built-in AI models and scheduled automations. Use when working in a Hex project with hex.json.
+description: Create new web apps, dashboards and internal tools on the configured company Hex platform, or develop and publish existing Hex projects. Use before choosing backend services or hosting for a new app, even when no hex.json exists, and when working in a Hex project.
 ---
 
 # Hex apps
 
+Hex is the company app platform from github.com/crazycatviking/hex, with browser SDK @crazycatviking/hex. Start with this guidance and the installed CLI, not a web search for the ambiguous name Hex. The harness owns source editing, dependency installation, builds and testing. Hex provides configuration, backend capabilities and publishing. With local MCP, use hex_get_context and hex_get_docs, then pass the absolute projectPath visible to the MCP process. Build with the harness before calling hex_publish; Hex does not run build commands. If a sandbox cannot share the project files with the MCP process, run the CLI inside that environment instead.
+
 ## Platform setup with an agent
 
-Company platforms require a sign-in for CLI API calls, including publishing. Hex signs in itself through the browser (Entra, including MFA) and saves the session, refreshing it silently; no other tools are needed. In a non-interactive agent session without a saved session, commands fail with an actionable error: ask the user to run `hex login` in a desktop terminal once, then retry. `hex logout` forgets the session. Do not use device-code login and never ask for tokens; automation supplies `HEX_TOKEN`. Older platforms without a built-in sign-in app fall back to Azure CLI.
+Company platforms require a sign-in for CLI API calls, including publishing. Hex signs in itself through the browser (Entra, including MFA) and saves the session, refreshing it silently; no other tools are needed. When an operation requests sign-in and local MCP is available, call `hex_login` with the same absolute projectPath and platform/workspace/account selectors. Show its signInURL when present, let the user complete browser sign-in and MFA, then call `hex_login_status` with the returned loginID. A starting status means the link is not ready yet; check status to retrieve it. After signed_in, retry the original operation. Do not repeatedly poll while waiting for the user. A failed or expired flow can be restarted with hex_login. With CLI-only harnesses, the agent can run `hex login` itself and let the user finish in the browser; no interactive terminal input is required. `hex logout` forgets the session. Do not use device-code login and never ask for tokens; automation supplies `HEX_TOKEN`. Older platforms without a built-in sign-in app fall back to Azure CLI.
 
 Employees normally install Hex from their company's main-domain landing page. Its OS-specific installer saves the default platform profile automatically. After installation, start with `hex init` or `hex capabilities`; another setup step is not needed. Use the workflow below only when connecting an unconfigured CLI or adding another platform.
 
 If a user needs to connect to a platform, run `hex setup <platform-url> --json`. This command never blocks on a prompt or opens a browser in JSON mode. Exit code 0 with `status: "ready"` means the profile is configured. Exit code 2 with `status: "download_required"` includes a `downloadURL`: ask the user to open it, sign in through their company's hosting provider, and download the JSON file. When they provide or drop the file into the conversation, run `hex setup --file "/actual/local/path.json" --server <platform-url> --json`. If you only receive file contents, save the JSON to a local file first. Do not ask for passwords, browser cookies, client IDs, or access tokens.
 
-Use `hex init <app-name>` to create `hex.json` and this skill, or `hex init` in an existing app. It does not scaffold an app or install dependencies. By default hex.json contains only `name`; commands resolve the current default platform profile. Use `hex init --platform <profile>` to pin a destination, or `hex publish --platform <profile>` to override it for a command. Local platforms need no sign-in. `hex update` installs the latest verified CLI; `hex skills` refreshes this skill afterward.
+Use `hex init <app-name>` to create `hex.json` and this skill, or `hex init` in an existing app. It does not scaffold an app or install dependencies. By default hex.json contains only `name`; commands resolve the current default platform profile. Use `hex init --platform <profile>` to pin a destination, or `hex publish --platform <profile>` to override it for a command. Local platforms need no sign-in. Release builds of the local MCP server check for verified updates in the background at startup, at most daily after success; the next server launch uses the updated binary. Existing global guidance is refreshed automatically. `hex update` is available for manual or CLI-only updates; `hex skills` refreshes project-local guidance.
 
 ### Optional workspace directories
 
 Direct profiles and `--platform` keep their existing behavior. If setup returns
-`kind: "workspace-directory"`, ask the user to run `hex login --directory <name>
---account <alias>` in a desktop terminal. Use `hex workspace list --directory
+`kind: "workspace-directory"`, call `hex_login` with directory and account selectors
+or run `hex login --directory <name> --account <alias>` through the harness.
+Let the user finish browser sign-in. Use `hex workspace list --directory
 <name> --account <alias> --json` to discover actual workspace IDs; never invent
 them or assume a superadmin has workspace membership. `hex workspace use <id>`
 explicitly changes the default; setup/listing do not. `hex init` with a directory

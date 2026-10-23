@@ -76,6 +76,8 @@ func TestPublishPlainSiteExcludesProjectFiles(t *testing.T) {
 	excluded := map[string]string{
 		"hex.dev.json":                  "local settings",
 		"AGENTS.md":                     "private instructions",
+		"opencode.json":                 `{"mcp":{"servers":{}}}`,
+		"opencode.jsonc":                "{ /* local harness settings */ }",
 		"package.json":                  `{"scripts":{"test":"custom"}}`,
 		"package-lock.json":             "lockfile",
 		".env":                          "secret",

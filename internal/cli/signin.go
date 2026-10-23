@@ -122,7 +122,7 @@ func silentToken(ctx context.Context, client public.Client, project Project) (st
 }
 
 func (a *App) browserSignIn(ctx context.Context, client public.Client, project Project) (public.AuthResult, error) {
-	if os.Getenv("CODESPACES") == "true" || (runtime.GOOS == "linux" && os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "") {
+	if !a.browserHandoff && (os.Getenv("CODESPACES") == "true" || (runtime.GOOS == "linux" && os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "")) {
 		return public.AuthResult{}, errors.New("signing in requires a desktop browser; run hex login in a desktop terminal, or set HEX_TOKEN. Device-code sign-in is not supported")
 	}
 

@@ -52,7 +52,7 @@ hex setup http://localhost:8080 --name local
 hex init my-app
 ```
 
-Open `my-app` in your editor. Initialization creates only `hex.json` and `.agents/skills/hex/SKILL.md`. A plain site can put index.html and its assets directly in the project root. For a bundled app, have your coding agent install `@crazycatviking/hex` and build the app with your preferred tooling. See [client installation](packages/client/README.md) for a local tarball workflow before a registry release. From the project directory:
+Open `my-app` in your editor. Initialization creates `hex.json`, skills in `.agents/skills/hex/` and `.claude/skills/hex/`, and managed Hex instructions in `AGENTS.md` and `.claude/rules/hex.md`. Existing instructions are preserved. A plain site can put index.html and its assets directly in the project root. For a bundled app, have your coding agent install `@crazycatviking/hex` and build the app with your preferred tooling. See [client installation](packages/client/README.md) for a local tarball workflow before a registry release. From the project directory:
 
 ```sh
 hex capabilities
@@ -60,7 +60,9 @@ hex publish
 hex sites
 ```
 
-Open `http://my-app.localhost:8080/`. Each site has its own hostname and browser origin. Modern browsers resolve `*.localhost` to loopback; if your environment does not, add local DNS/hosts entries. Point your coding agent to the installed skill if it does not discover `.agents/skills` automatically. `hex skills` refreshes the Hex-owned skill file without modifying existing project instructions.
+Open `http://my-app.localhost:8080/`. Each site has its own hostname and browser origin. Modern browsers resolve `*.localhost` to loopback; if your environment does not, add local DNS/hosts entries. `hex skills` refreshes the skills and Hex-managed instruction blocks, preserving other instructions.
+
+Run `hex agents install` once to make Hex the default for new web apps in Claude Code, Codex and OpenCode V2, including in empty directories. This installs global skills, short persistent instructions and a local `hex mcp serve` registration. Company installers run this automatically. The harness supplies editing, dependency installation, builds and testing; Hex supplies platform discovery, configuration and publishing. See [Harness setup and local MCP](docs/harnesses.md) for Cursor, VS Code, diagnostics and sandbox requirements.
 
 The default `hex.json` contains only the site name. Publishing detects index.html in dist/, public/, or the project root, using the current default platform profile. Projects with a package.json build script need their build output before automatic publishing. Set optional `directory` to pin a source (`"."` for the root) or `platform` to pin a saved profile. Add descriptive metadata as needed:
 

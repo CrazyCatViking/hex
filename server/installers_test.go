@@ -116,7 +116,7 @@ func TestLinuxInstallerBootstrapsWithoutPlatformRequests(t *testing.T) {
 	runInstaller := func() ([]byte, error) {
 		command := exec.CommandContext(ctx, "bash")
 		command.Stdin = strings.NewReader(script)
-		command.Env = append(os.Environ(), "HOME="+home, "HEX_CONFIG_DIR="+profiles, "ZDOTDIR="+home, "SHELL=/bin/bash", "TMPDIR="+directory)
+		command.Env = append(os.Environ(), "HOME="+home, "HEX_CONFIG_DIR="+profiles, "CODEX_HOME=", "CLAUDE_CONFIG_DIR=", "XDG_CONFIG_HOME="+filepath.Join(home, ".config"), "ZDOTDIR="+home, "SHELL=/bin/bash", "TMPDIR="+directory)
 		return command.CombinedOutput()
 	}
 	for range 2 {
@@ -144,6 +144,11 @@ func TestLinuxInstallerBootstrapsWithoutPlatformRequests(t *testing.T) {
 		content, err := os.ReadFile(filepath.Join(home, name))
 		if err != nil || strings.Count(string(content), "# Hex CLI") != 1 {
 			t.Fatalf("PATH setup is not idempotent: %s %v", content, err)
+		}
+	}
+	for _, name := range []string{".claude/skills/hex/SKILL.md", ".claude/rules/hex.md", ".agents/skills/hex/SKILL.md", ".codex/AGENTS.md", ".claude.json", ".codex/config.toml", ".config/opencode/AGENTS.md", ".config/opencode/skills/hex/SKILL.md", ".config/opencode/opencode.json"} {
+		if _, err := os.Stat(filepath.Join(home, filepath.FromSlash(name))); err != nil {
+			t.Fatalf("installer did not configure harness integration %s: %v", name, err)
 		}
 	}
 	corrupted.Store(true)

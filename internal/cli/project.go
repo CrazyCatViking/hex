@@ -64,7 +64,7 @@ func (a *App) initCommand() *cobra.Command {
 			if err := a.initializeProject(directory, project); err != nil {
 				return err
 			}
-			fmt.Fprintf(a.Out, "Initialized %s. Agent skill: .agents/skills/hex/SKILL.md\n", name)
+			fmt.Fprintf(a.Out, "Initialized %s. Installed Hex guidance for coding agents and Claude.\n", name)
 			return nil
 		},
 	}
@@ -99,7 +99,12 @@ func installSkills(directory string) error {
 	if err != nil {
 		return err
 	}
-	return atomicWrite(filepath.Join(directory, ".agents", "skills", "hex", "SKILL.md"), content, 0644)
+	for _, folder := range []string{".agents", ".claude"} {
+		if err := atomicWrite(filepath.Join(directory, folder, "skills", "hex", "SKILL.md"), content, 0644); err != nil {
+			return err
+		}
+	}
+	return installProjectInstructions(directory)
 }
 
 func (a *App) skillsCommand() *cobra.Command {
@@ -111,7 +116,7 @@ func (a *App) skillsCommand() *cobra.Command {
 			if err := installSkills(a.Dir); err != nil {
 				return err
 			}
-			fmt.Fprintln(a.Out, "Installed .agents/skills/hex/SKILL.md")
+			fmt.Fprintln(a.Out, "Installed Hex skills and project instructions for coding agents and Claude.")
 			return nil
 		},
 	}

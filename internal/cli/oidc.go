@@ -191,7 +191,7 @@ func (a *App) oidcBrowserLogin(ctx context.Context, provider *oidc.Provider, con
 		default:
 		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		fmt.Fprintln(w, "Sign-in received. Return to the Hex terminal.")
+		fmt.Fprintln(w, "Sign-in received. Return to your assistant or Hex terminal.")
 	})
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	defer server.Close()

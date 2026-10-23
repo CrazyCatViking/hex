@@ -133,6 +133,13 @@ func TestCLIUpdateReplacesExecutableAndPreservesConfiguration(t *testing.T) {
 		t.Fatalf("build running update fixture: %v\n%s", err, output)
 	}
 	t.Setenv("HEX_CONFIG_DIR", filepath.Join(directory, "profiles"))
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("HEX_AUTO_UPDATE", "1")
 	t.Setenv("HEX_CLI_RELEASE_URL", "")
 	connection := localConnection("http://localhost:8080")
 	connection.CLIReleaseURL = server.URL
@@ -156,6 +163,47 @@ func TestCLIUpdateReplacesExecutableAndPreservesConfiguration(t *testing.T) {
 	profileAfter, err := os.ReadFile(profilePath)
 	if err != nil || !bytes.Equal(profileBefore, profileAfter) {
 		t.Fatal("self-update changed saved platform profiles")
+	}
+	// Background MCP updates use the same verified replacement and refresh
+	// only already-installed guidance, without writing to protocol stdout.
+	paths, err := agentPaths("claude-code", home, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := installInstructions(paths.Instructions, "outdated Hex defaults"); err != nil {
+		t.Fatal(err)
+	}
+	if err := atomicWrite(paths.Skill, []byte("old skill"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	automatic := filepath.Join(directory, "automatic-hex")
+	if runtime.GOOS == "windows" {
+		automatic += ".exe"
+	}
+	if err := os.WriteFile(automatic, []byte("old executable"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	background, err := New(strings.NewReader(""), &stdout, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := background.automaticUpdate(context.Background(), automatic, "9.9.8"); err != nil {
+		t.Fatal(err)
+	}
+	count := binaryRequests.Load()
+	if err := background.automaticUpdate(context.Background(), automatic, "9.9.8"); err != nil || binaryRequests.Load() != count {
+		t.Fatalf("daily update throttle failed: %v", err)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("updater polluted MCP stdout: %s", &stdout)
+	}
+	skill, err := os.ReadFile(paths.Skill)
+	if err != nil || !bytes.Contains(skill, []byte("# Hex apps")) {
+		t.Fatalf("global skill was not refreshed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".codex", "AGENTS.md")); !os.IsNotExist(err) {
+		t.Fatalf("refresh installed an unrequested integration: %v", err)
 	}
 }
 

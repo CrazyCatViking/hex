@@ -17,6 +17,11 @@ import (
 )
 
 func TestDirectoryBrowserLoginIsReusedAcrossWorkspaces(t *testing.T) {
+	t.Run("cli", func(t *testing.T) { testDirectoryBrowserLogin(t, false) })
+	t.Run("mcp", func(t *testing.T) { testDirectoryBrowserLogin(t, true) })
+}
+
+func testDirectoryBrowserLogin(t *testing.T, useMCP bool) {
 	t.Setenv("HEX_CONFIG_DIR", t.TempDir())
 	t.Setenv("HEX_TOKEN", "")
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -94,7 +99,11 @@ func TestDirectoryBrowserLoginIsReusedAcrossWorkspaces(t *testing.T) {
 		}
 	}
 	app, _ := testApp(t, t.TempDir())
+	browserReady := make(chan struct{})
 	app.OpenBrowser = func(address string) error {
+		if useMCP {
+			<-browserReady
+		}
 		browserCalls.Add(1)
 		authorize, err := url.Parse(address)
 		if err != nil {
@@ -110,12 +119,47 @@ func TestDirectoryBrowserLoginIsReusedAcrossWorkspaces(t *testing.T) {
 		return response.Body.Close()
 	}
 	f.setup(t, app, "example")
+	if useMCP {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		logins := &mcpLogins{}
+		input := mcpProjectInput{ProjectPath: app.Dir, Directory: "example", Account: "personal"}
+		status, err := logins.start(ctx, ctx, app, "test", input)
+		if err != nil || status.Status != "waiting_for_browser" || status.SignInURL == "" {
+			close(browserReady)
+			t.Fatalf("login handoff: %+v %v", status, err)
+		}
+		repeated, err := logins.start(ctx, ctx, app, "test", input)
+		if err != nil || repeated.LoginID != status.LoginID {
+			close(browserReady)
+			t.Fatalf("duplicate sign-in started: %+v %v", repeated, err)
+		}
+		other := input
+		other.Account = "operator"
+		if _, err := logins.start(ctx, ctx, app, "test", other); err == nil {
+			close(browserReady)
+			t.Fatal("concurrent login changed accounts")
+		}
+		close(browserReady)
+		select {
+		case <-logins.job.done:
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		status = logins.snapshot(logins.job)
+		if status.Status != "signed_in" || status.SignInURL != "" || status.Message != "Signed in as person@example.test." {
+			t.Fatalf("login completion: %+v", status)
+		}
+	}
 	for _, args := range [][]string{
 		{"login", "--directory", "example", "--account", "personal"},
 		{"workspace", "use", "development", "--account", "personal"},
 		{"whoami"},
 		{"whoami", "--workspace", "production"},
 	} {
+		if useMCP && args[0] == "login" {
+			continue
+		}
 		if err := app.Execute(context.Background(), args, "test"); err != nil {
 			t.Fatalf("%v: %v", args, err)
 		}
