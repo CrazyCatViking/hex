@@ -555,21 +555,6 @@
 .permission-dialog .permission-operations {
   margin: 0;
 }
-.permission-dialog .permission-picker .combobox-options {
-  position: relative;
-  inset: auto;
-  box-shadow: none;
-  max-height: 320px;
-  margin-top: 14px;
-}
-.permission-dialog .combobox-option {
-  min-height: 60px;
-  padding: 12px 6px;
-  border-bottom: 1px solid var(--line);
-}
-.permission-dialog .permission-picker [role="status"]:empty {
-  display: none;
-}
 .permission-dialog .permission-identifier {
   margin-top: 20px;
   font-size: 11px;

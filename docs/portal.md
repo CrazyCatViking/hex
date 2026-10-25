@@ -6,6 +6,8 @@ Each Hex server includes a portal at the main domain, for example **https://hex.
 
 `server/portal/portal.css` owns the portal-wide light/dark palette, typography, page width (`--page-width`), control height (`--control-height`), and corner-radius tokens. All pages use the same `.button`, `.field`, `.panel`, and `.site-header` styles. `.form-grid` aligns two-column field layouts without stretching controls to match neighboring help text; it stacks on small screens. `.dialog`, `.dialog-heading`, and `.dialog-body` provide shared modal styling. Use these components rather than feature-scoped theme or page-width overrides. `permissions.css` adds only Sharing-specific layout and matrix treatments.
 
+People/group pickers in permission dialogs use an anchored, scrollable dropdown, not an inline list that resizes the modal. Results use the shared combobox styling, float above modal clipping, and fit the available viewport (including opening upward). Arrow keys and Enter select; Escape dismisses results before the dialog; Tab, outside clicks, and selection close the dropdown. Late directory responses cannot reopen a dismissed picker. The same control is used for site admission, app-permission rows, owners, and direct rule recipients.
+
 ## Pages
 
 | Page | Path | Contents |
