@@ -92,8 +92,11 @@ func validatePermissionPolicy(access SiteAccess) error {
 			return fmt.Errorf("invalid application role %q", name)
 		}
 	}
-	if err := validateSubjects(access.Admission, access.Roles); err != nil {
-		return fmt.Errorf("admission: %w", err)
+	if len(access.Admission.Roles) > 0 {
+		return errors.New("admission cannot reference application permission groups; use signedIn, owners, or explicit people/directory principals. For an existing site, run 'hex access show <site>' and copy its migrated admission and page rules into hex.json before publishing")
+	}
+	if err := validatePermissionPrincipalLimit("site admission principals", access.Admission.Principals, 1280); err != nil {
+		return err
 	}
 	seen := map[string]bool{}
 	for id, binding := range access.Bindings {
@@ -127,8 +130,8 @@ func validatePermissionPolicy(access SiteAccess) error {
 	return nil
 }
 
-func validateSubjects(subjects Subjects, roles map[string]ApplicationRole) error {
-	if err := validatePermissionPrincipals("subjects", subjects.Principals); err != nil {
+func validateSubjects(subjects Subjects, roles map[string]ApplicationRole, principalLimit int) error {
+	if err := validatePermissionPrincipalLimit("subjects", subjects.Principals, principalLimit); err != nil {
 		return err
 	}
 	if len(subjects.Roles) > 64 {
@@ -144,8 +147,12 @@ func validateSubjects(subjects Subjects, roles map[string]ApplicationRole) error
 
 func validatePermissionPrincipals(label string, principals []string) error {
 	// Legacy untyped principals expand into three typed claim selectors.
-	if len(principals) > 256 {
-		return fmt.Errorf("at most 256 %s are allowed", label)
+	return validatePermissionPrincipalLimit(label, principals, 256)
+}
+
+func validatePermissionPrincipalLimit(label string, principals []string, limit int) error {
+	if len(principals) > limit {
+		return fmt.Errorf("at most %d %s are allowed", limit, label)
 	}
 	for _, principal := range principals {
 		if !principalPattern.MatchString(principal) {
@@ -197,7 +204,13 @@ func validatePermissionGrant(grant PermissionGrant, roles map[string]Application
 			return fmt.Errorf("invalid excluded resource %q", resource)
 		}
 	}
-	if err := validateSubjects(grant.Subjects, roles); err != nil {
+	principalLimit := 256
+	if grant.Kind == "path" {
+		// Independent admission/page audiences can snapshot 1024 bindings
+		// alongside the original 256 direct principals without locking users out.
+		principalLimit = 1280
+	}
+	if err := validateSubjects(grant.Subjects, roles, principalLimit); err != nil {
 		return err
 	}
 	if grant.Kind != "collection" && grant.Kind != "action" && (grant.Where != nil || grant.Check != nil || grant.Scope != nil || grant.Fields != nil) {
@@ -230,7 +243,7 @@ func stablePermissionID(parts ...string) string {
 // The published snapshot is deliberately not replaced with the merged policy.
 func MigrateSiteAccess(old SiteAccess) SiteAccess {
 	if old.Version != 0 {
-		return CloneSiteAccess(old)
+		return migrateSiteAdmission(CloneSiteAccess(old))
 	}
 	old = CloneSiteAccess(old)
 	old.Owners = typedLegacyPrincipals(old.Owners)
@@ -256,7 +269,7 @@ func MigrateSiteAccess(old SiteAccess) SiteAccess {
 	}
 	viewerPrincipals := slices.Clone(old.Viewers)
 	viewerPrincipals = append(viewerPrincipals, old.Editors...)
-	access.Admission = Subjects{SignedIn: len(old.Viewers) == 0, Owners: true, Roles: []string{"legacy-viewer"}}
+	access.Admission = Subjects{SignedIn: len(old.Viewers) == 0, Owners: true, Principals: permissionMembers(viewerPrincipals)}
 	for _, principal := range viewerPrincipals {
 		access.Bindings[stablePermissionID("viewer", principal)] = RoleBinding{Principal: principal, Role: "legacy-viewer"}
 	}
@@ -348,6 +361,60 @@ func MigrateSiteAccess(old SiteAccess) SiteAccess {
 	// Runtime migration supplies the existing automation names separately.
 	if old.Published != nil {
 		published := MigrateSiteAccess(*old.Published)
+		access.Published = &published
+	}
+	// Ordinary pages follow the independent entry audience. Keep their existing
+	// protected-path exclusions; protected page rules remain app permissions.
+	for id, grant := range access.Grants {
+		if grant.Kind == "path" && grant.Resource == "*" {
+			if slices.Equal(grant.Subjects.Roles, []string{"legacy-viewer"}) {
+				// Legacy viewers are exactly the admitted audience. Gate ordinary
+				// pages through admission instead of copying its member list into
+				// a second rule that would drift during independent sharing edits.
+				grant.Subjects = Subjects{SignedIn: true}
+			} else {
+				grant.Subjects = admissionSubjects(access, grant.Subjects, false)
+			}
+			access.Grants[id] = grant
+		}
+	}
+	return access
+}
+
+func needsAdmissionMigration(access SiteAccess) bool {
+	return access.Version == 2 && (len(access.Admission.Roles) > 0 || access.Published != nil && needsAdmissionMigration(*access.Published))
+}
+
+// Snapshot the previously admitted audience, not the directory's people. A
+// directory-group selector remains a directory-group selector. Later app-group
+// assignments/defaults/deletions cannot silently change this entry audience.
+func admissionSubjects(access SiteAccess, subjects Subjects, includeScoped bool) Subjects {
+	result := Subjects{SignedIn: subjects.SignedIn, Owners: subjects.Owners, Principals: slices.Clone(subjects.Principals)}
+	for _, role := range subjects.Roles {
+		result.SignedIn = result.SignedIn || access.Roles[role].SignedIn
+	}
+	for _, id := range slices.Sorted(maps.Keys(access.Bindings)) {
+		binding := access.Bindings[id]
+		if slices.Contains(subjects.Roles, binding.Role) && (includeScoped || binding.Scope == nil) {
+			result.Principals = appendUnique(result.Principals, binding.Principal)
+		}
+	}
+	result.Principals = permissionMembers(result.Principals)
+	return result
+}
+
+func migrateSiteAdmission(access SiteAccess) SiteAccess {
+	if access.Version == 2 && len(access.Admission.Roles) > 0 {
+		access.Admission = admissionSubjects(access, access.Admission, true)
+		for id, grant := range access.Grants {
+			if grant.Kind == "path" && (grant.Resource == "*" || grant.Resource == "/" || grant.Resource == "/index.html") {
+				grant.Subjects = admissionSubjects(access, grant.Subjects, false)
+				access.Grants[id] = grant
+			}
+		}
+	}
+	if access.Published != nil {
+		published := MigrateSiteAccess(*access.Published)
 		access.Published = &published
 	}
 	return access

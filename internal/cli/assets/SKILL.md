@@ -87,13 +87,13 @@ Use `access.version: 2`. Site admission, management owners and application grant
   "name": "team-dashboard",
   "access": {
     "version": 2,
-    "admission": { "roles": ["member"] },
+    "admission": { "principals": ["group:<object-id>"], "owners": true },
     "roles": { "member": { "description": "Team member" } },
     "bindings": {
       "team-members": { "principal": "group:<object-id>", "role": "member" }
     },
     "grants": {
-      "pages": { "kind": "path", "resource": "*", "operations": ["read"], "subjects": { "roles": ["member"] } },
+      "pages": { "kind": "path", "resource": "*", "operations": ["read"], "subjects": { "signedIn": true } },
       "tasks": { "kind": "collection", "resource": "tasks", "operations": ["read", "create", "update"], "subjects": { "roles": ["member"] } }
     }
   }
@@ -102,6 +102,7 @@ Use `access.version: 2`. Site admission, management owners and application grant
 
 - Principals are `user:<stable id>`, `group:<object id>`, `role:<identity-provider value>` or `automation:<name>`. Never use email/display-name matching or invent real directory IDs. Omitted owners retain existing owners; first publishers own new names.
 - Subjects select principals, application roles, `signedIn: true`, or `owners: true`. Application roles have no implicit hierarchy; bindings may carry `{kind,id}` scope. Scoped grants name the corresponding record field with `{kind,field}`.
+- Site admission selects `signedIn`, `owners`, or explicit principals, never application permission groups. Deployed role-based admission migrates to its existing principal/default audience, independently of later app-group edits. For older local v2 configs containing `admission.roles`, copy the migrated admission and ordinary-page rules from `hex access show <site>` before republishing; do not use `--replace-access` to bypass migration.
 - Collection operations are read/create/update/delete; file operations read/upload/delete; channel operations read/send; paths read; actions run. A wildcard is additive, not overridden by more specific grants; use `except` to exclude resources.
 - Collection/action grants support `where` (existing record), `check` (proposed record), and top-level writable `fields`. Conditions use all/any or field/op/value with eq/ne/in/contains. Fields start with `data.` or use server metadata `id`/`createdBy`; a value `"$actor.id"` resolves to the caller. Missing fields never match. Each mutation needs one complete grant, not a union of partial constraints.
 - Path rules protect separately served files. Build admin areas as a separate HTML entry such as `admin/index.html` (a multi-page build), not a hash route inside the public page, and protect their data with collection rules.

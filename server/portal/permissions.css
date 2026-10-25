@@ -1,103 +1,10 @@
-/* The approved standalone prototype's palette, spacing and component shapes.
-   Scoped to Sharing so other portal screens keep their existing presentation. */
-:root:has(.permissions-page) {
-  --bg: #f5f7f8;
-  --surface: #fff;
-  --surface-muted: #f6f8f9;
-  --text: #1f2b35;
-  --text-muted: #667582;
-  --line: #dde4e9;
-  --line-strong: #bdcbd5;
-  --accent: #157d64;
-  --accent-strong: #09664e;
-  --accent-soft: #edf7f2;
-  --accent-text: #fff;
-  --danger: #ab4141;
-  --warning-soft: #fff7e7;
-  --permission-warning-text: #80601c;
-  --permission-system: #f9fbfa;
-  --permission-inherited: #eaf0f2;
-  --shadow: 0 6px 24px #172b3b09;
-  --focus: #81c8b0;
-}
-@media (prefers-color-scheme: dark) {
-  :root:has(.permissions-page) {
-    --bg: #101a21;
-    --surface: #18252e;
-    --surface-muted: #1b2c36;
-    --text: #e1e9ed;
-    --text-muted: #a0b2bd;
-    --line: #30424d;
-    --line-strong: #4c6472;
-    --accent: #61c6a3;
-    --accent-strong: #4ab28f;
-    --accent-soft: #17392f;
-    --accent-text: #08261d;
-    --danger: #ed9393;
-    --warning-soft: #392f1d;
-    --permission-warning-text: #e0bd76;
-    --permission-system: #192c30;
-    --permission-inherited: #2d414c;
-  }
-}
+/* Sharing-specific layout only. Palette, widths and controls are shared in portal.css. */
 .permissions-page {
-  font-size: 14px;
   padding-bottom: 100px;
-}
-.permissions-page .page,
-.permissions-page .topbar-inner,
-.permissions-page .footer {
-  max-width: 1368px;
-}
-.permissions-page .topbar {
-  background: var(--surface);
-  position: static;
-}
-.permissions-page .site-header {
-  margin-bottom: 20px;
-}
-.permissions-page .site-header h1 {
-  font-size: 23px;
-}
-.permissions-page .site-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 9px;
-}
-.permissions-page .tabs {
-  margin-bottom: 28px;
-}
-.permissions-page .button {
-  min-height: 39px;
-  padding: 9px 15px;
-  gap: 6px;
-  border-radius: 7px;
-  border: 1px solid var(--accent);
-  font-size: 13px;
-}
-.permissions-page .button-secondary {
-  border-color: var(--line-strong);
-}
-.permission-manager button:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
 }
 .permission-manager .link-button {
   font-size: 13px;
   padding: 5px 0;
-}
-.permission-manager .field-label {
-  color: var(--text);
-  font-size: 12px;
-}
-.permission-manager .field {
-  gap: 7px;
-}
-.permission-manager input,
-.permission-manager select,
-.permission-manager textarea {
-  border-radius: 7px;
-  color: var(--text);
 }
 .permission-manager input[type="checkbox"] {
   width: 19px;
@@ -108,16 +15,6 @@
 }
 .permission-manager input[type="checkbox"]:disabled {
   opacity: 0.6;
-}
-.permission-manager
-  :is(input, select, button, summary, textarea, [tabindex]):focus-visible {
-  outline: 3px solid var(--focus);
-  outline-offset: 3px;
-}
-.permission-manager .field-hint {
-  font-size: 12px;
-  line-height: 1.6;
-  font-weight: 400;
 }
 .permission-manager .eyebrow {
   font-size: 10px;
@@ -161,12 +58,7 @@
   font-size: 14px;
 }
 .permission-surface {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 11px;
   margin-bottom: 22px;
-  box-shadow: var(--shadow);
-  min-width: 0;
 }
 .permission-manager .permission-heading {
   display: flex;
@@ -390,7 +282,7 @@
   .permission-assignment-table
   .permission-system-row
   th:first-child {
-  background: var(--permission-system);
+  background: var(--system-row);
 }
 .permission-manager
   .permission-system-row
@@ -420,7 +312,7 @@
 .permission-manager .permission-inherited {
   font-size: 10px;
   color: var(--text-muted);
-  background: var(--permission-inherited);
+  background: var(--inherited);
   border: 0;
   border-radius: 4px;
   padding: 1px 5px;
@@ -481,10 +373,27 @@
   background: var(--surface-muted);
 }
 .permission-group-guide > summary {
-  padding: 20px 24px;
+  padding: 12px 0;
   font-size: 13px;
   font-weight: 650;
   cursor: pointer;
+}
+.permission-reference {
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 8px;
+}
+.permission-reference > summary {
+  padding: 12px 0;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.permission-reference > summary > span {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+.permission-reference[open] {
+  padding-bottom: 14px;
 }
 [data-group-definitions] {
   padding: 0 24px;
@@ -514,7 +423,7 @@
   margin: 6px 0;
 }
 .permission-additional {
-  padding: 22px 24px;
+  padding: 0;
 }
 .permission-additional .permission-heading {
   margin-bottom: 14px;
@@ -583,7 +492,7 @@
   border: 0;
   border-top: 1px solid var(--accent);
   border-radius: 0;
-  padding: 15px max(24px, calc((100vw - 1320px) / 2));
+  padding: 15px max(24px, calc((100vw - var(--page-width) + 48px) / 2));
   box-shadow: 0 -4px 18px #172b3b05;
 }
 .permission-save-bar strong {
@@ -597,33 +506,8 @@
   font-size: 11px;
   margin: 3px 0 0;
 }
-.permission-manager .permission-dialog {
-  border: 1px solid var(--line);
-  border-radius: 13px;
-  padding: 0;
-  width: min(690px, calc(100vw - 32px));
-  max-height: calc(100dvh - 48px);
-  color: var(--text);
-  background: var(--surface);
-  box-shadow: 0 20px 100px #102b3d40;
-}
-.permission-manager .permission-dialog::backdrop {
-  background: #112b3b70;
-  backdrop-filter: blur(3px);
-}
-.permission-dialog-heading {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 18px;
-  padding: 23px 25px;
-  border-bottom: 1px solid var(--line);
-}
 .permission-manager .permission-dialog-heading h3 {
   font-size: 21px;
-}
-.permission-dialog [data-permission-dialog-body] {
-  padding: 24px;
 }
 .permission-dialog .permission-edit-form {
   padding: 0;
@@ -718,6 +602,18 @@
   font-size: 12px;
   color: var(--text-muted);
 }
+.permission-rule-limits {
+  margin-left: 29px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.permission-rule-limits > summary {
+  cursor: pointer;
+  font-size: 11px;
+}
+.permission-rule-limits p {
+  margin: 6px 0;
+}
 .permission-group-option > .link-button {
   margin-left: 29px;
   font-size: 11px;
@@ -770,9 +666,6 @@
 @media (max-width: 640px) {
   .permissions-page {
     padding-bottom: 150px;
-  }
-  .permissions-page .page {
-    padding-inline: 14px;
   }
   .permission-page-heading {
     flex-direction: column;

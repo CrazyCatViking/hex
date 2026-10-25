@@ -34,7 +34,7 @@
 
   <section
     id="site-access"
-    class="permission-surface permission-admission"
+    class="panel permission-surface permission-admission"
     aria-labelledby="site-access-heading"
   >
     <div class="permission-heading">
@@ -56,8 +56,8 @@
     </div>
     <div class="permission-admission-footer">
       <span class="field-hint"
-        >Site access opens the door. The table below controls what happens
-        inside.</span
+        >Admission is separate. Assigning an app permission group never gives
+        site access.</span
       ><button type="button" class="link-button" data-add-admission>
         + Add a person or directory group
       </button>
@@ -67,7 +67,7 @@
 
   <section
     id="permission-groups"
-    class="permission-surface permission-matrix-section"
+    class="panel panel-flush permission-surface permission-matrix-section"
     aria-labelledby="permission-groups-heading"
   >
     <div class="permission-heading">
@@ -75,8 +75,8 @@
         <p class="eyebrow">2 · APP PERMISSIONS</p>
         <h3 id="permission-groups-heading">Permission groups</h3>
         <p class="permission-description">
-          Each column is a permission group owned by this site. Tick a group to
-          assign it.
+          Tick a group to assign its app permissions. Select a column heading to
+          configure what it allows.
         </p>
       </div>
       <div class="form-actions">
@@ -98,8 +98,7 @@
       </p>
       <p>
         <strong>Site owners</strong> have explicit, editable assignments.
-        Existing access is kept; ownership does not automatically assign every
-        group.
+        Ownership is not an app-permission bypass.
       </p>
     </div>
     <div
@@ -124,35 +123,25 @@
     </div>
   </section>
 
-  <details class="permission-surface permission-group-guide">
+  <details class="permission-reference permission-group-guide">
     <summary>What does each permission group allow?</summary>
     <div data-group-definitions></div>
   </details>
-  <section
+  <details
     data-additional-access
-    class="permission-surface permission-additional"
+    class="permission-reference permission-additional"
     aria-labelledby="additional-access-heading"
     hidden
   >
-    <div class="permission-heading">
-      <div>
-        <p class="eyebrow">EXISTING ACCESS</p>
-        <h3 id="additional-access-heading">
-          Access granted outside this table
-        </h3>
-        <p class="permission-description">
-          These people have permissions from existing rules, not from the
-          checkboxes above. Changing a checkbox will not remove this access.
-        </p>
-      </div>
-    </div>
+    <summary id="additional-access-heading">
+      Access granted outside this table <span data-additional-summary></span>
+    </summary>
+    <p class="field-hint">
+      These people have permissions from existing rules, not from the checkboxes
+      above. Changing a checkbox will not remove this access.
+    </p>
     <div data-independent-rules></div>
-  </section>
-  <p class="permission-model-note">
-    Site access → permission-group membership → resource rules. Publishing and
-    sharing are separate owner responsibilities. Record conditions and
-    membership limits still apply.
-  </p>
+  </details>
   <noscript
     ><p class="banner banner-warning">
       Enable JavaScript to manage site access, permission groups, and resource
@@ -220,11 +209,11 @@
     </div>
   </form>
   <dialog
-    class="permission-dialog"
+    class="dialog permission-dialog"
     data-permission-dialog
     aria-labelledby="permission-dialog-title"
   >
-    <div class="permission-dialog-heading">
+    <div class="dialog-heading permission-dialog-heading">
       <div>
         <p class="eyebrow" data-permission-dialog-eyebrow>
           SHARING &amp; PERMISSIONS
@@ -240,7 +229,7 @@
         ×
       </button>
     </div>
-    <div data-permission-dialog-body></div>
+    <div class="dialog-body" data-permission-dialog-body></div>
   </dialog>
 </div>
 {{end}}

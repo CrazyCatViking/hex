@@ -27,15 +27,7 @@ func (a siteAuthorization) applicationAdmitted() bool {
 	if a.access.Version != 2 || a.identity != nil && a.identity.Provider == "automation" {
 		return true
 	}
-	if a.subjectsMatch(a.access.Admission) {
-		return true
-	}
-	for _, binding := range a.access.Bindings {
-		if slices.Contains(a.access.Admission.Roles, binding.Role) && a.identity.matchesAny([]string{binding.Principal}) {
-			return true
-		}
-	}
-	return false
+	return a.subjectsMatch(a.access.Admission)
 }
 
 func (a siteAuthorization) subjectsMatch(subjects Subjects) bool {

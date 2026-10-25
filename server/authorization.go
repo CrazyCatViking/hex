@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"slices"
 	"strings"
 )
 
@@ -61,11 +60,6 @@ func (s *Server) siteRole(identity *Identity, access SiteAccess, exists bool) si
 		}
 		authorization := siteAuthorization{identity: identity, access: access, role: roleViewer}
 		admitted := authorization.subjectsMatch(access.Admission)
-		for _, binding := range access.Bindings {
-			if slices.Contains(access.Admission.Roles, binding.Role) && identity.matchesAny([]string{binding.Principal}) {
-				admitted = true
-			}
-		}
 		if !admitted {
 			return roleNone
 		}
@@ -307,10 +301,14 @@ func (s *Server) sitePolicy(ctx context.Context, site string) (SiteAccess, bool,
 	if err := s.validatePathPrefixes(access.Paths); err != nil {
 		return SiteAccess{}, false, err
 	}
-	if access.Version == 0 {
-		actions, automations, err := s.migrationExtras(ctx, site)
-		if err != nil {
-			return SiteAccess{}, false, err
+	if access.Version == 0 || needsAdmissionMigration(access) {
+		var actions []*registeredAction
+		var automations []ScheduledAutomation
+		if access.Version == 0 {
+			actions, automations, err = s.migrationExtras(ctx, site)
+			if err != nil {
+				return SiteAccess{}, false, err
+			}
 		}
 		err = s.config.Access.UpdateSiteAccess(ctx, site, func(current SiteAccess, exists bool) (*SiteAccess, error) {
 			if !exists {
@@ -322,6 +320,11 @@ func (s *Server) sitePolicy(ctx context.Context, site string) (SiteAccess, bool,
 			access = current
 			if current.Version == 0 {
 				access = migratePermissionExtras(MigrateSiteAccess(current), actions, automations)
+			} else {
+				access = MigrateSiteAccess(current)
+			}
+			if err := validatePermissionPolicy(access); err != nil {
+				return nil, err
 			}
 			return &access, nil
 		})

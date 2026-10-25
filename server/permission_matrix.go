@@ -137,7 +137,6 @@ func deletePermissionGroup(local SiteAccess, role string) (SiteAccess, error) {
 	if _, exists := local.Roles[role]; !exists {
 		return local, errors.New("that permission group no longer exists")
 	}
-	local.Admission.Roles = slices.DeleteFunc(local.Admission.Roles, func(value string) bool { return value == role })
 	for id, binding := range local.Bindings {
 		if binding.Role == role {
 			delete(local.Bindings, id)

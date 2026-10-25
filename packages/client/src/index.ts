@@ -67,7 +67,7 @@ export type RecordCondition =
 export interface PermissionPolicy {
   version: 2;
   owners?: string[];
-  admission?: PermissionSubjects;
+  admission?: Omit<PermissionSubjects, "roles">;
   roles?: Record<
     string,
     { name?: string; description?: string; signedIn?: boolean }

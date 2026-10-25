@@ -82,6 +82,46 @@ func TestPermissionMatrixCreatesGroupRulesAndMembershipAtomically(t *testing.T) 
 	requestAs(t, server, principalHeaders("alex"), "GET", "/api/sites/demo/db/requests/submitted", nil, 403)
 }
 
+func TestPermissionMatrixSplitsSharedRuleWithoutRoundingConditions(t *testing.T) {
+	policy := permissionPolicy()
+	original := hex.PermissionGrant{
+		Kind: "collection", Resource: "ledger", Operations: []string{"read", "update"},
+		Subjects: hex.Subjects{Roles: []string{"employee", "approver"}, Principals: []string{"user:direct"}},
+		Fields:   []string{"amount"},
+		Where:    &hex.RecordCondition{Field: "data.amount", Op: "eq", Value: json.RawMessage(`9007199254740993`)},
+		Check:    &hex.RecordCondition{Field: "data.amount", Op: "eq", Value: json.RawMessage(`9007199254740995`)},
+	}
+	policy.Grants["shared"] = original
+	server, _, _ := setupPermissionPolicy(t, policy)
+	policy = guiPolicy(t, server)
+	remaining := hex.CloneSiteAccess(policy).Grants["shared"]
+	remaining.Subjects.Roles = []string{"employee"}
+	remaining.Where.Value = json.RawMessage(`9007199254740992`)
+	remaining.Check.Value = json.RawMessage(`9007199254740996`)
+	fork := remaining
+	fork.Resource = "ledger-review"
+	fork.Subjects = hex.Subjects{Roles: []string{"approver"}}
+	result := saveMatrix(t, server, policy,
+		matrixValue(t, "grant", url.Values{"id": {"shared"}, "keep_where": {"true"}, "keep_check": {"true"}}, remaining),
+		matrixValue(t, "grant", url.Values{"id": {"group-rule"}, "creating": {"true"}, "copy_from": {"shared"}, "keep_where": {"true"}, "keep_check": {"true"}}, fork))
+	if !strings.Contains(result, "Permissions saved") {
+		t.Fatal(result)
+	}
+	saved := guiPolicy(t, server)
+	for _, id := range []string{"shared", "group-rule"} {
+		grant := saved.Grants[id]
+		if string(grant.Where.Value) != string(original.Where.Value) || string(grant.Check.Value) != string(original.Check.Value) || !reflect.DeepEqual(grant.Fields, original.Fields) {
+			t.Fatal("splitting a group-specific rule changed its exact record limits", id)
+		}
+	}
+	if !reflect.DeepEqual(saved.Grants["shared"].Subjects, remaining.Subjects) || !reflect.DeepEqual(saved.Grants["group-rule"].Subjects, fork.Subjects) {
+		t.Fatal("splitting changed other recipients or retained them on the group-specific rule")
+	}
+	if !reflect.DeepEqual(saved.Published, policy.Published) {
+		t.Fatal("splitting changed the publication baseline")
+	}
+}
+
 func TestPermissionMatrixPreservesUntouchedBindingsAndExactConditions(t *testing.T) {
 	policy := permissionPolicy()
 	policy.Grants["exact"] = hex.PermissionGrant{Kind: "collection", Resource: "ledger", Operations: []string{"read"}, Subjects: hex.Subjects{Owners: true}, Where: &hex.RecordCondition{Field: "data.amount", Op: "eq", Value: json.RawMessage(`9007199254740993`)}}
