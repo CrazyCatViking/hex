@@ -212,4 +212,8 @@ func TestPermissionGUIRejectsInvalidOrDestructiveEdits(t *testing.T) {
 	if !strings.Contains(asset.Body.String(), "HexPermissionEditor") {
 		t.Fatal("permission GUI script unavailable")
 	}
+	styles := requestAs(t, server, principalHeaders("owner-id"), "GET", "/api/hex/permissions.css", nil, 200)
+	if !strings.Contains(styles.Body.String(), "#101a21") || !strings.Contains(styles.Body.String(), ".permissions-page") {
+		t.Fatal("approved permission design stylesheet unavailable")
+	}
 }

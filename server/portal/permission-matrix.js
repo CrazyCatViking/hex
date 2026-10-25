@@ -252,9 +252,10 @@
       return true;
     }
 
-    function openDialog(label) {
+    function openDialog(label, eyebrow = "SHARING & PERMISSIONS") {
       if (dialog.open && !closeDialog()) return null;
       query("#permission-dialog-title").textContent = label;
+      query("[data-permission-dialog-eyebrow]").textContent = eyebrow;
       dialogBody.replaceChildren();
       dialogDirty = false;
       dialog.showModal();
@@ -270,31 +271,33 @@
       query("[data-general-access]").value = generalMode(policy);
       const target = query("[data-admission-entries]");
       target.replaceChildren();
-      if (policy.admission.owners)
+      if (policy.admission.owners && !policy.admission.signedIn)
         target.append(
           element(
             "span",
-            "Site owners and platform administrators",
+            "Site owners & platform administrators",
             "permission-chip muted",
           ),
         );
       for (const principal of policy.admission.principals || []) {
         const chip = element("span", undefined, "permission-chip");
-        chip.append(
-          element("span", nameOf(principal)),
-          button(
-            "Remove",
-            () => {
-              stage("admission", {
-                general: generalMode(policy),
-                principal: (policy.admission.principals || []).filter(
-                  (value) => value !== principal,
-                ),
-              });
-            },
-            "link-button",
-          ),
+        const remove = button(
+          "×",
+          () => {
+            stage("admission", {
+              general: generalMode(policy),
+              principal: (policy.admission.principals || []).filter(
+                (value) => value !== principal,
+              ),
+            });
+          },
+          "permission-icon-button",
         );
+        remove.setAttribute(
+          "aria-label",
+          `Remove ${nameOf(principal)} from site access`,
+        );
+        chip.append(element("span", nameOf(principal)), remove);
         target.append(chip);
       }
       for (const id of policy.admission.roles || [])
@@ -305,40 +308,56 @@
             "permission-chip",
           ),
         );
-      if (!target.children.length)
+      if (policy.admission.signedIn)
         target.append(
           element(
-            "p",
-            "No explicit entry audience. Review general access and the rules below.",
-            "field-hint",
+            "span",
+            "Everyone signed in to the workspace · not the public internet",
+            "permission-chip muted",
           ),
         );
       const boundary = query("[data-page-boundaries]");
       boundary.replaceChildren();
-      const list = element("ul", undefined, "permission-explanations");
-      for (const rule of Object.values(policy.grants || {}).filter(
-        (rule) => rule.kind === "path",
-      )) {
-        list.append(
-          element(
-            "li",
-            `${rule.resource}: ${ui.audienceText(rule.subjects, labels, policy.roles)}${rule.except?.length ? `; except ${rule.except.join(", ")}` : ""}.`,
-          ),
-        );
-      }
-      const details = disclosure(
-        "Page access and protected paths",
-        list,
-        "advanced",
+      const pages = Object.entries(policy.grants || {}).filter(
+        ([, rule]) => rule.kind === "path",
       );
-      details.append(
+      const protectedPages = pages.some(
+        ([, rule]) => rule.resource !== "*" || rule.except?.length,
+      );
+      const summary = element("div", undefined, "permission-page-summary");
+      summary.append(
         element(
           "p",
-          "Site entry and page rules both apply. Changing general access creates ordinary-page access while keeping protected-path exclusions; it does not grant app data access.",
-          "field-hint",
+          protectedPages
+            ? "Some pages have their own access settings."
+            : "Page permissions are checked after site entry.",
+        ),
+        button(
+          "Review page access",
+          () => {
+            const body = openDialog("Page access", "SITE ACCESS · PAGES");
+            if (!body) return;
+            body.append(
+              element(
+                "p",
+                "People must be admitted to the site and allowed to open the page. These settings do not grant access to app data.",
+                "permission-description",
+              ),
+            );
+            if (!pages.length)
+              body.append(
+                element(
+                  "p",
+                  "No page rules exist. Admitted people cannot open pages until a page rule allows it.",
+                  "banner banner-warning",
+                ),
+              );
+            pages.forEach(([id, rule]) => body.append(ruleCard(id, rule)));
+          },
+          "link-button",
         ),
       );
-      boundary.append(details);
+      boundary.append(summary);
     }
 
     function renderCell(kind, principal, id) {
@@ -446,13 +465,13 @@
             : scopes
                 .map((scope) => `${title(scope.kind)}: ${scope.id}`)
                 .join(", ");
-          content.append(
-            button(
-              text,
-              () => editMembership(principal, id),
-              "permission-scope-button",
-            ),
+          const limitButton = button(
+            text,
+            () => editMembership(principal, id),
+            "permission-scope-button",
           );
+          limitButton.setAttribute("aria-label", text);
+          content.append(limitButton);
         }
       }
       cell.append(content);
@@ -560,11 +579,32 @@
           )
           .map((principal) => ["custom", principal]),
       ];
+      who.append(
+        element(
+          "small",
+          `${rows.filter(([kind]) => kind === "custom").length} custom rows · no automatic user list`,
+        ),
+      );
       for (const [kind, principal] of rows) {
         const row = element("tr");
+        if (kind !== "custom") row.className = "permission-system-row";
         row.dataset.permissionRow = kind === "custom" ? principal : kind;
         const heading = element("th");
         heading.scope = "row";
+        if (kind === "custom")
+          heading.append(
+            element(
+              "span",
+              principal.startsWith("group:")
+                ? "DIRECTORY GROUP"
+                : principal.startsWith("automation:")
+                  ? "AUTOMATION"
+                  : principal.startsWith("role:")
+                    ? "DIRECTORY ROLE"
+                    : "PERSON",
+              "permission-row-kind",
+            ),
+          );
         heading.append(
           element(
             "strong",
@@ -579,13 +619,58 @@
           element(
             "small",
             kind === "default"
-              ? "Default permissions"
+              ? "Default permissions · no directory listing"
               : kind === "owners"
                 ? owners.map(nameOf).join(", ") || "No listed owners"
                 : labels.get(principal)?.detail || principal,
             "field-hint",
           ),
         );
+        if (kind === "owners") {
+          const ownerRules = Object.entries(policy.grants || {}).filter(
+            ([, rule]) => rule.kind !== "path" && rule.subjects.owners,
+          );
+          if (ownerRules.length)
+            heading.append(
+              button(
+                "Also has existing access ↗",
+                () =>
+                  openAccessRules(
+                    "Site owners & platform administrators",
+                    ownerRules,
+                  ),
+                "link-button",
+              ),
+            );
+          if (
+            owners.length &&
+            groups.some(
+              (id) =>
+                !policy.roles[id].signedIn &&
+                owners.some((owner) => !bindings(owner, id).length),
+            )
+          )
+            heading.append(
+              button(
+                "Assign all groups",
+                () => {
+                  if (
+                    !window.confirm(
+                      "Assign every current permission group without membership limits to all listed site owners? Record and field conditions still apply. Existing rules are unchanged.",
+                    )
+                  )
+                    return;
+                  for (const id of groups)
+                    if (!policy.roles[id].signedIn)
+                      stage("owner-membership", {
+                        group: id,
+                        assigned: "true",
+                      });
+                },
+                "link-button",
+              ),
+            );
+        }
         if (kind === "custom" && principal.startsWith("automation:")) {
           heading.append(
             element(
@@ -611,23 +696,27 @@
         row.append(heading);
         for (const id of groups) row.append(renderCell(kind, principal, id));
         const actions = element("td");
-        if (kind === "custom")
-          actions.append(
-            button(
-              "Remove row",
-              () => {
-                if (
-                  !window.confirm(
-                    `Remove all direct permission-group assignments for ${nameOf(principal)}? Defaults, directory-group memberships, direct resource rules, and site entry are unchanged.`,
-                  )
+        if (kind === "custom") {
+          const remove = button(
+            "×",
+            () => {
+              if (
+                !window.confirm(
+                  `Remove all direct permission-group assignments for ${nameOf(principal)}? Defaults, directory-group memberships, direct resource rules, and site entry are unchanged.`,
                 )
-                  return;
-                extraRows.delete(principal);
-                stage("remove-principal", { principal });
-              },
-              "link-button",
-            ),
+              )
+                return;
+              extraRows.delete(principal);
+              stage("remove-principal", { principal });
+            },
+            "permission-icon-button",
           );
+          remove.setAttribute(
+            "aria-label",
+            `Remove ${nameOf(principal)} permission row`,
+          );
+          actions.append(remove);
+        }
         row.append(actions);
         body.append(row);
       }
@@ -635,38 +724,52 @@
       target.append(table);
     }
 
+    function resourceName(rule) {
+      const all = {
+        path: "All site pages",
+        collection: "All data collections",
+        file: "All uploaded files",
+        channel: "All realtime channels",
+        action: "All app actions",
+        integration: "All integration endpoints",
+      };
+      if (rule.resource === "*") return all[rule.kind];
+      return `${ui.kindLabels[rule.kind]} · ${rule.resource}`;
+    }
+
+    function ruleSummary(rule) {
+      const actions = rule.operations
+        .map((operation) => ui.operationLabels[operation] || operation)
+        .join(", ");
+      return `${resourceName(rule)} — ${actions.toLowerCase()}`;
+    }
+
     function ruleCard(id, rule) {
       const card = element("div", undefined, "permission-rule-card");
-      const label = `${ui.operationLabels[rule.operations[0]] || rule.operations[0]}${
-        rule.operations.length > 1
-          ? ` / ${rule.operations
-              .slice(1)
-              .map((operation) => ui.operationLabels[operation])
-              .join(" / ")}`
-          : ""
-      } · ${ui.kindLabels[rule.kind]}: ${rule.resource}`;
-      card.append(element("h4", label));
+      card.append(
+        element("h4", resourceName(rule)),
+        element(
+          "p",
+          rule.operations
+            .map((operation) => ui.operationLabels[operation] || operation)
+            .join(" · "),
+        ),
+      );
       const limits = ui.limitsText(rule);
       if (limits.length) {
         const list = element("ul", undefined, "permission-explanations");
         limits.forEach((text) => list.append(element("li", text)));
         card.append(list);
-      } else
-        card.append(
-          element(
-            "p",
-            "No record or field restrictions on this rule.",
-            "field-hint",
-          ),
-        );
+      }
       card.append(
         element(
           "p",
-          `Allowed audience: ${ui.audienceText(rule.subjects, labels, policy.roles)}`,
+          `Who: ${ui.audienceText(rule.subjects, labels, policy.roles)}`,
           "field-hint",
         ),
       );
-      card.append(
+      const actions = element("div", undefined, "form-actions");
+      actions.append(
         button("Edit rule", () => openRule(id, rule)),
         button(
           "Delete rule",
@@ -683,7 +786,28 @@
           "link-button",
         ),
       );
+      card.append(actions);
       return card;
+    }
+
+    function openAccessRules(audience, rules) {
+      const target = openDialog(audience, "ACCESS OUTSIDE PERMISSION GROUPS");
+      if (!target) return;
+      target.append(
+        element(
+          "p",
+          "These existing rules grant access independently of the permission table. They may have been created by an earlier sharing setup or by the app’s configuration. They stay in effect until explicitly edited or deleted here.",
+          "permission-description",
+        ),
+      );
+      target.append(
+        element(
+          "p",
+          "Site entry is still required. Deleting a rule affects every audience listed on it; other rules may continue to grant access.",
+          "field-hint",
+        ),
+      );
+      rules.forEach(([id, rule]) => target.append(ruleCard(id, rule)));
     }
 
     function renderIndependentRules() {
@@ -691,21 +815,113 @@
       target.replaceChildren();
       const rules = Object.entries(policy.grants || {}).filter(
         ([, rule]) =>
-          !rule.subjects.roles?.length ||
-          rule.subjects.signedIn ||
-          rule.subjects.owners ||
-          rule.subjects.principals?.length,
+          rule.kind !== "path" &&
+          (rule.subjects.signedIn ||
+            rule.subjects.owners ||
+            rule.subjects.principals?.length),
       );
-      rules.forEach(([id, rule]) => target.append(ruleCard(id, rule)));
-      if (!rules.length)
+      query("[data-additional-access]").hidden = !rules.length;
+      const audiences = new Map();
+      for (const [id, rule] of rules) {
+        const subjects = {
+          signedIn: Boolean(rule.subjects.signedIn),
+          owners: Boolean(rule.subjects.owners),
+          principals: [...(rule.subjects.principals || [])].sort(),
+        };
+        const key = JSON.stringify(subjects);
+        if (!audiences.has(key)) audiences.set(key, { subjects, rules: [] });
+        audiences.get(key).rules.push([id, rule]);
+      }
+      for (const { subjects, rules } of audiences.values()) {
+        const name = ui.audienceText(subjects, labels, policy.roles);
+        const row = element("div", undefined, "permission-access-row");
+        const description = element("div");
+        description.append(element("strong", name));
+        const resources = [
+          ...new Set(rules.map(([, rule]) => resourceName(rule))),
+        ];
+        description.append(element("p", resources.join(" · ")));
+        if (
+          rules.some(
+            ([, rule]) =>
+              rule.where ||
+              rule.check ||
+              rule.scope ||
+              Array.isArray(rule.fields) ||
+              rule.except?.length,
+          )
+        )
+          description.append(
+            element(
+              "p",
+              "Some permissions have record, field or resource limits. Review access for details.",
+            ),
+          );
+        row.append(
+          description,
+          button(
+            "Review access",
+            () => openAccessRules(name, rules),
+            "button button-secondary",
+          ),
+        );
+        target.append(row);
+      }
+    }
+
+    function renderDefinitions() {
+      const target = query("[data-group-definitions]");
+      target.replaceChildren();
+      for (const id of Object.keys(policy.roles || {})) {
+        const section = element(
+          "section",
+          undefined,
+          "permission-group-definition",
+        );
+        const heading = element("div", undefined, "permission-heading");
+        heading.append(
+          element("h4", groupName(id)),
+          button("Edit group", () => openGroup(id), "link-button"),
+        );
+        const rules = groupRules(id);
+        const list = element("ul");
+        for (const [, rule] of rules) {
+          const item = element("li", ruleSummary(rule));
+          if (
+            rule.scope ||
+            rule.where ||
+            rule.check ||
+            Array.isArray(rule.fields) ||
+            rule.except?.length
+          )
+            item.append(
+              element("span", ". Limits apply — open the group for details."),
+            );
+          list.append(item);
+        }
+        if (!rules.length)
+          list.append(
+            element(
+              "li",
+              "No resource permissions yet. Assigning this group does not grant data or action access.",
+            ),
+          );
+        section.append(heading);
+        if (policy.roles[id].description)
+          section.append(
+            element("p", policy.roles[id].description, "field-hint"),
+          );
+        section.append(list);
+        target.append(section);
+      }
+      if (!target.children.length)
         target.append(
           element(
             "p",
-            "No rules outside permission-group audiences.",
+            "Create a permission group to define what it allows.",
             "field-hint",
           ),
         );
-      target.append(button("Add a resource rule", () => openRule("", {})));
     }
 
     function render() {
@@ -717,9 +933,10 @@
       renderAdmission();
       renderMatrix();
       renderIndependentRules();
+      renderDefinitions();
       query("[data-save-state]").textContent = edits.length
         ? "You have unsaved changes"
-        : "No unsaved changes";
+        : "All changes saved";
       query("[data-save-permissions]").disabled = !edits.length || saving;
       query("[data-discard-permissions]").disabled = !edits.length || saving;
       saveForm.classList.toggle("has-changes", Boolean(edits.length));
@@ -788,6 +1005,7 @@
         id
           ? `Edit ${groupName(id)} permission group`
           : "Create a permission group",
+        "OWNED BY THIS SITE",
       );
       if (!target) return;
       const original = policy.roles?.[id] || {};
@@ -796,38 +1014,133 @@
       name.maxLength = 120;
       const description = input(original.description || "");
       const owners = checkbox(
-        "Assign this new group to all listed site owners",
-        true,
+        id
+          ? "Assign this permission group to all listed site owners"
+          : "Assign this new group to all listed site owners",
+        !id ||
+          (policy.owners?.length > 0 &&
+            policy.owners.every((owner) => bindings(owner, id).length > 0)),
       );
-      const form = element("form", undefined, "permission-edit-form");
+      if (id && !owners.control.checked)
+        owners.control.indeterminate = policy.owners?.some(
+          (owner) => bindings(owner, id).length > 0,
+        );
+      let ownersEdited = false;
+      owners.control.addEventListener("change", () => {
+        ownersEdited = true;
+      });
+      const form = element(
+        "form",
+        undefined,
+        "permission-edit-form permission-group-form",
+      );
       form.append(
         field("Permission group name", name),
         field("Description", description),
+        owners.wrapper,
       );
+      if (id && original.signedIn)
+        form.append(
+          element(
+            "p",
+            "The default row also gives this group to admitted people, including owners. Unchecking an owner assignment does not deny that default.",
+            "field-hint",
+          ),
+        );
       if (!id)
         form.append(
-          owners.wrapper,
           element(
             "p",
             "A new group is empty until you add resource rules. Owner assignments are explicit, not a bypass of those rules.",
             "field-hint",
           ),
         );
-      else
+      const ruleChoices = [];
+      if (id) {
         form.append(
+          element("h4", "What does this permission group allow?"),
           element(
             "p",
-            `Stable app identifier: ${id}. Renaming the display name does not change app code or existing rules.`,
+            "These are this group’s resource permissions. Untick one to remove it from this group, or edit it to change its operations and limits.",
             "field-hint",
           ),
         );
+        const rules = groupRules(id);
+        const resources = element(
+          "div",
+          undefined,
+          "permission-group-resources",
+        );
+        for (const kind of new Set(rules.map(([, rule]) => rule.kind))) {
+          const section = element("fieldset");
+          section.append(element("legend", ui.kindLabels[kind]));
+          for (const [ruleID, rule] of rules.filter(
+            ([, rule]) => rule.kind === kind,
+          )) {
+            const choice = checkbox(ruleSummary(rule), true);
+            ruleChoices.push({ id: ruleID, rule, control: choice.control });
+            const option = element("div", undefined, "permission-group-option");
+            option.append(choice.wrapper);
+            const limits = ui.limitsText(rule);
+            if (limits.length) option.append(element("p", limits.join(". ")));
+            option.append(
+              button("Edit rule", () => openRule(ruleID, rule), "link-button"),
+            );
+            section.append(option);
+          }
+          resources.append(section);
+        }
+        if (!rules.length)
+          resources.append(
+            element(
+              "p",
+              "No resource rules yet. This group grants no data access.",
+              "field-hint",
+            ),
+          );
+        form.append(
+          resources,
+          button(
+            "+ Add resource rule",
+            () => openRule("", {}, id),
+            "button button-secondary",
+          ),
+        );
+        if (policy.admission.roles?.includes(id))
+          form.append(
+            element(
+              "p",
+              "This group also allows site entry. Deleting it removes that entry route.",
+              "banner banner-warning",
+            ),
+          );
+      }
       const submit = element(
         "button",
         id ? "Apply group changes" : "Add permission group",
         "button",
       );
       submit.type = "submit";
-      form.append(submit);
+      const actions = element("div", undefined, "form-actions");
+      actions.append(submit);
+      if (id)
+        actions.append(
+          button(
+            "Delete permission group",
+            () => {
+              if (
+                !window.confirm(
+                  `Delete ${groupName(id)}, all its memberships, and its rule audiences? Rules shared with other groups or people keep their other audiences. Its site-entry role, if any, will also be removed.`,
+                )
+              )
+                return;
+              stage("delete-group", { id });
+              finishDialog();
+            },
+            "link-button permission-delete",
+          ),
+        );
+      form.append(actions);
       form.addEventListener("submit", (event) => {
         event.preventDefault();
         const groupID = id || `portal-${crypto.randomUUID()}`;
@@ -846,6 +1159,14 @@
           showError("A permission group with that name already exists.");
           return;
         }
+        if (
+          ownersEdited &&
+          owners.control.checked &&
+          !window.confirm(
+            "Assign this group without membership limits to all listed site owners? Record and field conditions still apply.",
+          )
+        )
+          return;
         stage("role", {
           id: groupID,
           entry: JSON.stringify({
@@ -857,56 +1178,47 @@
             ? {}
             : { creating: "true", assign_owners: owners.control.checked }),
         });
+        if (id && ownersEdited)
+          stage("owner-membership", {
+            group: id,
+            assigned: owners.control.checked,
+          });
+        for (const choice of ruleChoices) {
+          if (choice.control.checked) continue;
+          const rule = choice.rule;
+          const subjects = {
+            ...rule.subjects,
+            roles: (rule.subjects.roles || []).filter((role) => role !== id),
+          };
+          if (
+            !subjects.signedIn &&
+            !subjects.owners &&
+            !subjects.principals?.length &&
+            !subjects.roles.length
+          )
+            stage("remove-grant", { id: choice.id });
+          else
+            stage("grant", {
+              id: choice.id,
+              entry: JSON.stringify({ ...rule, subjects }),
+              keep_where: "true",
+              keep_check: "true",
+            });
+        }
         finishDialog();
-        openGroup(groupID);
+        if (!id) openGroup(groupID);
       });
       target.append(form);
       if (id) {
         target.append(
-          element("h4", "What this group allows"),
-          element(
-            "p",
-            "Each rule allows specific operations on an app resource. Record conditions determine which records match. Rules add access; a narrow rule does not override a broader one.",
-            "field-hint",
-          ),
-        );
-        const rules = groupRules(id);
-        if (!rules.length)
-          target.append(
+          disclosure(
+            "App identifier",
             element(
               "p",
-              "No resource rules yet. This group grants no data access.",
-              "banner banner-warning",
+              `Stable identifier: ${id}. Changing the display name does not change app code or existing rules.`,
+              "field-hint",
             ),
-          );
-        rules.forEach(([ruleID, rule]) =>
-          target.append(ruleCard(ruleID, rule)),
-        );
-        target.append(
-          button("+ Add resource rule", () => openRule("", {}, id), "button"),
-        );
-        if (policy.admission.roles?.includes(id))
-          target.append(
-            element(
-              "p",
-              "This group also controls site entry through an existing admission rule. Deleting the group removes that entry route.",
-              "banner banner-warning",
-            ),
-          );
-        target.append(
-          button(
-            "Delete permission group",
-            () => {
-              if (
-                !window.confirm(
-                  `Delete ${groupName(id)}, all its memberships, and its rule audiences? Rules shared with other groups or people keep their other audiences. Its site-entry role, if any, will also be removed.`,
-                )
-              )
-                return;
-              stage("delete-group", { id });
-              finishDialog();
-            },
-            "link-button permission-delete",
+            "permission-identifier",
           ),
         );
       }
@@ -914,11 +1226,22 @@
     }
 
     function openRule(id, rule, groupID = "") {
+      if (
+        id &&
+        rule.subjects.roles?.length === 1 &&
+        !rule.subjects.signedIn &&
+        !rule.subjects.owners &&
+        !rule.subjects.principals?.length
+      )
+        groupID = rule.subjects.roles[0];
       const target = openDialog(
         id ? "Edit resource rule" : "Add resource rule",
+        groupID
+          ? `PERMISSION GROUP · ${groupName(groupID)}`
+          : "CUSTOM RESOURCE ACCESS",
       );
       if (!target) return;
-      if (id)
+      if (id && !groupID)
         target.append(
           element(
             "p",
@@ -1082,6 +1405,9 @@
     );
     query("[data-new-permission-group]").addEventListener("click", () =>
       openGroup(),
+    );
+    query("[data-add-direct-rule]").addEventListener("click", () =>
+      openRule("", {}),
     );
     query("[data-edit-owners]").addEventListener("click", () => {
       const target = openDialog("Manage site owners");

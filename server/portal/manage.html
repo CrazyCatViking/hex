@@ -6,6 +6,7 @@
     <script src="/api/hex/manage.js" defer></script>
     <script src="/api/hex/permissions.js" defer></script>
     <script src="/api/hex/permission-matrix.js" defer></script>
+    <link rel="stylesheet" href="/api/hex/permissions.css" />
   </head>
   <body hx-headers='{"X-Hex-Request":"1"}'>
     {{template "header" .Chrome}}
@@ -164,8 +165,12 @@
     <script src="/api/hex/manage.js" defer></script>
     <script src="/api/hex/permissions.js" defer></script>
     <script src="/api/hex/permission-matrix.js" defer></script>
+    <link rel="stylesheet" href="/api/hex/permissions.css" />
   </head>
-  <body hx-headers='{"X-Hex-Request":"1"}'>
+  <body
+    class="{{if eq .Tab `sharing`}}permissions-page{{end}}"
+    hx-headers='{"X-Hex-Request":"1"}'
+  >
     {{template "header" .Chrome}}
     <main id="main" class="page">
       <nav class="breadcrumbs" aria-label="Breadcrumb">
@@ -284,8 +289,7 @@
         </ul>
       </section>
       {{end}} {{end}} {{if eq .Tab "sharing"}}
-      <section class="panel" aria-labelledby="sharing-heading">
-        <h2 id="sharing-heading">Sharing</h2>
+      <section class="permission-workspace" aria-label="Sharing">
         {{template "sharing" .Sharing}}
       </section>
       {{end}} {{if eq .Tab "data"}}
