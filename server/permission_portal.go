@@ -112,7 +112,7 @@ func (s *Server) permissionSharingView(ctx context.Context, site string, access 
 	view := sharingView{Site: site, Platform: s.platformName(), V2: true, Policy: string(encoded), Base: string(encoded), General: sharingMode(access), Summary: sharingSummary(access, s.platformName())}
 	view.GeneralChoices = choices(view.General, [2]string{"owners", "Only site owners"}, [2]string{"selected", "Only selected people and groups"}, [2]string{"everyone", "Everyone signed in to " + view.Platform})
 	if view.General == "custom" {
-		view.GeneralChoices = append(view.GeneralChoices, choices("custom", [2]string{"custom", "Permission groups and custom access (keep current settings)"})...)
+		view.GeneralChoices = append(view.GeneralChoices, choices("custom", [2]string{"custom", "Custom site admission (keep current settings)"})...)
 	}
 	var principals []string
 	for _, value := range access.Owners {

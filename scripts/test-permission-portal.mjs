@@ -144,6 +144,12 @@ try {
   await page.goto(`${url}/manage/demo?tab=sharing`);
   await page.locator('#permission-manager[data-ready="true"]').waitFor();
   const initial = await policy();
+  assert.equal(initial.admission.roles, undefined);
+  assert.deepEqual(initial.admission.principals, ["user:alex"]);
+  assert.doesNotMatch(
+    await page.locator("#site-access").innerText(),
+    /Permission group:|Permission groups and custom/,
+  );
   assert.equal(
     await page
       .getByText("Other resource rules and page restrictions", { exact: true })
@@ -164,11 +170,18 @@ try {
     0,
     "do not dump technical rule cards into the sharing screen",
   );
+  assert.equal(
+    await page.locator("[data-additional-access]").getAttribute("open"),
+    null,
+    "outside grants should be summarized, not expanded by default",
+  );
+  await page.locator("[data-additional-access] > summary").click();
   await page
     .getByRole("button", { name: "Review access", exact: true })
     .click();
   assert.equal(await dialog.locator(".permission-rule-card").count(), 5);
   await close();
+  await page.locator("[data-additional-access] > summary").click();
   await page
     .getByRole("button", { name: "Review page access", exact: true })
     .click();
@@ -264,6 +277,35 @@ try {
     .fill("invoices");
   await rule.getByLabel("View", { exact: true }).check();
   await rule.getByLabel("Edit", { exact: true }).check();
+  const selectorLayout = await rule.evaluate((form) => {
+    const kind = form.querySelector("select").getBoundingClientRect();
+    const resource = form.querySelector("input[list]").getBoundingClientRect();
+    return {
+      aligned: Math.abs(kind.top - resource.top) < 1,
+      kindHeight: kind.height,
+      resourceHeight: resource.height,
+    };
+  });
+  assert.deepEqual(
+    selectorLayout,
+    { aligned: true, kindHeight: 42, resourceHeight: 42 },
+    "shared form grid must align resource controls without stretching the select to match hint text",
+  );
+  assert.equal(
+    await rule.locator(".permission-advanced-limits").getAttribute("open"),
+    null,
+  );
+  await screenshot("resource-rule-simple");
+  await rule.getByLabel("Resource type", { exact: true }).selectOption("file");
+  await rule
+    .getByLabel("Resource type", { exact: true })
+    .selectOption("collection");
+  assert.equal(
+    await rule.getByLabel("Edit", { exact: true }).isChecked(),
+    true,
+    "switching resource types must retain draft operation choices",
+  );
+  await rule.locator(".permission-advanced-limits > summary").click();
   await rule
     .locator("summary")
     .filter({ hasText: "Limit editable fields (optional)" })
@@ -799,6 +841,91 @@ try {
   assert.deepEqual(afterShared.grants.shared.subjects.principals, ["user:bea"]);
   assert.deepEqual(afterShared.grants.shared.where.value, deepValue);
   assert.deepEqual(afterShared.grants.deep, sharedPolicy.grants.deep);
+  // Editing through a group forks legacy shared grants rather than changing
+  // every group/person that used to share the rule.
+  await page.request.put(`${url}/api/hex/sites/demo/access`, {
+    data: sharedPolicy,
+    headers: { "X-Hex-Request": "1" },
+  });
+  await page.reload();
+  await page
+    .getByRole("button", {
+      name: "Edit Background job permission group",
+      exact: true,
+    })
+    .click();
+  await dialog
+    .locator(".permission-group-option")
+    .filter({ hasText: "Data collection · shared — view" })
+    .getByRole("button", { name: "Edit rule", exact: true })
+    .click();
+  assert.match(
+    await dialog.innerText(),
+    /other recipients keep the original rule/,
+  );
+  assert.equal(await dialog.locator(".permission-audience").isVisible(), false);
+  await dialog
+    .getByLabel("Resource name or prefix", { exact: true })
+    .fill("shared2");
+  await dialog
+    .getByRole("button", { name: "Apply rule changes", exact: true })
+    .click();
+  await save();
+  const forked = await policy();
+  assert.equal(forked.grants.shared.resource, "shared");
+  assert.deepEqual(forked.grants.shared.subjects.roles, ["other"]);
+  assert.deepEqual(forked.grants.shared.subjects.principals, ["user:bea"]);
+  const independent = Object.values(forked.grants).find(
+    (rule) => rule.resource === "shared2",
+  );
+  assert.deepEqual(independent.subjects.roles, ["background"]);
+  assert.deepEqual(independent.where.value, deepValue);
+  assert.deepEqual(forked.grants.deep, sharedPolicy.grants.deep);
+  const designPage = await browser.newPage();
+  for (const scheme of ["light", "dark"]) {
+    await designPage.emulateMedia({ colorScheme: scheme });
+    for (const mobile of [false, true]) {
+      await designPage.setViewportSize(
+        mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 },
+      );
+      for (const path of [
+        "/",
+        "/manage",
+        "/manage/demo?tab=overview",
+        "/manage/demo?tab=data",
+        "/start",
+      ]) {
+        await designPage.goto(`${url}${path}`);
+        const sharedDesign = await designPage.evaluate(() => {
+          const root = getComputedStyle(document.documentElement);
+          const main = getComputedStyle(document.querySelector(".page"));
+          const button = document.querySelector(".button");
+          return {
+            background: root.getPropertyValue("--bg").trim(),
+            maxWidth: main.maxWidth,
+            radius: button ? getComputedStyle(button).borderRadius : "7px",
+            overflow: document.documentElement.scrollWidth > innerWidth,
+          };
+        });
+        assert.deepEqual(
+          sharedDesign,
+          {
+            background: scheme === "dark" ? "#101a21" : "#f5f7f8",
+            maxWidth: "1368px",
+            radius: "7px",
+            overflow: false,
+          },
+          `${path} must use shared portal components in ${scheme} ${mobile ? "mobile" : "desktop"}`,
+        );
+        if (process.env.HEX_PORTAL_SCREENSHOTS && !mobile)
+          await designPage.screenshot({
+            path: `${process.env.HEX_PORTAL_SCREENSHOTS}-shared-${path === "/" ? "home" : path.replace(/[^a-z]+/g, "-")}-${scheme}.png`,
+            fullPage: true,
+          });
+      }
+    }
+  }
+  await designPage.close();
   assert.deepEqual(errors, []);
   console.log(
     "Production permission matrix passed: groups and resource rules, atomic saves, defaults and owner assignments, scoped memberships, revocation, lossless custom rules, validation/stale-form/sign-in error retention, technical-editor draft protection, keyboard access, escaping, and mobile layout. Routine management required no JSON.",

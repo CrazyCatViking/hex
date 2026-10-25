@@ -57,7 +57,6 @@ func mergePermissionPolicy(base, live, local SiteAccess) (SiteAccess, []string) 
 	}
 	merged.Owners = mergeExplicitMembers(base.Owners, live.Owners, local.Owners)
 	merged.Admission.Principals = mergeExplicitMembers(base.Admission.Principals, live.Admission.Principals, local.Admission.Principals)
-	merged.Admission.Roles = mergeExplicitMembers(base.Admission.Roles, live.Admission.Roles, local.Admission.Roles)
 	mergeBool := func(base, live, local bool) bool {
 		if local == base {
 			return live

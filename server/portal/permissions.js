@@ -713,6 +713,8 @@
       }
     };
     renderOperations();
+    const selectedByKind = new Map();
+    let previousKind = kind.value;
     const who = element("fieldset", undefined, "permission-audience");
     who.append(element("legend", "Who receives this permission?"));
     const all = checkbox(
@@ -805,7 +807,7 @@
       limits.hidden = !record;
       resource.placeholder = {
         path: "/reports/ or *",
-        collection: "expenses or *",
+        collection: "Collection ID or *",
         file: "exports/ or *",
         channel: "updates or *",
         action: "approve-request or *",
@@ -813,7 +815,20 @@
       }[kind.value];
     };
     kind.addEventListener("change", () => {
+      selectedByKind.set(
+        previousKind,
+        [...operationControls.querySelectorAll("input:checked")].map(
+          (control) => control.dataset.operation,
+        ),
+      );
       renderOperations();
+      if (selectedByKind.has(kind.value)) {
+        for (const control of operationControls.querySelectorAll("input"))
+          control.checked = selectedByKind
+            .get(kind.value)
+            .includes(control.dataset.operation);
+      }
+      previousKind = kind.value;
       updateKind();
     });
     updateKind();
@@ -903,13 +918,17 @@
         };
       },
     );
-    const selectors = element("div", undefined, "permission-form-grid");
+    const selectors = element(
+      "div",
+      undefined,
+      "form-grid permission-form-grid",
+    );
     selectors.append(
       field("Resource type", kind),
       field(
         "Resource name or prefix",
         resource,
-        "Choose an existing policy resource or enter the identifier supplied by the app. This does not create the resource. * means all matching resources.",
+        "Use the app’s resource ID. * selects all resources of this type.",
       ),
     );
     const suggestions = element("datalist");
@@ -940,18 +959,21 @@
       "advanced",
     );
     exclusions.open = Boolean(grant.except?.length);
-    form.append(
-      selectors,
-      operationBox,
-      who,
-      limits,
-      exclusions,
-      element(
-        "p",
-        "Grant only the operations needed. Approval actions and integrations can have additional server-side contracts and platform approvals; this rule does not bypass them.",
-        "field-hint",
-      ),
+    const advanced = element("div", undefined, "permission-record-limits");
+    advanced.append(limits, exclusions);
+    const advancedDetails = disclosure(
+      "Advanced limits",
+      advanced,
+      "advanced permission-advanced-limits",
     );
+    advancedDetails.open = Boolean(
+      grant.scope ||
+      grant.where ||
+      grant.check ||
+      Array.isArray(grant.fields) ||
+      grant.except?.length,
+    );
+    form.append(selectors, operationBox, who, advancedDetails);
     finish();
     return form;
   }

@@ -53,6 +53,9 @@ func run() error {
 	for kind, operations := range map[string][]string{"collection": {"read", "create", "update", "delete"}, "file": {"read", "upload", "delete"}, "channel": {"read", "send"}, "action": {"run"}, "integration": {"read", "write"}} {
 		policy.Grants["existing-owner-"+kind] = hex.PermissionGrant{Kind: kind, Resource: "*", Operations: operations, Subjects: hex.Subjects{Owners: true}}
 	}
+	// Persist the earlier v2 shape so the browser also exercises automatic,
+	// independent site-admission migration rather than just a fresh policy.
+	policy.Admission.Roles = []string{"reviewers"}
 	baseline := hex.CloneSiteAccess(policy)
 	policy.Published = &baseline
 	if err := policies.PutSiteAccess(ctx, "demo", policy); err != nil {

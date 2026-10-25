@@ -2,6 +2,10 @@
 
 Each Hex server includes a portal at the main domain, for example **https://hex.smartdok.dev/**. Published apps remain on **https://<site>.hex.smartdok.dev/**. The portal is written for everyone who uses the apps, not only the people who build them, so it avoids technical terms and puts sharing and finding things first.
 
+## Shared components
+
+`server/portal/portal.css` owns the portal-wide light/dark palette, typography, page width (`--page-width`), control height (`--control-height`), and corner-radius tokens. All pages use the same `.button`, `.field`, `.panel`, and `.site-header` styles. `.form-grid` aligns two-column field layouts without stretching controls to match neighboring help text; it stacks on small screens. `.dialog`, `.dialog-heading`, and `.dialog-body` provide shared modal styling. Use these components rather than feature-scoped theme or page-width overrides. `permissions.css` adds only Sharing-specific layout and matrix treatments.
+
 ## Pages
 
 | Page | Path | Contents |

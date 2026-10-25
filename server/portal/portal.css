@@ -624,25 +624,30 @@ main > div > .pagination {
   }
 }
 :root {
-  --bg: #f5f7f6;
+  --bg: #f5f7f8;
   --surface: #ffffff;
-  --surface-muted: #eef3f0;
-  --text: #13221c;
-  --text-muted: #5d6f67;
-  --line: #dde6e1;
-  --line-strong: #c4d3cb;
-  --accent: #1f8a68;
-  --accent-strong: #176a50;
-  --accent-soft: #e2f3ec;
+  --surface-muted: #f6f8f9;
+  --text: #1f2b35;
+  --text-muted: #667582;
+  --line: #dde4e9;
+  --line-strong: #bdcbd5;
+  --accent: #157d64;
+  --accent-strong: #09664e;
+  --accent-soft: #edf7f2;
   --accent-text: #ffffff;
-  --danger: #b4322f;
+  --danger: #ab4141;
   --danger-soft: #fbe9e8;
-  --warning-soft: #fff4dd;
-  --focus: #c98a1f;
-  --shadow: 0 1px 2px rgb(16 34 27 / 6%), 0 8px 24px rgb(16 34 27 / 6%);
+  --warning-soft: #fff7e7;
+  --warning-text: #80601c;
+  --system-row: #f9fbfa;
+  --inherited: #eaf0f2;
+  --focus: #81c8b0;
+  --shadow: 0 6px 24px #172b3b09;
   --shadow-pop: 0 12px 40px rgb(16 34 27 / 18%);
-  --radius: 14px;
-  --radius-small: 9px;
+  --radius: 11px;
+  --radius-small: 7px;
+  --page-width: 1368px;
+  --control-height: 42px;
   --tone-0: #1f8a68;
   --tone-1: #4b63d6;
   --tone-2: #b4542d;
@@ -660,26 +665,30 @@ main > div > .pagination {
     "Segoe UI",
     sans-serif;
   font-synthesis: none;
+  font-size: 14px;
   line-height: 1.55;
   color: var(--text);
   background: var(--bg);
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0c1411;
-    --surface: #131e19;
-    --surface-muted: #19271f;
-    --text: #e4efe9;
-    --text-muted: #9bb0a6;
-    --line: #23332b;
-    --line-strong: #31453b;
-    --accent: #3cc493;
-    --accent-strong: #61d6aa;
-    --accent-soft: #163128;
-    --accent-text: #06120d;
-    --danger: #ef7d78;
+    --bg: #101a21;
+    --surface: #18252e;
+    --surface-muted: #1b2c36;
+    --text: #e1e9ed;
+    --text-muted: #a0b2bd;
+    --line: #30424d;
+    --line-strong: #4c6472;
+    --accent: #61c6a3;
+    --accent-strong: #4ab28f;
+    --accent-soft: #17392f;
+    --accent-text: #08261d;
+    --danger: #ed9393;
     --danger-soft: #3a1a19;
-    --warning-soft: #33280f;
+    --warning-soft: #392f1d;
+    --warning-text: #e0bd76;
+    --system-row: #192c30;
+    --inherited: #2d414c;
     --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 8px 24px rgb(0 0 0 / 25%);
     --shadow-pop: 0 12px 40px rgb(0 0 0 / 55%);
     --tone-0: #2fa47c;
@@ -718,10 +727,12 @@ main > div > .pagination {
 .permission-edit-form textarea {
   width: 100%;
 }
+.form-grid,
 .permission-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
+  align-items: start;
 }
 .permission-card,
 .permission-group-card,
@@ -979,18 +990,16 @@ h3 {
 
 /* Layout */
 .topbar {
-  position: sticky;
-  top: 0;
+  position: relative;
   z-index: 10;
-  background: color-mix(in srgb, var(--bg) 85%, transparent);
-  backdrop-filter: blur(12px);
+  background: var(--surface);
   border-bottom: 1px solid var(--line);
 }
 .topbar-inner,
 .page,
 .footer {
   width: 100%;
-  max-width: 1180px;
+  max-width: var(--page-width);
   margin: 0 auto;
   padding-inline: 24px;
 }
@@ -1251,15 +1260,15 @@ h3 {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  min-height: 40px;
-  padding: 8px 16px;
-  border-radius: 999px;
+  gap: 6px;
+  min-height: 39px;
+  padding: 9px 15px;
+  border-radius: var(--radius-small);
   border: 1px solid transparent;
   background: var(--accent);
   color: var(--accent-text);
   font-weight: 650;
-  font-size: 14px;
+  font-size: 13px;
   text-decoration: none;
   cursor: pointer;
   white-space: nowrap;
@@ -1288,8 +1297,8 @@ h3 {
   background: color-mix(in srgb, var(--danger) 85%, black);
 }
 button:disabled {
-  opacity: 0.6;
-  cursor: wait;
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 .link-button {
   background: none;
@@ -1325,19 +1334,21 @@ button:disabled {
 }
 .field {
   display: grid;
-  gap: 6px;
+  gap: 7px;
+  align-content: start;
 }
 .field-grow {
   flex: 1;
   min-width: 200px;
 }
 .field-label {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 650;
-  color: var(--text-muted);
+  color: var(--text);
 }
 .field-hint {
-  font-size: 13px;
+  font-size: 12px;
+  line-height: 1.6;
   color: var(--text-muted);
   margin: 6px 0 0;
 }
@@ -1347,11 +1358,18 @@ input:not([type]),
 select,
 textarea {
   width: 100%;
-  min-height: 42px;
+  min-height: var(--control-height);
   padding: 9px 12px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-small);
   background: var(--surface);
+}
+select {
+  height: var(--control-height);
+  align-self: start;
+}
+input[type="checkbox"] {
+  accent-color: var(--accent);
 }
 textarea {
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
@@ -1383,7 +1401,7 @@ textarea:focus {
   color: var(--danger);
 }
 #page-error {
-  max-width: 1132px;
+  max-width: calc(var(--page-width) - 48px);
   margin: 16px auto 0;
 }
 .toast {
@@ -1756,12 +1774,13 @@ textarea:focus {
   align-items: center;
   gap: 16px;
   flex-wrap: wrap;
+  margin-bottom: 20px;
 }
 .site-header .site-icon {
-  width: 56px;
-  height: 56px;
+  width: 44px;
+  height: 44px;
   font-size: 24px;
-  border-radius: 15px;
+  border-radius: var(--radius-small);
 }
 .site-header-main {
   flex: 1;
@@ -1769,7 +1788,7 @@ textarea:focus {
 }
 .site-header h1 {
   margin: 0 0 4px;
-  font-size: clamp(26px, 3.4vw, 36px);
+  font-size: 23px;
   overflow-wrap: anywhere;
 }
 .site-header p {
@@ -1779,7 +1798,7 @@ textarea:focus {
 .tabs {
   display: flex;
   gap: 4px;
-  margin: 24px 0 20px;
+  margin: 24px 0 28px;
   border-bottom: 1px solid var(--line);
   overflow-x: auto;
 }
@@ -1815,6 +1834,50 @@ textarea:focus {
 .panel h2 {
   margin: 0 0 12px;
   font-size: 20px;
+}
+.panel.panel-flush {
+  padding: 0;
+}
+
+/* Shared modal and form components; feature styles should only add layout. */
+.dialog {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0;
+  width: min(690px, calc(100vw - 32px));
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+}
+.dialog::backdrop {
+  background: #112b3b70;
+  backdrop-filter: blur(3px);
+}
+.dialog-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 23px 24px;
+  border-bottom: 1px solid var(--line);
+}
+.dialog-heading h3 {
+  font-size: 21px;
+  margin: 0;
+}
+.dialog-body {
+  padding: 24px;
+}
+@media (max-width: 640px) {
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+  .dialog-heading,
+  .dialog-body {
+    padding: 20px;
+  }
 }
 .panel-heading {
   align-items: baseline;

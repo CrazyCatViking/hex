@@ -76,7 +76,7 @@ func TestPermissionGUIUnchangedSharingPreservesCustomRules(t *testing.T) {
 	policy.Admission = hex.Subjects{Owners: true, Roles: []string{"approver"}, Principals: []string{"user:direct"}}
 	server, _, _ := setupPermissionPolicy(t, policy)
 	policy = guiPolicy(t, server)
-	result := guiEdit(t, server, policy, "sharing", "", nil, url.Values{"general": {"custom"}, "principal": {"user:owner-id", "user:direct"}, "role": {"owner", "viewer"}})
+	result := guiEdit(t, server, policy, "sharing", "", nil, url.Values{"general": {"selected"}, "principal": {"user:owner-id", "user:direct", "group:managers"}, "role": {"owner", "viewer", "viewer"}})
 	if !strings.Contains(result, "Permissions saved") {
 		t.Fatal(result)
 	}
@@ -85,12 +85,13 @@ func TestPermissionGUIUnchangedSharingPreservesCustomRules(t *testing.T) {
 	}
 }
 
-func TestPermissionGUICustomInvitationDoesNotOpenPagesToOtherRoles(t *testing.T) {
+func TestPermissionGUIInvitationDoesNotAdmitOtherAppGroupMembers(t *testing.T) {
 	policy := permissionPolicy()
-	policy.Admission = hex.Subjects{Owners: true, Roles: []string{"approver"}}
+	policy.Admission = hex.Subjects{Owners: true}
 	policy.Grants["pages"] = hex.PermissionGrant{Kind: "path", Resource: "*", Operations: []string{"read"}, Subjects: hex.Subjects{Owners: true}}
 	server, _, _ := setupPermissionPolicy(t, policy)
-	result := guiEdit(t, server, policy, "sharing", "", nil, url.Values{"general": {"custom"}, "principal": {"user:owner-id", "user:invited"}, "role": {"owner", "viewer"}})
+	policy = guiPolicy(t, server)
+	result := guiEdit(t, server, policy, "sharing", "", nil, url.Values{"general": {"selected"}, "principal": {"user:owner-id", "user:invited"}, "role": {"owner", "viewer"}})
 	if !strings.Contains(result, "Permissions saved") {
 		t.Fatal(result)
 	}
@@ -110,7 +111,12 @@ func TestPermissionGUIGroupMembershipAndConditionalRules(t *testing.T) {
 	policy := permissionPolicy()
 	policy.Admission = hex.Subjects{Owners: true}
 	server, _, database := setupPermissionPolicy(t, policy)
-	result := guiEdit(t, server, policy, "role", "reviewers", hex.ApplicationRole{Description: "Project reviewers"}, url.Values{"creating": {"true"}, "admit_role": {"true"}})
+	result := guiEdit(t, server, policy, "role", "reviewers", hex.ApplicationRole{Description: "Project reviewers"}, url.Values{"creating": {"true"}})
+	if !strings.Contains(result, "Permissions saved") {
+		t.Fatal(result)
+	}
+	policy = guiPolicy(t, server)
+	result = guiEdit(t, server, policy, "admission", "", nil, url.Values{"general": {"selected"}, "principal": {"user:reviewer"}})
 	if !strings.Contains(result, "Permissions saved") {
 		t.Fatal(result)
 	}
@@ -150,7 +156,7 @@ func TestPermissionGUIGroupMembershipAndConditionalRules(t *testing.T) {
 	if !strings.Contains(result, "Permissions saved") {
 		t.Fatal(result)
 	}
-	requestAs(t, server, reviewer, "GET", "/api/hex/authz", nil, 403)
+	requestAs(t, server, reviewer, "GET", "/api/hex/authz", nil, 204)
 	requestAs(t, server, reviewer, "GET", "/api/sites/demo/db/cases/A", nil, 403)
 }
 
@@ -213,7 +219,11 @@ func TestPermissionGUIRejectsInvalidOrDestructiveEdits(t *testing.T) {
 		t.Fatal("permission GUI script unavailable")
 	}
 	styles := requestAs(t, server, principalHeaders("owner-id"), "GET", "/api/hex/permissions.css", nil, 200)
-	if !strings.Contains(styles.Body.String(), "#101a21") || !strings.Contains(styles.Body.String(), ".permissions-page") {
-		t.Fatal("approved permission design stylesheet unavailable")
+	if !strings.Contains(styles.Body.String(), ".permissions-page") || strings.Contains(styles.Body.String(), ":root:has") {
+		t.Fatal("permission layout must not override the portal theme")
+	}
+	sharedStyles := requestAs(t, server, principalHeaders("owner-id"), "GET", "/api/hex/portal.css", nil, 200)
+	if !strings.Contains(sharedStyles.Body.String(), "#101a21") || !strings.Contains(sharedStyles.Body.String(), "--page-width: 1368px") {
+		t.Fatal("shared portal theme unavailable")
 	}
 }

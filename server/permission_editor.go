@@ -85,18 +85,8 @@ func applyPermissionEditorChange(base SiteAccess, form url.Values) (SiteAccess, 
 				}
 			}
 		}
-		wasAdmitted := slices.Contains(local.Admission.Roles, id)
 		if form.Get("admit_role") == "true" {
-			local.Admission.Roles = appendUnique(local.Admission.Roles, id)
-			if !wasAdmitted {
-				pageID := stablePermissionID("portal", "group-pages", id)
-				if err := ensureSharingPages(&local, pageID, Subjects{Roles: []string{id}}); err != nil {
-					return local, err
-				}
-			}
-		} else if form.Has("admit_role") {
-			local.Admission.Roles = slices.DeleteFunc(local.Admission.Roles, func(value string) bool { return value == id })
-			delete(local.Grants, stablePermissionID("portal", "group-pages", id))
+			return local, errors.New("permission groups cannot grant site entry; add people or directory groups under Site access")
 		}
 	case "binding":
 		var binding RoleBinding
@@ -120,7 +110,17 @@ func applyPermissionEditorChange(base SiteAccess, form url.Values) (SiteAccess, 
 		if err != nil {
 			return local, err
 		}
-		if original, exists := base.Grants[id]; exists {
+		originalID := id
+		if source := form.Get("copy_from"); source != "" {
+			if form.Get("creating") != "true" {
+				return local, errors.New("only a new group-specific rule can copy an existing rule")
+			}
+			if _, exists := base.Grants[source]; !exists {
+				return local, errors.New("the original shared rule no longer exists; reload and try again")
+			}
+			originalID = source
+		}
+		if original, exists := base.Grants[originalID]; exists {
 			if form.Get("keep_where") == "true" {
 				grant.Where = original.Where
 			}
@@ -136,9 +136,6 @@ func applyPermissionEditorChange(base SiteAccess, form url.Values) (SiteAccess, 
 		id := form.Get("id")
 		if _, exists := local.Roles[id]; !exists {
 			return local, errors.New("that permission group no longer exists")
-		}
-		if slices.Contains(local.Admission.Roles, id) {
-			return local, errors.New("this group controls site entry; change general access before removing it")
 		}
 		for _, binding := range local.Bindings {
 			if binding.Role == id {
@@ -209,8 +206,6 @@ func sharingMode(access SiteAccess) string {
 	switch {
 	case access.Admission.SignedIn:
 		return "everyone"
-	case len(access.Admission.Roles) > 0:
-		return "custom"
 	case len(access.Admission.Principals) > 0:
 		return "selected"
 	case access.Admission.Owners:
@@ -229,7 +224,7 @@ func sharingSummary(access SiteAccess, platform string) string {
 	case "selected":
 		return "Site entry is limited to selected people and directory groups."
 	default:
-		return "Site entry uses permission-group memberships and selected audiences."
+		return "Site entry has custom admission settings. Permission groups do not grant site entry."
 	}
 }
 

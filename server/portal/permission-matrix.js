@@ -191,9 +191,6 @@
         }
         case "delete-group":
           delete policy.roles[id];
-          policy.admission.roles = (policy.admission.roles || []).filter(
-            (role) => role !== id,
-          );
           for (const [bindingID, binding] of Object.entries(
             policy.bindings || {},
           )) {
@@ -218,7 +215,6 @@
 
     function generalMode(value) {
       if (value.admission.signedIn) return "everyone";
-      if (value.admission.roles?.length) return "custom";
       if (value.admission.principals?.length) return "selected";
       return value.admission.owners ? "owners" : "custom";
     }
@@ -300,14 +296,6 @@
         chip.append(element("span", nameOf(principal)), remove);
         target.append(chip);
       }
-      for (const id of policy.admission.roles || [])
-        target.append(
-          element(
-            "span",
-            `Permission group: ${groupName(id)} (existing entry rule)`,
-            "permission-chip",
-          ),
-        );
       if (policy.admission.signedIn)
         target.append(
           element(
@@ -821,6 +809,8 @@
             rule.subjects.principals?.length),
       );
       query("[data-additional-access]").hidden = !rules.length;
+      query("[data-additional-summary]").textContent =
+        `· ${rules.length} existing ${rules.length === 1 ? "rule" : "rules"}`;
       const audiences = new Map();
       for (const [id, rule] of rules) {
         const subjects = {
@@ -1082,9 +1072,20 @@
             const option = element("div", undefined, "permission-group-option");
             option.append(choice.wrapper);
             const limits = ui.limitsText(rule);
-            if (limits.length) option.append(element("p", limits.join(". ")));
+            if (limits.length)
+              option.append(
+                disclosure(
+                  `${limits.length} ${limits.length === 1 ? "limit" : "limits"} apply`,
+                  element("p", limits.join(". ")),
+                  "permission-rule-limits",
+                ),
+              );
             option.append(
-              button("Edit rule", () => openRule(ruleID, rule), "link-button"),
+              button(
+                "Edit rule",
+                () => openRule(ruleID, rule, id),
+                "link-button",
+              ),
             );
             section.append(option);
           }
@@ -1106,14 +1107,6 @@
             "button button-secondary",
           ),
         );
-        if (policy.admission.roles?.includes(id))
-          form.append(
-            element(
-              "p",
-              "This group also allows site entry. Deleting it removes that entry route.",
-              "banner banner-warning",
-            ),
-          );
       }
       const submit = element(
         "button",
@@ -1130,7 +1123,7 @@
             () => {
               if (
                 !window.confirm(
-                  `Delete ${groupName(id)}, all its memberships, and its rule audiences? Rules shared with other groups or people keep their other audiences. Its site-entry role, if any, will also be removed.`,
+                  `Delete ${groupName(id)} and its app permissions and assignments? Other groups and site admission are unchanged.`,
                 )
               )
                 return;
@@ -1257,7 +1250,37 @@
             "field-hint",
           ),
         );
-      target.append(ui.grantEditor(manager, policy, labels, id, rule, groupID));
+      const shared =
+        groupID &&
+        id &&
+        (rule.subjects.roles?.length > 1 ||
+          rule.subjects.signedIn ||
+          rule.subjects.owners ||
+          rule.subjects.principals?.length);
+      const groupRule = groupID
+        ? { ...rule, subjects: { roles: [groupID] } }
+        : rule;
+      if (shared)
+        target.append(
+          element(
+            "p",
+            "This existing rule is shared. Saving here creates an independent permission for this group; other recipients keep the original rule.",
+            "field-hint",
+          ),
+        );
+      const form = ui.grantEditor(
+        manager,
+        policy,
+        labels,
+        id,
+        groupRule,
+        groupID,
+      );
+      if (shared) {
+        form.dataset.splitGroup = groupID;
+        form.dataset.splitRule = id;
+      }
+      target.append(form);
       target.querySelector("select")?.focus();
     }
 
@@ -1271,6 +1294,25 @@
       if (action === "grant" && !values.id?.[0]) {
         values.id = [`portal-${crypto.randomUUID()}`];
         values.creating = ["true"];
+      }
+      if (action === "grant" && form.dataset.splitGroup) {
+        const source = form.dataset.splitRule;
+        const rule = policy.grants[source];
+        const subjects = {
+          ...rule.subjects,
+          roles: rule.subjects.roles.filter(
+            (role) => role !== form.dataset.splitGroup,
+          ),
+        };
+        stage("grant", {
+          id: source,
+          entry: JSON.stringify({ ...rule, subjects }),
+          keep_where: "true",
+          keep_check: "true",
+        });
+        values.id = [`portal-${crypto.randomUUID()}`];
+        values.creating = ["true"];
+        values.copy_from = [source];
       }
       stage(action, values);
       finishDialog();

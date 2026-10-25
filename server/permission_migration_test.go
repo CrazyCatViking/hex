@@ -3,8 +3,104 @@ package hex
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
+	"slices"
 	"testing"
 )
+
+func TestAdmissionMigrationPreservesEntryAndPageAudiences(t *testing.T) {
+	identities := []*Identity{
+		nil, {ID: "owner"}, {ID: "unscoped"}, {ID: "scoped"},
+		{ID: "directory-member", Groups: []string{"team"}},
+		{ID: "direct"}, {ID: "outsider"}, {ID: "job", Provider: "automation"},
+	}
+	for _, defaultMembership := range []bool{false, true} {
+		for _, pageResource := range []string{"*", "/", "/index.html"} {
+			t.Run(fmt.Sprintf("default=%t/resource=%s", defaultMembership, pageResource), func(t *testing.T) {
+				old := SiteAccess{
+					Version: 2, Owners: []string{"user:owner"},
+					Admission: Subjects{Owners: true, Roles: []string{"members"}, Principals: []string{"user:direct"}},
+					Roles:     map[string]ApplicationRole{"members": {SignedIn: defaultMembership}},
+					Bindings: map[string]RoleBinding{
+						"unscoped": {Principal: "user:unscoped", Role: "members"},
+						"scoped":   {Principal: "user:scoped", Role: "members", Scope: &RoleScope{Kind: "project", ID: "A"}},
+						"team":     {Principal: "group:team", Role: "members"},
+						"job":      {Principal: "automation:job", Role: "members"},
+					},
+					Grants: map[string]PermissionGrant{
+						"ordinary":  {Kind: "path", Resource: pageResource, Except: []string{"/admin/"}, Operations: []string{"read"}, Subjects: Subjects{Roles: []string{"members"}}},
+						"protected": {Kind: "path", Resource: "/admin/", Operations: []string{"read"}, Subjects: Subjects{Roles: []string{"members"}}},
+					},
+				}
+				migrated := MigrateSiteAccess(old)
+				if err := ValidatePublishedAccess(migrated); err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(old.Grants["protected"], migrated.Grants["protected"]) {
+					t.Fatal("migration changed a protected page rule")
+				}
+				for _, identity := range identities {
+					role := roleViewer
+					if identity.matchesAny(old.Owners) {
+						role = roleOwner
+					}
+					before := siteAuthorization{access: old, identity: identity, role: role}
+					after := siteAuthorization{access: migrated, identity: identity, role: role}
+					admittedBefore := before.subjectsMatch(old.Admission)
+					for _, binding := range old.Bindings {
+						if slices.Contains(old.Admission.Roles, binding.Role) && identity.matchesAny([]string{binding.Principal}) {
+							admittedBefore = true
+						}
+					}
+					// Named automations bypass human admission, but still need grants.
+					if identity != nil && identity.Provider == "automation" {
+						admittedBefore = true
+					}
+					if admittedBefore != after.applicationAdmitted() {
+						t.Fatalf("entry changed for %+v", identity)
+					}
+					for _, path := range []string{"/", "/index.html", "/index.html/child", "/assets/app.js", "/admin", "/admin/report"} {
+						allowedBefore := false
+						for _, grant := range old.Grants {
+							if !permissionSelectorMatches("path", grant.Resource, path) || slices.ContainsFunc(grant.Except, func(except string) bool { return permissionSelectorMatches("path", except, path) }) {
+								continue
+							}
+							allowedBefore = allowedBefore || admittedBefore && before.subjectsMatch(grant.Subjects)
+						}
+						if allowedBefore != after.permits("path", path, "read") {
+							t.Fatalf("page %s changed for %+v", path, identity)
+						}
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestAdmissionMigrationSupportsMaximumExistingAudience(t *testing.T) {
+	old := SiteAccess{
+		Version: 2, Admission: Subjects{Roles: []string{"members"}},
+		Roles: map[string]ApplicationRole{"members": {}}, Bindings: map[string]RoleBinding{},
+		Grants: map[string]PermissionGrant{"pages": {Kind: "path", Resource: "*", Operations: []string{"read"}, Subjects: Subjects{Roles: []string{"members"}}}},
+	}
+	for i := range 1024 {
+		old.Bindings[fmt.Sprintf("binding-%d", i)] = RoleBinding{Principal: fmt.Sprintf("user:bound-%d", i), Role: "members"}
+	}
+	page := old.Grants["pages"]
+	for i := range 256 {
+		principal := fmt.Sprintf("user:direct-%d", i)
+		old.Admission.Principals = append(old.Admission.Principals, principal)
+		page.Subjects.Principals = append(page.Subjects.Principals, principal)
+	}
+	old.Grants["pages"] = page
+	migrated := MigrateSiteAccess(old)
+	if len(migrated.Admission.Principals) != 1280 || len(migrated.Grants["pages"].Subjects.Principals) != 1280 {
+		t.Fatal("migration dropped admission/page principals")
+	}
+	if err := ValidatePublishedAccess(migrated); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestPermissionMigrationPreservesEffectiveAccess(t *testing.T) {
 	server := New(Config{AdminGroups: []string{"group:admins"}})
