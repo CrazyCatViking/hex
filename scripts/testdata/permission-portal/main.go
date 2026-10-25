@@ -48,6 +48,11 @@ func run() error {
 		"admin":            {Kind: "path", Resource: "/admin/", Operations: []string{"read"}, Subjects: hex.Subjects{Owners: true}},
 		"project-expenses": {Kind: "collection", Resource: "expenses", Operations: []string{"read", "update"}, Subjects: hex.Subjects{Roles: []string{"reviewers"}}, Scope: &hex.PermissionScope{Kind: "project", Field: "data.projectId"}, Fields: []string{"amount"}, Where: &hex.RecordCondition{All: []hex.RecordCondition{{Field: "data.status", Op: "eq", Value: json.RawMessage(`"draft"`)}, {Any: []hex.RecordCondition{{Field: "createdBy", Op: "eq", Value: json.RawMessage(`"$actor.id"`)}, {Field: "data.shared", Op: "eq", Value: json.RawMessage(`true`)}}}}}},
 	}}
+	// Match migrated owner policies: several broad grants should be one clear
+	// audience summary, not a page full of unrelated technical rule cards.
+	for kind, operations := range map[string][]string{"collection": {"read", "create", "update", "delete"}, "file": {"read", "upload", "delete"}, "channel": {"read", "send"}, "action": {"run"}, "integration": {"read", "write"}} {
+		policy.Grants["existing-owner-"+kind] = hex.PermissionGrant{Kind: kind, Resource: "*", Operations: operations, Subjects: hex.Subjects{Owners: true}}
+	}
 	baseline := hex.CloneSiteAccess(policy)
 	policy.Published = &baseline
 	if err := policies.PutSiteAccess(ctx, "demo", policy); err != nil {

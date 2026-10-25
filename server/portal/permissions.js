@@ -345,9 +345,7 @@
     return (
       [
         ...(subjects.signedIn ? ["Everyone signed in"] : []),
-        ...(subjects.owners
-          ? ["Site managers and platform administrators"]
-          : []),
+        ...(subjects.owners ? ["Site owners & platform administrators"] : []),
         ...(subjects.roles || []).map(
           (id) => `Group: ${roles[id]?.name || title(id)}`,
         ),
@@ -764,25 +762,44 @@
       field(
         "Membership scope type (optional)",
         scopeKind,
-        "For example project. Leave both scope fields empty for an unscoped rule.",
+        "The limit type defined by this app. Leave both fields empty if the rule does not use membership limits.",
       ),
       field(
         "Record field containing the scope ID",
         scopeField,
-        "For example data.projectId. Before and after values must match the member's scope.",
+        "The app's record field holding the allowed identifier. It must match before and after changes.",
       ),
     );
-    limits.append(
-      disclosure("Optional membership limits", scopes, "advanced"),
+    const fieldLimits = element("div", undefined, "permission-record-limits");
+    fieldLimits.append(
       allFields.wrapper,
       field(
         "Editable fields · one per line",
         fields,
         "An empty list with unrestricted changes turned off means no fields may change. This does not restrict deletion.",
       ),
-      where.wrapper,
-      check.wrapper,
     );
+    const conditions = element("div", undefined, "permission-record-limits");
+    conditions.append(where.wrapper, check.wrapper);
+    const scopeDetails = disclosure(
+      "Limit by membership (optional)",
+      scopes,
+      "advanced",
+    );
+    scopeDetails.open = Boolean(grant.scope);
+    const fieldDetails = disclosure(
+      "Limit editable fields (optional)",
+      fieldLimits,
+      "advanced",
+    );
+    fieldDetails.open = Array.isArray(grant.fields);
+    const conditionDetails = disclosure(
+      "Limit which records are allowed (optional)",
+      conditions,
+      "advanced",
+    );
+    conditionDetails.open = Boolean(grant.where || grant.check);
+    limits.append(fieldDetails, conditionDetails, scopeDetails);
     const updateKind = () => {
       const record = ["collection", "action"].includes(kind.value);
       limits.hidden = !record;
@@ -913,20 +930,22 @@
     kind.addEventListener("change", updateSuggestions);
     updateSuggestions();
     form.append(suggestions);
+    const exclusions = disclosure(
+      "Exclude specific resources (optional)",
+      field(
+        "Exclude resources · one name or prefix per line",
+        except,
+        "Exclusions apply only to this rule, not to other rules.",
+      ),
+      "advanced",
+    );
+    exclusions.open = Boolean(grant.except?.length);
     form.append(
       selectors,
       operationBox,
       who,
-      disclosure(
-        "Excluded resources (optional)",
-        field(
-          "Exclude resources · one name or prefix per line",
-          except,
-          "Exclusions apply only to this rule, not to other rules.",
-        ),
-        "advanced",
-      ),
       limits,
+      exclusions,
       element(
         "p",
         "Grant only the operations needed. Approval actions and integrations can have additional server-side contracts and platform approvals; this rule does not bypass them.",
@@ -941,31 +960,50 @@
     if (!condition) return "No record requirement";
     if (condition.all || condition.any)
       return `(${(condition.all || condition.any).map(conditionText).join(condition.all ? " AND " : " OR ")})`;
-    const value =
+    if (
+      condition.field === "createdBy" &&
+      condition.op === "eq" &&
       condition.value === "$actor.id"
-        ? "the current person's ID"
-        : JSON.stringify(condition.value);
-    return `${condition.field} ${{ eq: "equals", ne: "does not equal", in: "is one of", contains: "contains" }[condition.op]} ${value}`;
+    )
+      return "created by the person using the app";
+    const describeValue = (value) => {
+      if (value === "$actor.id") return "the current person’s ID";
+      if (Array.isArray(value)) return value.map(describeValue).join(", ");
+      if (value === null) return "empty (null)";
+      if (typeof value === "object") return "a structured value";
+      if (
+        typeof value === "number" &&
+        Number.isInteger(value) &&
+        !Number.isSafeInteger(value)
+      )
+        return "an exact large number (preserved)";
+      return typeof value === "string" ? `“${value}”` : String(value);
+    };
+    const name = condition.field
+      .replace(/^data\./, "")
+      .replace(/([a-z])([A-Z])/g, "$1 $2")
+      .replace(/_/g, " ");
+    return `${name} ${{ eq: "equals", ne: "does not equal", in: "is one of", contains: "contains" }[condition.op]} ${describeValue(condition.value)}`;
   }
 
   function limitsText(grant) {
     const limits = [];
     if (grant.scope)
       limits.push(
-        `Membership scope ${grant.scope.kind} must match ${grant.scope.field} before and after changes`,
+        `Only records matching the member’s ${grant.scope.kind} limit (${grant.scope.field}); checked before and after changes`,
       );
     if (grant.where)
       limits.push(
-        `Existing record (new record on create): ${conditionText(grant.where)}`,
+        `Allowed records: ${conditionText(grant.where)}${grant.operations.includes("create") ? "; also checked on new records" : ""}`,
       );
     if (grant.check)
       limits.push(
-        `Proposed record (old record on delete): ${conditionText(grant.check)}`,
+        `After changes: ${conditionText(grant.check)}${grant.operations.includes("delete") ? "; checked on the current record when deleting" : ""}`,
       );
     if (Array.isArray(grant.fields))
       limits.push(
         grant.fields.length
-          ? `Only these fields may change: ${grant.fields.join(", ")}`
+          ? `When writing, only these fields may change: ${grant.fields.join(", ")}`
           : "No record fields may change (deletion is separate)",
       );
     if (grant.except?.length)

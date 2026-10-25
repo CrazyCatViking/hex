@@ -54,6 +54,45 @@ try {
     dialog
       .getByRole("button", { name: "Close permission editor", exact: true })
       .click();
+  const screenshot = async (name) => {
+    if (!process.env.HEX_PORTAL_SCREENSHOTS) return;
+    await page.evaluate(() => scrollTo(0, 0));
+    await page.screenshot({
+      path: `${process.env.HEX_PORTAL_SCREENSHOTS}-${name}.png`,
+      fullPage: !(await dialog.isVisible()),
+    });
+  };
+  const checkDesign = async (scheme, mobile = false) => {
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.setViewportSize(
+      mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 },
+    );
+    const design = await page.evaluate(() => {
+      const style = (selector) =>
+        getComputedStyle(document.querySelector(selector));
+      return {
+        background: style("body").getPropertyValue("--bg").trim(),
+        surface: style("#site-access").backgroundColor,
+        text: style("#permission-manager").color,
+        buttonRadius: style("[data-new-permission-group]").borderRadius,
+        cardRadius: style("#permission-groups").borderRadius,
+        systemRow: style('[data-permission-row="default"] th').backgroundColor,
+        overflow: document.documentElement.scrollWidth > innerWidth,
+      };
+    });
+    // Exact tokens/shapes from the approved standalone prototype, not the
+    // portal's previous green-tinted surfaces and pill-shaped controls.
+    assert.deepEqual(design, {
+      background: scheme === "dark" ? "#101a21" : "#f5f7f8",
+      surface: scheme === "dark" ? "rgb(24, 37, 46)" : "rgb(255, 255, 255)",
+      text: scheme === "dark" ? "rgb(225, 233, 237)" : "rgb(31, 43, 53)",
+      buttonRadius: "7px",
+      cardRadius: "11px",
+      systemRow: scheme === "dark" ? "rgb(25, 44, 48)" : "rgb(249, 251, 250)",
+      overflow: false,
+    });
+    await screenshot(`${mobile ? "mobile" : "desktop"}-${scheme}`);
+  };
   const save = async (success = true) => {
     const [response] = await Promise.all([
       page.waitForResponse(
@@ -106,6 +145,42 @@ try {
   await page.locator('#permission-manager[data-ready="true"]').waitFor();
   const initial = await policy();
   assert.equal(
+    await page
+      .getByText("Other resource rules and page restrictions", { exact: true })
+      .count(),
+    0,
+  );
+  assert.equal(
+    await page
+      .locator("[data-independent-rules] .permission-access-row")
+      .count(),
+    1,
+    "migrated owner grants should be summarized as one audience",
+  );
+  assert.equal(
+    await page
+      .locator("[data-independent-rules] .permission-rule-card")
+      .count(),
+    0,
+    "do not dump technical rule cards into the sharing screen",
+  );
+  await page
+    .getByRole("button", { name: "Review access", exact: true })
+    .click();
+  assert.equal(await dialog.locator(".permission-rule-card").count(), 5);
+  await close();
+  await page
+    .getByRole("button", { name: "Review page access", exact: true })
+    .click();
+  assert.equal(await dialog.locator(".permission-rule-card").count(), 2);
+  assert.match(await dialog.innerText(), /\/admin\//);
+  await close();
+  assert.deepEqual(
+    await policy(),
+    initial,
+    "reviewing existing access must not rewrite policies",
+  );
+  assert.equal(
     await page.locator(".permission-assignment-table tbody tr").count(),
     3,
   );
@@ -148,6 +223,15 @@ try {
     initial.grants["project-expenses"],
   );
 
+  // The real management screen must retain the approved design in both themes
+  // and at narrow widths, not just pass the interaction tests.
+  for (const scheme of ["light", "dark"]) {
+    await checkDesign(scheme);
+    await checkDesign(scheme, true);
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.emulateMedia({ colorScheme: "light" });
+
   await page
     .getByRole("button", { name: "+ New permission group", exact: true })
     .click();
@@ -181,11 +265,19 @@ try {
   await rule.getByLabel("View", { exact: true }).check();
   await rule.getByLabel("Edit", { exact: true }).check();
   await rule
+    .locator("summary")
+    .filter({ hasText: "Limit editable fields (optional)" })
+    .click();
+  await rule
     .getByLabel("Allow changes to all record fields", { exact: true })
     .uncheck();
   await rule
     .getByLabel("Editable fields · one per line", { exact: true })
     .fill("amount");
+  await rule
+    .locator("summary")
+    .filter({ hasText: "Limit which records are allowed (optional)" })
+    .click();
   const where = rule.locator("fieldset.permission-condition").first();
   await where
     .getByRole("button", { name: "Add a condition", exact: true })
@@ -239,6 +331,37 @@ try {
     saved.grants["project-expenses"],
     initial.grants["project-expenses"],
   );
+  await screenshot("groups-desktop");
+  await page
+    .getByRole("button", {
+      name: "Edit Finance reviewers permission group",
+      exact: true,
+    })
+    .click();
+  assert.equal(
+    await dialog
+      .locator(".permission-group-resources input[type=checkbox]:checked")
+      .count(),
+    1,
+  );
+  await screenshot("group-editor");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ colorScheme: "dark" });
+  assert.equal(
+    await dialog.evaluate((node) => node.scrollWidth > node.clientWidth),
+    false,
+    "group editor must fit narrow screens without horizontal overflow",
+  );
+  await screenshot("group-editor-mobile-dark");
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.emulateMedia({ colorScheme: "light" });
+  await close();
+  await page.locator(".permission-group-guide > summary").click();
+  assert.match(
+    await page.locator("[data-group-definitions]").innerText(),
+    /invoices/,
+  );
+  await page.locator(".permission-group-guide > summary").click();
 
   await addRow("bea", "Bea");
   assert.equal(
@@ -348,7 +471,6 @@ try {
   await dialog
     .getByRole("button", { name: "Apply group changes", exact: true })
     .click();
-  await close();
   await save(false);
   assert.match(
     await page.locator("[data-permission-error]").innerText(),
@@ -409,7 +531,7 @@ try {
   assert.deepEqual(await policy(), beforeInvalid);
 
   await row("group:finance")
-    .getByRole("button", { name: "Remove row", exact: true })
+    .getByRole("button", { name: "Remove Finance permission row", exact: true })
     .click();
   await save();
   assert.equal(
@@ -490,6 +612,11 @@ try {
   );
   await page.reload();
   await page.getByText("No permission groups yet.", { exact: false }).waitFor();
+  assert.equal(
+    await page.locator("[data-additional-access]").isVisible(),
+    false,
+    "do not show an irrelevant existing-access section when there are no direct app grants",
+  );
   await page
     .getByRole("button", { name: "+ New permission group", exact: true })
     .click();
@@ -627,6 +754,51 @@ try {
     deepValue,
     "deep custom conditions must remain intact when editing other parts of a rule",
   );
+  // Removing a checked resource permission from one group must preserve other
+  // recipients of a shared rule, including its untouched custom conditions.
+  const sharedPolicy = await policy();
+  sharedPolicy.roles.other = { name: "Other recipients" };
+  sharedPolicy.grants.shared = {
+    kind: "collection",
+    resource: "shared",
+    operations: ["read"],
+    subjects: { roles: ["background", "other"], principals: ["user:bea"] },
+    where: { field: "data.value", op: "eq", value: deepValue },
+  };
+  assert.equal(
+    (
+      await page.request.put(`${url}/api/hex/sites/demo/access`, {
+        data: sharedPolicy,
+        headers: { "X-Hex-Request": "1" },
+      })
+    ).status(),
+    200,
+  );
+  await page.reload();
+  await page
+    .getByRole("button", {
+      name: "Edit Background job permission group",
+      exact: true,
+    })
+    .click();
+  const sharedChoice = dialog.getByLabel("Data collection · shared — view", {
+    exact: true,
+  });
+  await sharedChoice.uncheck();
+  await dialog
+    .getByRole("button", { name: "Apply group changes", exact: true })
+    .click();
+  assert.deepEqual(
+    await policy(),
+    sharedPolicy,
+    "unchecking a resource permission is staged until save",
+  );
+  await save();
+  const afterShared = await policy();
+  assert.deepEqual(afterShared.grants.shared.subjects.roles, ["other"]);
+  assert.deepEqual(afterShared.grants.shared.subjects.principals, ["user:bea"]);
+  assert.deepEqual(afterShared.grants.shared.where.value, deepValue);
+  assert.deepEqual(afterShared.grants.deep, sharedPolicy.grants.deep);
   assert.deepEqual(errors, []);
   console.log(
     "Production permission matrix passed: groups and resource rules, atomic saves, defaults and owner assignments, scoped memberships, revocation, lossless custom rules, validation/stale-form/sign-in error retention, technical-editor draft protection, keyboard access, escaping, and mobile layout. Routine management required no JSON.",
