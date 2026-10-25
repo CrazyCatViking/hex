@@ -696,6 +696,481 @@ main > div > .pagination {
 * {
   box-sizing: border-box;
 }
+
+/* Permission management: routine sharing first, full visual rule editing below. */
+.permission-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+.permission-heading h3 {
+  margin: 0 0 6px;
+}
+.permission-manager > [data-permission-status]:empty {
+  display: none;
+}
+.permission-heading .form-actions {
+  margin-top: 0;
+}
+@media (min-width: 1000px) {
+  #site-access.permission-section {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 400px);
+    gap: 12px 24px;
+    padding-block: 18px;
+  }
+  #site-access > .permission-heading {
+    grid-column: 1;
+    grid-row: 1;
+    margin-bottom: 0;
+    align-self: center;
+  }
+  #site-access > .field {
+    grid-column: 2;
+    grid-row: 1;
+    margin: 0;
+  }
+  #site-access > .field-hint,
+  #site-access > [data-page-boundaries] {
+    grid-column: 1 / -1;
+    margin: 0;
+  }
+  #site-access .permission-admission-entries {
+    margin: 0;
+    align-self: center;
+  }
+  #site-access > [data-add-admission] {
+    justify-self: end;
+    align-self: center;
+  }
+  #site-access .advanced {
+    margin-top: 0;
+  }
+}
+.permission-manager .form-actions {
+  flex-wrap: wrap;
+}
+.permission-heading .eyebrow {
+  margin: 0 0 6px;
+}
+.permission-admission-entries {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 16px 0;
+}
+.permission-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  padding: 6px 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.permission-matrix-scroll {
+  position: relative;
+  overflow-x: auto;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.permission-assignment-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  table-layout: fixed;
+  text-align: left;
+}
+.permission-assignment-table th,
+.permission-assignment-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 16px;
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+.permission-assignment-table th {
+  font-size: 13px;
+}
+.permission-assignment-table th:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  width: 230px;
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+}
+.permission-assignment-table thead th {
+  background: var(--surface-raised, var(--surface));
+}
+.permission-assignment-table thead th:not(:first-child):not(:last-child) {
+  width: 175px;
+}
+.permission-assignment-table thead th:last-child {
+  width: 95px;
+}
+.permission-assignment-table tbody th > strong,
+.permission-assignment-table th > small {
+  display: block;
+}
+.permission-assignment-table th > small {
+  font-weight: 400;
+  font-size: 11px;
+  margin-top: 5px;
+}
+.permission-assignment-table tbody tr:last-child > * {
+  border-bottom: 0;
+}
+.permission-column-heading {
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  background: none;
+  border: 0;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+}
+.permission-column-heading::after {
+  content: " ↗";
+  color: var(--text-muted);
+}
+.permission-column-heading:hover {
+  color: var(--accent-strong);
+}
+.permission-matrix-cell {
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 45px;
+}
+.permission-matrix-cell input {
+  width: 19px;
+  height: 19px;
+  accent-color: var(--accent);
+}
+.permission-inherited {
+  color: var(--text-muted);
+  background: var(--surface);
+  padding: 2px 5px;
+  font-size: 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+.permission-scope-button {
+  color: var(--accent-strong);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 4px 7px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+}
+.permission-empty {
+  padding: 24px;
+}
+.permission-save-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+  margin-top: 22px;
+}
+.permission-save-bar.has-changes {
+  position: sticky;
+  bottom: 12px;
+  z-index: 3;
+  box-shadow: var(--shadow);
+  border-color: var(--accent);
+}
+.permission-save-bar p {
+  margin-bottom: 0;
+}
+.permission-dialog {
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 24px;
+  width: min(800px, calc(100vw - 32px));
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+  box-shadow: var(--shadow);
+}
+.permission-dialog::backdrop {
+  background: #10232e99;
+}
+.permission-dialog .permission-heading {
+  position: sticky;
+  top: -24px;
+  background: var(--surface);
+  padding: 12px 0;
+  z-index: 2;
+  border-bottom: 1px solid var(--line);
+}
+.permission-dialog .permission-rule-card {
+  margin-block: 14px;
+}
+.permission-dialog .permission-rule-card > .button {
+  margin-right: 14px;
+}
+.permission-dialog .permission-delete {
+  display: block;
+  margin-top: 26px;
+  color: var(--danger, #b43c3c);
+}
+.permission-dialog [data-permission-dialog-body] > h4 {
+  margin-top: 28px;
+}
+@media (max-width: 640px) {
+  .permission-assignment-table th:first-child {
+    width: 170px;
+  }
+  .permission-assignment-table thead th:not(:first-child):not(:last-child) {
+    width: 145px;
+  }
+  .permission-save-bar {
+    align-items: stretch;
+  }
+  .permission-dialog {
+    padding: 18px;
+  }
+}
+.permission-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  padding: 12px 0 20px;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+}
+.permission-section {
+  padding-block: 26px;
+  border-bottom: 1px solid var(--line);
+  scroll-margin-top: 90px;
+}
+.permission-section > h3 {
+  margin-top: 0;
+  font-size: 21px;
+}
+.permission-current {
+  background: var(--accent-soft);
+  padding: 14px 18px;
+  border-radius: var(--radius-small);
+  font-weight: 600;
+}
+.permission-picker {
+  position: relative;
+}
+.permission-picker .combobox-options {
+  z-index: 8;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.permission-edit-form {
+  display: grid;
+  gap: 16px;
+  padding: 18px 0;
+  min-width: 0;
+}
+.permission-edit-form .field {
+  min-width: 0;
+}
+.permission-edit-form textarea {
+  width: 100%;
+}
+.permission-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.permission-card,
+.permission-group-card,
+.permission-rule-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-small);
+  padding: 18px;
+  margin-block: 14px;
+  min-width: 0;
+}
+.permission-card > summary,
+.permission-member-edit > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.permission-group-card h4,
+.permission-rule-card h4 {
+  margin-block: 0 10px;
+  overflow-wrap: anywhere;
+}
+.permission-audience-summary {
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+.permission-members {
+  list-style: none;
+  padding: 0;
+}
+.permission-members > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding-block: 10px;
+  border-bottom: 1px solid var(--line);
+}
+.permission-members > li > div:first-child {
+  flex: 1;
+  min-width: 160px;
+}
+.permission-members > li > div:first-child > span {
+  display: block;
+  font-size: 13px;
+}
+.permission-member-edit {
+  flex-basis: 100%;
+}
+.permission-selected-person,
+.permission-note {
+  padding: 10px 14px;
+  border-radius: var(--radius-small);
+  background: var(--surface-muted);
+}
+.permission-remove-form {
+  display: block;
+  padding-block: 6px;
+}
+.permission-remove-form .form-actions {
+  margin: 0;
+}
+.permission-remove-form .button {
+  background: var(--surface);
+  color: var(--danger);
+  border: 1px solid var(--line);
+  padding: 5px 10px;
+  font-size: 12px;
+}
+.permission-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-block: 8px;
+  font-size: 14px;
+}
+.permission-check input {
+  width: 17px;
+  height: 17px;
+  margin-top: 3px;
+  flex: none;
+}
+.permission-check-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+}
+.permission-edit-form fieldset {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-small);
+  padding: 14px;
+  margin: 0;
+  min-width: 0;
+}
+.permission-edit-form legend {
+  font-size: 14px;
+  font-weight: 650;
+  padding-inline: 5px;
+}
+.permission-record-limits {
+  display: grid;
+  gap: 18px;
+}
+.permission-condition-node {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-small);
+}
+.permission-condition-children {
+  display: grid;
+  gap: 10px;
+  padding-left: 14px;
+  border-left: 2px solid var(--line-strong);
+}
+.permission-value {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+.permission-value-entries {
+  display: grid;
+  gap: 10px;
+}
+.permission-value-row {
+  border-left: 2px solid var(--line-strong);
+  padding-left: 12px;
+  display: grid;
+  gap: 8px;
+}
+.permission-explanations {
+  font-size: 14px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.permission-explanations li {
+  margin-block: 8px;
+}
+.permission-overview {
+  min-width: 700px;
+}
+.permission-overview td {
+  max-width: 360px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+.permission-technical {
+  margin-top: 26px;
+}
+@media (max-width: 640px) {
+  .permission-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .permission-manager .person {
+    flex-wrap: wrap;
+  }
+  .permission-manager .person-main {
+    min-width: 130px;
+  }
+  .permission-manager .role-select {
+    max-width: 100%;
+  }
+  .permission-card,
+  .permission-group-card,
+  .permission-rule-card {
+    padding: 12px;
+  }
+  .permission-condition-node {
+    padding: 8px;
+  }
+  .permission-condition-children {
+    padding-left: 6px;
+  }
+}
 /* The hidden attribute always wins over component display rules. */
 [hidden] {
   display: none !important;

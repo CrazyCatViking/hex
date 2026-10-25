@@ -68,7 +68,10 @@ export interface PermissionPolicy {
   version: 2;
   owners?: string[];
   admission?: PermissionSubjects;
-  roles?: Record<string, { description?: string; signedIn?: boolean }>;
+  roles?: Record<
+    string,
+    { name?: string; description?: string; signedIn?: boolean }
+  >;
   bindings?: Record<
     string,
     {

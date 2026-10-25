@@ -2,22 +2,16 @@ package hex
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
+	"reflect"
+	"slices"
 	"strings"
 )
-
-type permissionMatrixRow struct {
-	ID, Resource, Operations, Subjects, Condition string
-}
-
-type permissionRoleRow struct {
-	ID, Description string
-	SignedIn        bool
-}
 
 func decodePermissionPolicy(data []byte) (SiteAccess, error) {
 	var policy SiteAccess
@@ -38,19 +32,33 @@ func decodePermissionPolicy(data []byte) (SiteAccess, error) {
 
 func (s *Server) updatePortalPermissions(w http.ResponseWriter, r *http.Request, identity *Identity, site string, access SiteAccess, exists bool) {
 	failed := func(err error) {
+		trigger, encodeErr := json.Marshal(map[string]any{"permissionError": map[string]string{"message": err.Error()}})
+		if encodeErr == nil {
+			w.Header().Set("HX-Reswap", "none")
+			w.Header().Set("HX-Trigger", string(trigger))
+		} else {
+			slog.Error("encode permission editor error", "error", encodeErr)
+		}
 		view := s.sharingView(r.Context(), site, access, exists)
 		view.Error = err.Error()
-		view.Policy = r.PostForm.Get("policy")
+		if r.PostForm.Has("policy") {
+			view.Policy = r.PostForm.Get("policy")
+		}
 		s.renderFragment(w, "sharing", view)
-	}
-	local, err := decodePermissionPolicy([]byte(r.PostForm.Get("policy")))
-	if err != nil {
-		failed(err)
-		return
 	}
 	base, err := decodePermissionPolicy([]byte(r.PostForm.Get("base")))
 	if err != nil {
 		failed(errors.New("the permission form's baseline is missing or invalid; reload and try again"))
+		return
+	}
+	var local SiteAccess
+	if r.PostForm.Has("editor_action") {
+		local, err = permissionEditorChange(base, r.PostForm)
+	} else {
+		local, err = decodePermissionPolicy([]byte(r.PostForm.Get("policy")))
+	}
+	if err != nil {
+		failed(err)
 		return
 	}
 	var saved SiteAccess
@@ -58,9 +66,21 @@ func (s *Server) updatePortalPermissions(w http.ResponseWriter, r *http.Request,
 		if err := s.mayChangeAccess(identity, current, exists); err != nil {
 			return nil, err
 		}
+		if matrixAssignsOwners(r.PostForm) && !sameMembers(base.Owners, current.Owners) {
+			return nil, errors.New("site owners changed while you were editing. Nothing was saved. Reload before assigning owner permissions")
+		}
+		if permissionMatrixMembershipConflict(base, current, r.PostForm) {
+			return nil, errors.New("someone changed the same memberships while you were editing. Nothing was saved. Reload and review the latest assignments before saving")
+		}
+		if r.PostForm.Has("editor_action") && sharingMode(base) != sharingMode(local) && !reflect.DeepEqual(base.Admission, current.Admission) {
+			return nil, errors.New("site-entry rules changed while you were editing. Nothing was saved. Reload before replacing general access")
+		}
+		if r.PostForm.Has("editor_action") && portalPageRulesChanged(base, local) && !sameMembers(protectedPagePaths(base), protectedPagePaths(current)) {
+			return nil, errors.New("page restrictions changed while you were editing. Nothing was saved. Reload and review the protected paths before changing site access")
+		}
 		merged, conflicts := mergePermissionPolicy(base, current, local)
 		if len(conflicts) > 0 {
-			return nil, errors.New("permissions changed while this form was open; reload and reconcile: " + strings.Join(conflicts, ", "))
+			return nil, errors.New("someone changed the same permissions while you were editing. Nothing was saved. Reload, review the latest settings, and try again. Conflicting entries: " + strings.Join(conflicts, ", "))
 		}
 		if err := s.validateSiteAccess(merged); err != nil {
 			return nil, err
@@ -78,6 +98,50 @@ func (s *Server) updatePortalPermissions(w http.ResponseWriter, r *http.Request,
 	}
 	slog.Info("site permissions changed in the portal", "site", site, "by", identity.ID)
 	view := s.sharingView(r.Context(), site, saved, true)
-	view.Message = "Permissions saved. New requests use these rules; future publications preserve unchanged portal edits."
+	view.Message = "Permissions saved. Changes apply to new requests; republishing unchanged settings will not undo them."
 	s.renderFragment(w, "sharing", view)
+}
+
+func (s *Server) permissionSharingView(ctx context.Context, site string, access SiteAccess) sharingView {
+	access = CloneSiteAccess(access)
+	access.Published = nil
+	encoded, err := json.MarshalIndent(access, "", "  ")
+	if err != nil {
+		return sharingView{Site: site, V2: true, Error: err.Error()}
+	}
+	view := sharingView{Site: site, Platform: s.platformName(), V2: true, Policy: string(encoded), Base: string(encoded), General: sharingMode(access), Summary: sharingSummary(access, s.platformName())}
+	view.GeneralChoices = choices(view.General, [2]string{"owners", "Only site owners"}, [2]string{"selected", "Only selected people and groups"}, [2]string{"everyone", "Everyone signed in to " + view.Platform})
+	if view.General == "custom" {
+		view.GeneralChoices = append(view.GeneralChoices, choices("custom", [2]string{"custom", "Permission groups and custom access (keep current settings)"})...)
+	}
+	var principals []string
+	for _, value := range access.Owners {
+		principals = appendUnique(principals, value)
+	}
+	for _, value := range access.Admission.Principals {
+		principals = appendUnique(principals, value)
+	}
+	for _, label := range s.describePrincipals(ctx, principals) {
+		role := RoleViewer
+		if slices.Contains(access.Owners, label.Principal) {
+			role = RoleOwner
+		}
+		view.Entries = append(view.Entries, shareEntry{Principal: label.Principal, Name: label.Name, Detail: label.Detail, Kind: label.Kind, Initials: initials(label.Name), Tone: tone(label.Principal), Role: role, RoleChoices: choices(role, [2]string{RoleOwner, "Manage site"}, [2]string{RoleViewer, "Can open site"})})
+	}
+	view.EmptyAttr = flag("hidden", len(view.Entries) > 0)
+	for _, binding := range access.Bindings {
+		principals = appendUnique(principals, binding.Principal)
+	}
+	for _, grant := range access.Grants {
+		for _, principal := range grant.Subjects.Principals {
+			principals = appendUnique(principals, principal)
+		}
+	}
+	labels, err := json.Marshal(s.describePrincipals(ctx, principals))
+	if err != nil {
+		view.Error = err.Error()
+	} else {
+		view.Labels = string(labels)
+	}
+	return view
 }

@@ -1,0 +1,197 @@
+{{define "permission-manager"}}
+<div
+  id="permission-manager"
+  class="permission-manager"
+  data-site="{{.Site}}"
+  data-policy="{{.Base}}"
+  data-labels="{{.Labels}}"
+>
+  {{if .Message}}
+  <p class="banner banner-success" role="status">{{.Message}}</p>
+  {{end}} {{if .Error}}
+  <p class="banner banner-error" role="alert">{{.Error}}</p>
+  {{end}}
+  <p class="lead">
+    Choose who can enter. Then assign the permission groups they need.
+  </p>
+  <p
+    data-permission-error
+    class="banner banner-error"
+    role="alert"
+    tabindex="-1"
+    hidden
+  ></p>
+  <p data-permission-status role="status" aria-live="polite"></p>
+
+  <section
+    id="site-access"
+    class="permission-section"
+    aria-labelledby="site-access-heading"
+  >
+    <div class="permission-heading">
+      <div>
+        <p class="eyebrow">1 · SITE ACCESS</p>
+        <h3 id="site-access-heading">Who can open this site?</h3>
+      </div>
+      <button type="button" class="link-button" data-edit-owners>
+        Manage site owners
+      </button>
+    </div>
+    <label class="field"
+      ><span class="field-label" id="general-access-label">General access</span
+      ><select data-general-access aria-labelledby="general-access-label">
+        {{range .GeneralChoices}}
+        <option value="{{.Value}}" {{.Attr}}>{{.Label}}</option>
+        {{end}}
+      </select></label
+    >
+    <p class="field-hint">
+      Everyone means signed-in workspace members, not the public internet. Site
+      access does not grant app data permissions.
+    </p>
+    <div data-admission-entries class="permission-admission-entries">
+      {{range .Entries}}<span class="permission-chip">{{.Name}}</span>{{end}}
+    </div>
+    <button type="button" class="link-button" data-add-admission>
+      + Add a person or directory group
+    </button>
+    <div data-page-boundaries></div>
+  </section>
+
+  <section
+    id="permission-groups"
+    class="permission-section permission-matrix-section"
+    aria-labelledby="permission-groups-heading"
+  >
+    <div class="permission-heading">
+      <div>
+        <p class="eyebrow">2 · APP PERMISSIONS</p>
+        <h3 id="permission-groups-heading">Who can do what?</h3>
+        <p class="muted">
+          Each column is a site-owned permission group. Click its name to edit
+          what it allows.
+        </p>
+      </div>
+      <div class="form-actions">
+        <button
+          type="button"
+          class="button button-secondary"
+          data-add-permission-row
+        >
+          + Add person or group</button
+        ><button type="button" class="button" data-new-permission-group>
+          + New permission group
+        </button>
+      </div>
+    </div>
+    <p class="field-hint">
+      Defaults apply to everyone admitted. Add rows only for people or directory
+      groups needing extra permissions. Permissions add together; an unchecked
+      box cannot deny a default or another group's access.
+    </p>
+    <div
+      data-permission-matrix
+      class="permission-matrix-scroll"
+      tabindex="0"
+      role="region"
+      aria-label="Permission assignment table"
+    ></div>
+    <p class="field-hint">
+      The table shows default and explicit assignments, not an effective-access
+      calculation. Other directory memberships and direct resource rules may
+      also grant access. Existing owner permissions are preserved; new groups
+      offer explicit owner assignments.
+    </p>
+  </section>
+
+  <details class="advanced" data-other-rules>
+    <summary>Other resource rules and page restrictions</summary>
+    <p class="field-hint">
+      Rules outside the permission groups are preserved. They can independently
+      allow access; unticking a group does not revoke these rules.
+    </p>
+    <div data-independent-rules></div>
+  </details>
+  <noscript
+    ><p class="banner banner-warning">
+      Enable JavaScript to manage site access, permission groups, and resource
+      rules. No permissions have been changed.
+    </p></noscript
+  >
+  <details class="advanced permission-technical">
+    <summary>Technical tools · full policy JSON</summary>
+    <p class="field-hint">
+      For app developers. Ordinary sharing and resource rules can be managed
+      without JSON. Save or discard table changes before using this separate
+      editor.
+    </p>
+    <form
+      data-advanced-permission-form
+      hx-put="/api/hex/manage/sites/{{.Site}}/sharing"
+      hx-target="#permission-manager"
+      hx-swap="outerHTML"
+    >
+      <input type="hidden" name="base" value="{{.Base}}" /><label class="field"
+        ><span class="field-label" id="permission-policy-label"
+          >Permission policy (JSON)</span
+        ><textarea
+          name="policy"
+          rows="24"
+          spellcheck="false"
+          aria-labelledby="permission-policy-label"
+        >
+{{.Policy}}</textarea></label
+      ><button type="submit" class="button button-secondary">
+        Save advanced policy
+      </button>
+    </form>
+  </details>
+  <form
+    data-permission-save
+    class="permission-save-bar"
+    hx-put="/api/hex/manage/sites/{{.Site}}/sharing"
+    hx-target="#permission-manager"
+    hx-swap="outerHTML"
+  >
+    <input type="hidden" name="base" value="{{.Base}}" /><input
+      type="hidden"
+      name="editor_action"
+      value="matrix"
+    /><input type="hidden" name="entry" />
+    <div>
+      <strong data-save-state>No unsaved changes</strong>
+      <p class="field-hint">Changes apply together when you save.</p>
+    </div>
+    <div class="form-actions">
+      <button
+        type="button"
+        class="button button-secondary"
+        data-discard-permissions
+        disabled
+      >
+        Discard changes</button
+      ><button type="submit" class="button" data-save-permissions disabled>
+        Save changes
+      </button>
+    </div>
+  </form>
+  <dialog
+    class="permission-dialog"
+    data-permission-dialog
+    aria-labelledby="permission-dialog-title"
+  >
+    <div class="permission-heading">
+      <h3 id="permission-dialog-title"></h3>
+      <button
+        type="button"
+        class="link-button"
+        data-close-permission-dialog
+        aria-label="Close permission editor"
+      >
+        Close
+      </button>
+    </div>
+    <div data-permission-dialog-body></div>
+  </dialog>
+</div>
+{{end}}

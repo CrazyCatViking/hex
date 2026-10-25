@@ -79,6 +79,8 @@ Put this policy under `access` in `hex.json`. IDs below are illustrative, not re
 
 There is no implicit role hierarchy. `approver` does not inherit `employee`. A caller may hold several roles, including different scoped roles in different projects. An unscoped binding holds that role across all scopes. A role's `signedIn: true` explicitly assigns it to every signed-in visitor, but never to an automation.
 
+Roles can also have an optional `name` (up to 512 bytes) for display in the portal. The role map key remains the stable identifier used by app code, bindings, grants, and reconciliation; changing the display name never changes authorization.
+
 ## Grant semantics
 
 | Kind | Resource | Operations |
@@ -157,7 +159,22 @@ hex publish
 
 `local-policy.json` is the intended Base policy (the access object, not all of hex.json). Existing differences are thereafter treated as portal edits. To deliberately discard remote differences, use `hex publish --replace-access`; this is never implicit. Review its effects first.
 
-The portal shows roles and a permission matrix, and edits the complete policy as JSON. Its stale forms also use a three-way merge. Removing a direct binding does not necessarily remove access granted through groups, signed-in roles, or other grants.
+### Managing permissions in the portal
+
+Open a site's **Sharing** tab on the platform domain:
+
+1. **Site access** controls admission independently of app data permissions. Add people or directory groups with the searchable picker. Site ownership is managed separately.
+2. **Who can do what?** shows a checkbox column per site-owned permission group. The default row applies groups to all admitted signed-in people, not automations. The owner row shows explicit owner-principal assignments, without assuming all owners already have app permissions. Only explicit memberships and intentionally added rows appear, not the whole directory.
+3. Click a group heading to create/edit its name, description, and **resource rules**. Each rule selects a resource type, app resource identifier, operations, optional record conditions, and writable fields. Resource suggestions come from the existing policy; they are not a complete automatically discovered app schema. Adding a grant does not create a collection or implement an app action.
+4. **Save changes** applies the staged table and rule edits together. **Apply** in a dialog updates the draft only. Validation and stale-form errors preserve the edited controls; incompatible edits are not guessed. Technical full-policy JSON remains a separate collapsed developer tool, not a prerequisite for routine management.
+
+New groups offer explicit assignments to the listed owners by default. Existing policies and owner permissions are never expanded merely by opening the editor. These memberships do not automatically include platform administrators or future owners; record and action restrictions still apply. Mixed or scoped owner memberships remain visible individually.
+
+Membership limits are optional and use the types defined by the app's scoped rules; Hex has no built-in project A/B model. A limited binding satisfies only matching scoped rules, not unscoped page grants. An unrestricted binding or signed-in role applies across all scopes, while still enforcing record conditions and field limits.
+
+The matrix shows **explicit assignments**, not a general effective-access evaluator. Inherited defaults are marked and cannot be denied per person. The platform does not know other people's current directory claims; directory memberships and direct/owner resource grants can independently allow access. Those grants and page restrictions remain visible under **Other resource rules and page restrictions**. Removing a row or unticking a group does not revoke unrelated grants or site entry.
+
+Edits are narrow transformations of the original form policy. The server retains untouched custom rules, exact condition values and stable IDs, merges independent remote changes, and preserves the existing publication baseline. Stale edits to the same principal/group membership, changes to owners during owner assignments, and concurrent page-boundary or general-admission replacements fail without a partial save. Unchanged local republication continues to preserve portal additions and revocations.
 
 ## Automatic migration
 

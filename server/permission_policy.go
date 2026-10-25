@@ -20,6 +20,7 @@ type Subjects struct {
 }
 
 type ApplicationRole struct {
+	Name        string `json:"name,omitempty"`
 	Description string `json:"description,omitempty"`
 	SignedIn    bool   `json:"signedIn,omitempty"`
 }
@@ -83,7 +84,10 @@ func validatePermissionPolicy(access SiteAccess) error {
 	if len(access.Roles) > 64 || len(access.Bindings) > 1024 || len(access.Grants) > 2048 {
 		return errors.New("at most 64 roles, 1024 bindings and 2048 grants are allowed")
 	}
-	for name := range access.Roles {
+	for name, role := range access.Roles {
+		if len(role.Name) > 512 {
+			return fmt.Errorf("application role %q: display names are limited to 512 bytes", name)
+		}
 		if !validCollectionName(name) {
 			return fmt.Errorf("invalid application role %q", name)
 		}
