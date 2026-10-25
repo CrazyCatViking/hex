@@ -133,8 +133,8 @@ For artifacts:
 - A folder with `index.html` is published as a site. A single HTML file becomes the page.
 - Any other file gets a generated page that previews it (images, PDF, video, audio, and text up to 1 MiB inline) with a download link. A folder without `index.html` gets a generated file listing.
 - `--name` (`-n`) sets the human-readable title, which defaults to the file or folder name.
-- `--with user:<email or id>` or `--with group:<object id>` (repeatable) shares it; the creator always stays a viewer. `hex access` changes the viewers later.
-- `--update <site>` replaces an artifact's content at the same URL, keeping its title and viewers unless `--name` or `--with` is given.
+- `--with user:<stable id>` or `--with group:<object id>` (repeatable) declares artifact sharing using version 2 roles and grants. Changes merge with portal edits; unchanged local sharing never restores portal revocations.
+- `--update <site>` replaces artifact content at the same URL. Without `--with`, deployed permissions and their local baseline remain unchanged.
 - `hex sites --mine` lists everything you own, and `hex delete <site> --yes` removes one.
 
 Artifacts never appear in the catalogue or discovery API. Anyone who can sign in may create them, even when `HEX_PUBLISHER_GROUPS` limits app names, because their names are random. The feature needs identities, access control and publishing; `GET /api/hex/capabilities` reports it as `artifacts`.

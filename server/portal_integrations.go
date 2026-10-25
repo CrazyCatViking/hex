@@ -130,6 +130,13 @@ func (s *Server) manageSiteIntegrations(w http.ResponseWriter, r *http.Request) 
 func (s *Server) siteIntegrationPortalView(ctx context.Context, identity *Identity, site string) (siteIntegrationsView, error) {
 	view := siteIntegrationsView{Site: site, ApprovalsEnabled: s.integrationApprovalsEnabled(), Admin: s.isAdmin(identity)}
 	caller := integrationCaller{site: site, identity: identity, role: roleOwner}
+	if site != "" {
+		authorization, err := s.authorizeSite(ctx, identity, site)
+		if err != nil {
+			return view, err
+		}
+		caller.authorization = &authorization
+	}
 	for _, registered := range s.config.Integrations.all() {
 		integration := registered.integration
 		card := portalIntegrationCard{

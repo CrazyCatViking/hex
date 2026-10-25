@@ -124,6 +124,26 @@ test("database operations preserve envelopes and report structured failures", as
   );
 });
 
+test("record permission checks are site-scoped advisory requests", async () => {
+  const input = {
+    collection: "expenses",
+    operation: "update",
+    id: "one",
+    data: { amount: 20 },
+  };
+  const hex = createHexClient({
+    site: "demo",
+    fetch: async (url, init) => {
+      assert.equal(url, "/api/sites/demo/permissions/check");
+      assert.equal(init.method, "POST");
+      assert.equal(init.headers.get("X-Hex-Request"), "1");
+      assert.deepEqual(JSON.parse(init.body), input);
+      return new Response('{"allowed":true,"version":2}');
+    },
+  });
+  assert.deepEqual(await hex.can(input), { allowed: true, version: 2 });
+});
+
 function sseResponse(chunks, { signal } = {}) {
   const encoder = new TextEncoder();
   let index = 0;

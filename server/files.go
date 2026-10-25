@@ -24,6 +24,13 @@ func fileKey(w http.ResponseWriter, r *http.Request) (string, bool) {
 
 // allowFileAccess applies the site's file prefix rules to the requested key.
 func allowFileAccess(w http.ResponseWriter, r *http.Request, write bool) bool {
+	if r.Method == http.MethodDelete && !requestAuthorization(r).permits("file", r.PathValue("key"), "delete") {
+		writeError(w, http.StatusForbidden, "deleting this file is restricted")
+		return false
+	}
+	if r.Method == http.MethodDelete {
+		return true
+	}
 	access := requestAuthorization(r).file(r.PathValue("key"))
 	if write && access.write != grantAll {
 		writeError(w, http.StatusForbidden, "writing this file is restricted")

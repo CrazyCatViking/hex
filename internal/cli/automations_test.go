@@ -104,6 +104,7 @@ func TestAutomationProjectMetadataRequiresFileAndRejectsWorkflowFields(t *testin
 
 const automationProject = `{
 	"name": "demo",
+	"access": {"version":2,"grants":{"automation-integrations":{"kind":"integration","resource":"*","operations":["read","write"],"subjects":{"principals":["automation:weekly","automation:daily"]}}}},
 	"automations": [{
 		"name": "weekly",
 		"schedule": "0 8 * * MON",

@@ -47,7 +47,8 @@ func TestArtifactsArePrivateUntilShared(t *testing.T) {
 		t.Fatalf("unexpected artifact: %+v", created)
 	}
 
-	publishSite(t, server, creator, created.Name, map[string]string{"index.html": "report"}, "")
+	files := map[string]string{"index.html": "report"}
+	publishPublication(t, server, creator, created.Name, files, publication{Files: manifest(files), Metadata: &hex.SiteMetadata{Title: "Demo"}})
 
 	authz := func(headers map[string][]string) int {
 		r := httptest.NewRequest("GET", "/api/hex/authz", nil)
@@ -89,7 +90,8 @@ func TestArtifactsArePrivateUntilShared(t *testing.T) {
 	if authz(colleague) != 204 {
 		t.Fatal("sharing with a group did not grant access")
 	}
-	publishSite(t, server, creator, created.Name, map[string]string{"index.html": "report v2"}, "")
+	files = map[string]string{"index.html": "report v2"}
+	publishPublication(t, server, creator, created.Name, files, publication{Files: manifest(files), Metadata: &hex.SiteMetadata{Title: "Demo"}})
 	data, _ := readSiteFile(t, store, created.Name, ".hex-site.json")
 	if !strings.Contains(data, `"kind": "artifact"`) || !strings.Contains(data, `"title": "Demo"`) {
 		t.Fatalf("republishing lost the artifact kind: %s", data)

@@ -1,191 +1,209 @@
-# Identity and site access control
+# Identity and application permissions
 
-Hex decides who may view, edit and publish each site using the identity that already authenticates the platform. Hex never validates identity-provider tokens or manages users itself: the hosting gateway authenticates every request, a configured identity resolver reads what the gateway forwarded, and Hex evaluates the site's access policy against that identity.
+Hex separates three decisions:
 
-Access control is optional. Without an identity resolver and access store, every authenticated user can view and edit every site.
+1. **Site admission** (`admission`): who may enter the site's API namespace.
+2. **Site management** (`owners` and platform administrators): who may publish and change permissions.
+3. **Application authorization** (`roles`, `bindings`, `grants`): which operations callers may perform.
 
-## Concepts
+Version 2 policies deny application access unless a grant permits it. Owners and platform administrators do **not** implicitly bypass application rules. They can still change the policy, so this is not a security boundary against policy administrators.
 
-An **identity** is what the gateway resolved for the caller: a stable ID, a display name, an email address (from the token's `email`, `preferred_username` or `upn` claim), and the group and role values the identity provider emitted. Apps read it from `GET /api/hex/me` or `hex.identity()`, and operators from `hex whoami`.
+## Identity and principals
 
-A **principal** is a typed value in a policy:
+The gateway authenticates the caller. The configured resolver supplies a stable ID, optional display name/email, groups and identity-provider roles. Read it with `hex whoami` or `hex.identity()`. Never match access against email or display-name claims.
 
-| Principal | Matches |
+| Principal | Exact, case-sensitive match |
 | --- | --- |
-| `user:<value>` | The caller's exact, case-sensitive stable identity ID. Email and display-name claims never grant access. |
-| `group:<value>` | One of the caller's group claims (Entra group object IDs) |
-| `role:<value>` | One of the caller's role claims (app role values) |
+| `user:<id>` | Stable identity ID |
+| `group:<id>` | Identity-provider group claim |
+| `role:<value>` | Identity-provider role claim, not an application role |
+| `automation:<name>` | That site's named automation; only matches the automation provider |
 
-Values are opaque, case-sensitive strings of 1–256 non-whitespace printable ASCII characters. Punctuation such as `:`, `|`, `/` and `@` is supported: `user:oidc|Subject:AbC` matches the full ID `oidc|Subject:AbC`. Only the first reserved `user:`, `group:` or `role:` prefix identifies the claim kind. Configured `HEX_ADMIN_GROUPS` and `HEX_PUBLISHER_GROUPS` values may be untyped; an untyped value matches the exact ID, any group or any role. Use a typed principal when an opaque ID starts with a reserved prefix.
-
-The resolver owns provider-specific canonicalization. Easy Auth normalizes Entra (`aad`) user and group GUIDs to lowercase; opaque IDs and app role values retain their original spelling. Use that same lowercase GUID spelling in policies and configured group IDs. Remembered-person and group labels use the same exact ID comparison as authorization; case-insensitive name/email search does not grant access.
-
-A **site access policy** is a server-owned record per site name. Each site has one of four roles for a caller:
-
-| Role | Who | May |
-| --- | --- | --- |
-| Owner | Listed in `owners`, or a platform admin | Manage the policy, publish and unpublish, pass every rule |
-| Editor | Listed in `editors`; everyone who can view when `editors` is empty | Write the site's data by default |
-| Viewer | Listed in `viewers`; every signed-in user when `viewers` is empty | See the site and read its data by default |
-| None | Anyone else | Nothing: 403 for the site's pages and API namespace, and the site is hidden from discovery |
-
-Defaults keep sharing open:
-
-- A site **without a policy** is open: every authenticated user can view and edit it, and only platform admins own it.
-- Empty `viewers` lets every signed-in user view. Empty `editors` lets every viewer edit.
-- Explicit editors can edit and view even when `viewers` is restricted to someone else.
-
-**Platform admins** — `HEX_ADMIN_GROUPS` (or `Config.AdminGroups`) — own every site. Configure at least one admin group so squatted or orphaned policies can always be corrected.
+Principal values are opaque printable ASCII strings, up to 256 characters. Only the first reserved prefix identifies the claim kind. Easy Auth canonicalizes Entra user/group GUIDs to lowercase; opaque subjects and role values retain their spelling. Application roles are site-defined names, assigned independently of identity-provider roles.
 
 ## Complete example
 
+Put this policy under `access` in `hex.json`. IDs below are illustrative, not real directory IDs.
+
 ```json
 {
-  "owners": ["user:alex-object-id", "group:6f1c1c7e-0000-4000-8000-000000000001"],
-  "editors": ["group:6f1c1c7e-0000-4000-8000-000000000002"],
-  "viewers": [],
-  "paths": [
-    { "prefix": "/admin/", "viewers": "owners" },
-    { "prefix": "/admin/help/", "viewers": "viewers" }
-  ],
-  "collections": {
-    "settings": { "read": "viewers", "write": "owners" },
-    "audit": { "read": ["group:6f1c1c7e-0000-4000-8000-000000000003"], "write": "owners" },
-    "drafts": { "read": "creator", "write": "creator" },
-    "*": { "read": "viewers", "write": "editors" }
+  "version": 2,
+  "owners": ["user:publisher-id"],
+  "admission": { "signedIn": true },
+  "roles": {
+    "employee": { "description": "Submit your own expenses", "signedIn": true },
+    "approver": { "description": "Review expenses within assigned projects" }
   },
-  "files": {
-    "exports/": { "read": "owners", "write": "owners" }
+  "bindings": {
+    "project-a-managers": {
+      "principal": "group:project-a-managers-id",
+      "role": "approver",
+      "scope": { "kind": "project", "id": "A" }
+    }
   },
-  "channels": {
-    "announcements": { "read": "viewers", "write": "owners" }
+  "grants": {
+    "site-pages": {
+      "kind": "path", "resource": "*", "operations": ["read"],
+      "subjects": { "signedIn": true }
+    },
+    "own-expenses": {
+      "kind": "collection", "resource": "expenses", "operations": ["read"],
+      "subjects": { "roles": ["employee"] },
+      "where": { "field": "createdBy", "op": "eq", "value": "$actor.id" }
+    },
+    "create-drafts": {
+      "kind": "collection", "resource": "expenses", "operations": ["create"],
+      "subjects": { "roles": ["employee"] },
+      "fields": ["amount", "projectId", "status"],
+      "check": { "field": "data.status", "op": "eq", "value": "draft" }
+    },
+    "edit-own-drafts": {
+      "kind": "collection", "resource": "expenses", "operations": ["update"],
+      "subjects": { "roles": ["employee"] },
+      "fields": ["amount"],
+      "where": {
+        "all": [
+          { "field": "createdBy", "op": "eq", "value": "$actor.id" },
+          { "field": "data.status", "op": "eq", "value": "draft" }
+        ]
+      }
+    },
+    "project-review": {
+      "kind": "collection", "resource": "expenses", "operations": ["read"],
+      "subjects": { "roles": ["approver"] },
+      "scope": { "kind": "project", "field": "data.projectId" }
+    }
   }
 }
 ```
 
-Every signed-in user can use this site. Only the second group edits its general data, only owners open `/admin/` (except `/admin/help/`), everyone reads `settings` but only owners change it, one group reads the audit log, and each user sees only their own drafts.
+There is no implicit role hierarchy. `approver` does not inherit `employee`. A caller may hold several roles, including different scoped roles in different projects. An unscoped binding holds that role across all scopes. A role's `signedIn: true` explicitly assigns it to every signed-in visitor, but never to an automation.
 
-## Audiences
+## Grant semantics
 
-Rules grant access to an **audience**: either a level name or an array of principals.
+| Kind | Resource | Operations |
+| --- | --- | --- |
+| `collection` | Exact collection or `*` | `read`, `create`, `update`, `delete` |
+| `file` | File-key prefix or `*` | `read`, `upload`, `delete` |
+| `channel` | Exact channel or `*` | `read`, `send` |
+| `path` | Absolute URL prefix or `*` | `read` |
+| `action` | Exact action name or `*` | `run` |
+| `integration` | Qualified endpoint, `name.*`, or `*` | `read` (non-mutating endpoint), `write` (mutating endpoint) |
 
-| Level | Grants |
-| --- | --- |
-| `viewers` | Everyone who can view the site |
-| `editors` | Editors and owners |
-| `owners` | Owners only |
-| `creator` | Only documents the caller created (collections only) |
+Subjects are an OR of `principals`, unscoped application `roles`, `signedIn`, and `owners`. Admission uses the same subjects; a scoped role binding can admit the caller but cannot satisfy an unscoped data grant. A scoped grant must use only role subjects and names the record field carrying its scope ID. Site admission is required even when a data grant names a caller directly.
 
-A principal array grants its members, provided they can view the site at all. Owners and admins pass every rule; callers who cannot view the site pass none.
+Grants are additive, but **one complete grant must authorize a mutation**: fields from one grant cannot be combined with another grant's state constraints. No grant means denial. A broad grant does not become restricted merely because a narrower grant also exists. Use `except` selectors to exclude resources from a broad grant.
 
-## Path rules
+File prefixes match the exact key and descendants (a trailing slash matches descendants). Path matching uses URL prefixes, including `/admin/` covering `/admin`. `Config.PathCaseInsensitive` applies to path selectors and exclusions on case-insensitive static storage. Paths protect separately served assets, not hash routes or data behind public bundles.
 
-`paths` restricts static assets under URL prefixes. Prefixes start with `/` and may contain letters, digits, `.`, `_`, `~`, `/` and `-` (no `..` or `//`); at most 32 rules. The longest matching prefix wins, and a prefix such as `/admin/` also covers the bare `/admin`. A path rule needs `viewers`, a level or principals; `creator` is not allowed. Paths without a matching rule use only the site-level decision.
+### Record conditions and protected fields
 
-Matching is case-sensitive by default. The host must set `Config.PathCaseInsensitive: true` when its static storage resolves paths case-insensitively, including Azure Files. This setting governs static authorization and portal icon authorization; application file-key rules retain exact matching. `/Admin/` and `/admin/` can have distinct rules on case-sensitive storage, but are ambiguous and rejected in case-insensitive mode. Duplicate exact prefixes are also rejected. Existing ambiguous policies fail closed when read, so consolidate them before changing a host's comparison mode. Portable policy validation does not assume Azure storage.
+Collection and declared-action grants support:
 
-NGINX sends the decoded, normalized request path to the authorization subrequest, so encoded or dot-segment variants of a protected path are checked as that path. Path rules protect separately served files only. An admin area must be its own HTML entry point, such as `admin/index.html` in a multi-page build, with admin-only assets under the same prefix. Hash routes inside a public page cannot be protected, and shared bundles remain readable. Protect the data behind an admin page with collection, file and channel rules.
+- `where`: existing record requirement (proposed record for a create).
+- `check`: proposed record requirement (existing record for a delete).
+- `fields`: top-level fields that may change or be supplied on create. Omitted/null means unrestricted; `[]` means no fields may change. Deleting a record is governed by the explicit delete operation, not a field allowlist.
+- `scope`: binding scope IDs must match the record field before and after a mutation. Scope checks cannot be bypassed by changing the project field.
 
-## Data rules
+Conditions use a leaf `{field, op, value}` or a nonempty `{all:[...]}` / `{any:[...]}` tree. Supported comparisons: `eq`, `ne`, `in` (value array), `contains` (record array contains the exact JSON value). Missing fields never match, even `ne`; JSON null is distinct from missing. Field paths are `data.<field>[.<nested-field>...]`, `id`, or server-recorded `createdBy`. A comparison value equal to `"$actor.id"` resolves to the caller's stable ID. Conditions are bounded to 8 levels, 128 nodes and 4 KiB per comparison value.
 
-`collections`, `files` and `channels` map names to `{ "read": <audience>, "write": <audience> }`. An unset `read` defaults to `viewers` and an unset `write` to `editors`. The `"*"` key is the rule for names without their own entry; without it, those defaults apply. At most 64 rules per map.
+`PUT` selects `create` or `update` from the actual record existence under the storage lock. Replacements preserve `createdBy`. Lists filter in storage **before** sorting, pagination and limit. Unreadable documents return 404; forbidden writes return 403. PostgreSQL uses parameterized JSONB filters and transactional mutation locks, including absent IDs; memory uses the same evaluator under its mutex. Custom providers must implement `GuardedDatabase`; unsupported conditional lists and mutations fail closed.
 
-| Map | Keys | Read covers | Write covers |
-| --- | --- | --- | --- |
-| `collections` | Collection names | List and get | Create, replace, delete |
-| `files` | File key prefixes; the longest match wins. `exports/` covers keys under it, `report.pdf` that key and keys under `report.pdf/` | Get; listings omit unreadable files | Upload, delete |
-| `channels` | Channel names | Connecting to the WebSocket | Sending; a read-only subscriber that sends is disconnected with close code 1008 |
+## Constrained business actions
 
-The `creator` level is available for collections only. The server records the creating caller's identity ID as the document's `createdBy` when it is first stored; later writes never change it and clients cannot set it. Under `read: creator`, lists contain only the caller's documents and other people's documents answer 404, so their IDs cannot be probed. Under `write: creator`, any viewer may create documents, and only their creator may replace or delete them (403 otherwise). Documents stored before creators were recorded have an empty `createdBy`, so only owners can manage them under a creator rule.
-
-## Enforcement points
-
-1. **Static assets.** The NGINX template sends an `auth_request` subrequest to `/api/hex/authz` for every site-asset request, with the validated site name in `X-Hex-Site` and the normalized path in `X-Hex-Path`. 204 serves the asset; 403 blocks it.
-2. **Site APIs.** Every `/api/sites/{site}/...` route — files, documents, realtime upgrades — first requires the viewer role, then applies the matching data rule. App hostnames can access only their own site's namespace and permissions, plus identity and capabilities; management APIs are unavailable there. Platform API hosts retain cross-site access subject to the caller's policies. This prevents a compromised app from borrowing its visitor's authority over another site.
-3. **Discovery.** `GET /api/sites`, the landing page and its statistics omit sites the caller cannot view.
-4. **Publishing.** Only owners publish and unpublish. See [Publishing](publishing.md).
-
-`GET /api/hex/sites/{site}/permissions` (`hex.permissions()` in the browser client, `hex access check` in the CLI) describes what the caller may do: `role`, `admin`, `publish`, each path rule with `allowed`, and `read`/`write` grants (`all`, `own` or `none`) for every configured collection, file prefix and channel plus `"*"`. Apps use it to show or hide links and controls; it is advisory, and every request is checked regardless.
-
-Authorization reads the current policy from the store on each request. There is no replica-local policy cache, so a restriction saved before uploading files is visible to subsequent authorization checks on every replica. Already authorized requests and established WebSocket connections are not retroactively revoked.
-
-## Managing policies
-
-Keep the policy in the `access` section of the app's hex.json. `hex publish` sends it with the publication and the server validates and saves it before changing files or issuing upload URLs. Restrictions also apply to the currently served files; an interrupted publication retains the policy. Publishing a policy requires identity and access control to be configured.
+Declared actions default to `authorization: "caller"`: callers need an `action/run` grant **and** a complete collection-operation grant. To expose a narrow workflow without general collection write access, publish an action like:
 
 ```json
 {
-  "name": "team-dashboard",
-  "access": {
-    "viewers": ["group:<sales group object id>"],
-    "paths": [{ "prefix": "/admin/", "viewers": "owners" }],
-    "collections": { "settings": { "write": "owners" } }
-  }
+  "name": "approve", "description": "Approve an expense submitted by someone else",
+  "operation": "update", "collection": "expenses", "authorization": "action",
+  "input": {
+    "type": "object", "properties": { "id": { "type": "string" } },
+    "required": ["id"], "additionalProperties": false
+  },
+  "where": {
+    "all": [
+      { "field": "data.status", "op": "eq", "value": "submitted" },
+      { "field": "createdBy", "op": "ne", "value": "$actor.id" }
+    ]
+  },
+  "set": { "status": "approved", "approvedBy": "$actor.id", "approvedAt": "$now" }
 }
 ```
 
-A policy without `owners` keeps the current owners, or makes the caller the owner of a new policy. Every stored policy must keep the caller able to manage it, so you cannot lock yourself out by accident. Without an `access` section, publishing leaves the existing policy unchanged.
+Add an `action/run` grant for `approve` with subjects `approver` and scope `{kind:"project",field:"data.projectId"}`. The action accepts no writable input fields except its ID unless `fields` explicitly lists them. Fixed `set` effects overwrite allowed input and support `$actor.id` and `$now`. Action grant conditions, definition constraints, and the update execute under one storage lock. Calling the database directly does not inherit action authority.
 
-**Republishing merges.** Owners also change policies in the portal and with `hex access`, so a publication does not replace the policy. The server remembers the `access` section of the last publication and applies only what hex.json changed since then: principals hex.json added or removed are added to or removed from the live lists, and path, collection, file and channel rules are compared by prefix or name. A principal or rule removed in the portal stays removed while hex.json still lists it; it returns only if hex.json removes and adds it again. When both sides changed the same rule differently, or one side opened a list to everyone (an empty `viewers` or `editors`) while the other changed it, the publication is refused with `409 Conflict` before anything changes. `hex publish --replace-access` applies hex.json as it is.
+Go-registered handlers remain trusted server code. Conditional action grants do not authorize them automatically, since Hex cannot infer which record an arbitrary handler targets. `ActionContext.CollectionWriteOptions` only represents unrestricted or creator-only CRUD; use `ActionContext.MutateDocument` for conditional writes. Integration grants further restrict the caller's platform permissions; platform integration permissions and site approvals are still required and cannot be granted by a site policy.
 
-The publication result lists how the saved policy still differs from hex.json, comparing people by the role they effectively have, and `hex publish` prints it as a warning; update hex.json to match `hex access show`, or use `--replace-access`. A site whose policy predates this behavior adopts the first `access` section published to it as its base without changing its policy, so earlier portal changes are kept; later hex.json changes merge as usual. A site first published without an `access` section starts from an empty base, so a section added later is applied in full. Artifacts are shared with `--with`, which always replaces their viewers.
+## Publishing and portal reconciliation
 
-**Claiming names.** The first publication of an unowned name creates a policy that makes the publisher its owner. `HEX_PUBLISHER_GROUPS` (or `Config.PublisherGroups`) limits who may claim new names; empty lets every signed-in user. Owners can always republish their sites, and admins can reassign squatted names.
+The server atomically stores the merged live policy and the incoming local baseline:
 
-The CLI manages policies directly:
+- **Base**: previously accepted local `access` section.
+- **Remote**: current deployed policy, including portal changes.
+- **Local**: incoming `access` section.
+
+Only Base→Local changes apply to Remote. Unchanged local assignments never restore portal revocations or delete portal additions. Roles, bindings and grants have stable map IDs, not array positions or display names. A binding contains one principal/role/scope assignment; keep its ID stable when editing it. Differing changes or delete-versus-edit to the same ID conflict (409). Independent IDs merge. Cross-references and duplicate assignments are validated after merging. Opening a role to all signed-in users concurrently with changing that role's assignments also conflicts.
+
+The baseline is always the **incoming local document**, never the merged live result. Publication warnings report preserved remote differences. Both apps and artifacts use this reconciliation. Publishing without `access` leaves both live permissions and the baseline untouched.
+
+Missing baselines are not guessed. Explicitly establish one without changing live access:
+
+```sh
+hex access show my-app
+hex access reconcile my-app --file local-policy.json
+hex publish
+```
+
+`local-policy.json` is the intended Base policy (the access object, not all of hex.json). Existing differences are thereafter treated as portal edits. To deliberately discard remote differences, use `hex publish --replace-access`; this is never implicit. Review its effects first.
+
+The portal shows roles and a permission matrix, and edits the complete policy as JSON. Its stale forms also use a three-way merge. Removing a direct binding does not necessarily remove access granted through groups, signed-in roles, or other grants.
+
+## Automatic migration
+
+Existing deployed policies migrate atomically on first policy use; no opt-in or permanent second authorization engine is required. The stored historical publication baseline migrates with it, independently of live changes. Migration uses stable deterministic IDs and explicit compatibility grants to preserve:
+
+- Existing viewer/editor audiences and creator-only records.
+- Owner/admin bypass as **explicit grants**.
+- Collection/channel overrides, file longest-prefix rules and path fallback using exclusions; broad fallback grants cannot bypass migrated restrictions.
+- Existing declared/registered action audiences and existing automation names. New automations need explicit grants, e.g. `automation:weekly-report`; they are not implicit owners.
+
+Sites without any stored policy retain their historical open behavior. Newly claimed sites without an `access` section are private to owners, with no default data authority. Read the migrated policy with `hex access show`, copy/review it for local source configuration, and adopt cleaner defaults when ready.
+
+**Legacy publications are rejected before claiming ownership, changing policy, or modifying files.** An access section must declare `version: 2` and use the new schema. Merely setting version 2 while retaining even empty legacy `viewers`, `editors`, `paths`, `collections`, `files` or `channels` is rejected with migration guidance. Unknown fields and malformed policies also fail. The direct management API still translates legacy replacement requests for older tooling; it never stores a legacy policy.
+
+PostgreSQL stores v2 policies in a fail-closed envelope: older binaries reject its incompatible legacy `owners` field instead of interpreting absent lists as open access. Back up policies before upgrading. Older binaries cannot serve migrated sites and rollback needs a compatible release; do not run mixed-version replicas as a long-term deployment strategy. No database table migration is needed for v2 JSON policies.
+
+The CLI also checks live `capabilities.permissionVersion` before sending a version 2 policy. Upgrade the server first: an older server might otherwise ignore new fields and interpret absent legacy lists as open access.
+
+## Managing policies and inspecting access
 
 ```sh
 hex whoami
 hex access show my-app
-hex access set my-app --owner user:<identity-id> --viewer group:<object-id>
 hex access set my-app --file policy.json
 hex access check my-app
-hex access clear my-app
+hex access reconcile my-app --file local-policy.json
 ```
 
-`hex access set` replaces the whole policy, and the next publication merges hex.json into it; flags cover owners, editors and viewers, and `--file` accepts the complete JSON shape above. `clear` removes the policy, opening the site to every signed-in user; the name is then unowned. The CLI authenticates like other API commands: `HEX_TOKEN`, or its saved browser sign-in for the platform (see [Publishing](publishing.md#authentication)).
+`access set` explicitly replaces live policy and retains the last publication baseline. Omitted owners keep existing owners, and changes must retain the caller's ability to manage the site. Legacy convenience flags generate explicit compatibility policies. `access clear` removes the policy and opens the site to all signed-in users; it is a destructive administrative operation.
 
-The HTTP routes are `GET`/`PUT`/`DELETE /api/hex/sites/{site}/access`, registered when both an identity resolver and an access store are configured. Reading a policy requires owner or admin rights.
+Management endpoints require ownership: `GET/PUT/DELETE /api/hex/sites/{site}/access`, `POST /api/hex/sites/{site}/access/baseline`. `hex.permissions()` returns version, application roles, management role, per-operation grants (`all`, `own`, `conditional`, `none`), and compatibility `read`/`write` summaries. A `conditional` grant is not unrestricted access.
 
-## Storage
+`await hex.can({collection:"expenses",operation:"update",id:"item-id",data:nextRecord})` asks whether the current caller could perform that exact operation. It calls `POST /api/sites/{site}/permissions/check`. Responses are advisory, not authorization tokens: real operations always recheck. Permission descriptions do not expose policy membership to ordinary viewers.
 
-Policies live in the platform database, never in the published site directory. The PostgreSQL provider stores them as JSON in `hex_site_policies`. `Migrate` converts entries from the former `hex_site_access` table (whose `groups` become `viewers`) and drops it in one transaction. Converted untyped values keep matching the ID, groups and roles; policies saved afterwards must use typed principals. The in-memory store is for development and tests.
+## Storage, enforcement and trust model
 
-Claims and policy changes use `AccessStore.UpdateSiteAccess`, which serializes the read, authorization and write for each site across instances, including names without a policy yet. PostgreSQL uses a transaction-scoped advisory lock and row lock; memory uses a mutex. A competing initial claim cannot overwrite the winner, and revoked owners cannot mutate policies using stale authorization.
+Policies reside in the access store, never served app files. `AccessStore.UpdateSiteAccess` must serialize authorization and all mutations across replicas. PostgreSQL uses transaction-scoped advisory and row locks; memory uses a mutex. Each request reads the current policy without a replica-local cache. Already authorized requests and established WebSockets are not retroactively revoked.
 
-### Upgrading existing policies and providers
+Static assets, app APIs, discovery, portal data browsing, actions and automation data operations apply these rules. App hostnames are restricted to their own namespace; management APIs stay on the platform host. Only owners publish/unpublish. `HEX_PUBLISHER_GROUPS` limits new name claims. `HEX_ADMIN_GROUPS` supplies platform policy administrators; configure recovery administrators.
 
-Older versions also matched `user:` values against email and display-name claims. Replace those values with stable IDs in owners, editors, viewers and rule audiences, including policies in hex.json. Use the sharing picker (which stores IDs), `hex whoami`, or your identity provider's directory to obtain the IDs. A platform admin can repair policies whose owners were email/name-based. There is no automatic email-to-ID migration or authorization fallback.
+The gateway must authenticate requests and strip spoofed identity headers. Never expose the Easy Auth resolver directly to untrusted clients. Store outages and invalid policies fail closed. Strong protection against policy-editing owners needs platform governance, not an application role.
 
-Core identity matching now preserves case for users, groups, roles, admin and publisher principals. Replace differently cased opaque principal values with the exact claims returned by `hex whoami`; do not lowercase generic identity-provider subjects or roles. For Easy Auth/Entra, lowercase user/group GUIDs in existing policies, configured groups, admin/publisher lists and remembered-person IDs to match the resolver's canonical GUIDs. `easyauth.CanonicalID` and `easyauth.CanonicalPrincipal` are available to Azure compositions and migration tools; role values remain exact. Core policy normalization does not rewrite provider claims.
+## Entra ID configuration and local development
 
-Older path matching always ignored case. Preserve that behavior explicitly with `Config.PathCaseInsensitive: true` on Azure Files and other case-insensitive static mounts. On case-sensitive storage, review prefixes against the actual asset spelling before adopting the exact default. Consolidate casefold-colliding rules before enabling case-insensitive comparison; there is no order-dependent winner for ambiguous policies.
+Enable `HEX_IDENTITY_PROVIDER=easyauth` behind Easy Auth. Emit assigned group claims (`groupMembershipClaims: ApplicationGroup`) or identity-provider app roles. Group/role membership changes take effect after claims are refreshed; removing a directory membership does not instantly invalidate an existing session. Use exact stable IDs, not email addresses.
 
-Custom access stores must implement the atomic `UpdateSiteAccess` contract. A separate read followed by an unconditional write is not sufficient; all policy writers must participate in the same serialization mechanism.
+`hex dev` supplies identity `local-dev` and local administrator authority. That authority manages policy but does not imply v2 data grants. Policies in the in-memory store reset on restart. Custom persistent stores must preserve the baseline and enforce atomic updates; custom document stores must participate in the guarded mutation protocol for every writer.
 
-With the reference executable, access control activates with the `easyauth` resolver only alongside the `postgres` database provider; the `static` resolver accepts the in-memory store for local experimentation.
-
-## Entra ID configuration (Azure example)
-
-Easy Auth injects the authenticated caller as `X-MS-CLIENT-PRINCIPAL` headers; `HEX_IDENTITY_PROVIDER=easyauth` makes the server read them. The Azure example enables this and accepts `admin_group_ids` and `publisher_group_ids`.
-
-Group claims are not emitted by default. On the app registration, either:
-
-- Set `groupMembershipClaims` to `ApplicationGroup` and assign the relevant groups to the enterprise application. Only assigned groups are emitted, which avoids the claims overage that silently drops groups for users in many groups. Policies then use `group:<object id>`. A team group must be assigned to the enterprise application before it can appear in a policy.
-- Or define **app roles**, assign them to groups or users on the enterprise application, and use `role:<value>` in policies. Roles never overage.
-
-Claims come from the token issued at sign-in, so group and role changes apply after the user signs in again. Removing someone from a group does not revoke an existing session immediately.
-
-If the app registration is shared with other applications, prefer a dedicated registration for Hex before changing its claims configuration.
-
-## Local development
-
-`hex dev` has no authenticating gateway, so the local helper resolves a fixed identity: ID `local-dev`, name `Local Developer`, groups from `HEX_IDENTITY_GROUPS` (comma-separated). The local developer is a platform admin by default, and policies live in memory unless the PostgreSQL provider is selected, so they reset on restart. Simulate a viewer without access by leaving `HEX_IDENTITY_GROUPS` unset and setting `HEX_ADMIN_GROUPS` to something else.
-
-## Trust model and limits
-
-- **The gateway remains the authentication boundary.** Only enable `easyauth` behind a gateway that authenticates every request and strips client-supplied identity headers; never expose the Go server directly with it enabled.
-- **Publishers are per-site owners.** Only owners of a site can publish or unpublish it. Azure Files upload URLs are scoped to single files of that site and expire after an hour. The server identity itself holds share-wide write access, so treat the server and its storage credentials as the trust boundary.
-- **Names can be claimed first-come.** Limit claiming with `HEX_PUBLISHER_GROUPS`, claim your name when you first publish, and let admins correct squatted names. Unpublishing keeps the policy, so the name stays reserved.
-- **Fail-closed behavior.** With an identity resolver configured, site APIs require a resolved identity even for otherwise open sites. Unresolved identities are denied static site access and receive no discovery listings. If the access store is unavailable, requests fail with a server error rather than falling open.
-- **Rules are coarse by design.** Rules apply per path prefix, collection, file prefix and channel, plus per-creator documents. There is no field-level or content-based rule language.
+See [the legacy mapping reference](access-control-legacy.md) for historical semantics only, and [publishing](publishing.md) for upload behavior.

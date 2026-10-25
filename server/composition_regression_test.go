@@ -33,7 +33,7 @@ func TestAutomationAIDryRunCannotWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	access := memory.NewAccessStore()
-	if err := access.PutSiteAccess(context.Background(), "demo", hex.SiteAccess{Owners: []string{"user:owner"}}); err != nil {
+	if err := access.PutSiteAccess(context.Background(), "demo", automationIntegrationPolicy("owner", "preview")); err != nil {
 		t.Fatal(err)
 	}
 	provider := &scriptedProvider{turns: [][]hex.AIEvent{

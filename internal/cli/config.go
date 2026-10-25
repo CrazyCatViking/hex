@@ -28,17 +28,18 @@ var clientIDPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-f
 var profileNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{0,127}$`)
 
 type Capabilities struct {
-	Version        int   `json:"version"`
-	Sites          bool  `json:"sites"`
-	Files          bool  `json:"files"`
-	Database       bool  `json:"database"`
-	Realtime       bool  `json:"realtime"`
-	Identity       bool  `json:"identity,omitempty"`
-	AccessControl  bool  `json:"accessControl,omitempty"`
-	Publishing     bool  `json:"publishing,omitempty"`
-	Artifacts      bool  `json:"artifacts,omitempty"`
-	Actions        bool  `json:"actions,omitempty"`
-	MaxUploadBytes int64 `json:"maxUploadBytes"`
+	Version           int   `json:"version"`
+	Sites             bool  `json:"sites"`
+	Files             bool  `json:"files"`
+	Database          bool  `json:"database"`
+	Realtime          bool  `json:"realtime"`
+	Identity          bool  `json:"identity,omitempty"`
+	AccessControl     bool  `json:"accessControl,omitempty"`
+	PermissionVersion int   `json:"permissionVersion,omitempty"`
+	Publishing        bool  `json:"publishing,omitempty"`
+	Artifacts         bool  `json:"artifacts,omitempty"`
+	Actions           bool  `json:"actions,omitempty"`
+	MaxUploadBytes    int64 `json:"maxUploadBytes"`
 }
 
 // UnmarshalJSON requires the original capabilities and tolerates new ones,

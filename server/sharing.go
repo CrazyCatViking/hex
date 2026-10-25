@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"html/template"
 	"log/slog"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -29,6 +30,11 @@ const (
 )
 
 type sharingView struct {
+	V2             bool
+	Policy         string
+	Base           string
+	Matrix         []permissionMatrixRow
+	RoleRows       []permissionRoleRow
 	Site           string
 	Platform       string
 	General        string
@@ -145,6 +151,40 @@ func appendUnique(values []string, value string) []string {
 }
 
 func (s *Server) sharingView(ctx context.Context, site string, access SiteAccess, exists bool) sharingView {
+	if access.Version == 2 {
+		access.Published = nil
+		encoded, err := json.MarshalIndent(access, "", "  ")
+		if err != nil {
+			return sharingView{Site: site, V2: true, Error: err.Error()}
+		}
+		view := sharingView{Site: site, Platform: s.platformName(), V2: true, Policy: string(encoded), Base: string(encoded)}
+		for _, id := range slices.Sorted(maps.Keys(access.Roles)) {
+			role := access.Roles[id]
+			view.RoleRows = append(view.RoleRows, permissionRoleRow{ID: id, Description: role.Description, SignedIn: role.SignedIn})
+		}
+		for _, id := range slices.Sorted(maps.Keys(access.Grants)) {
+			grant := access.Grants[id]
+			subjects := append(slices.Clone(grant.Subjects.Principals), grant.Subjects.Roles...)
+			if grant.Subjects.SignedIn {
+				subjects = append(subjects, "All signed-in users")
+			}
+			if grant.Subjects.Owners {
+				subjects = append(subjects, "Site owners / platform administrators")
+			}
+			condition := "All matching records"
+			if grant.Where != nil || grant.Check != nil || grant.Scope != nil {
+				condition = "Conditional — see policy"
+			}
+			if grant.Fields != nil {
+				condition += "; limited writable fields"
+			}
+			if len(grant.Except) > 0 {
+				condition += "; excludes " + strings.Join(grant.Except, ", ")
+			}
+			view.Matrix = append(view.Matrix, permissionMatrixRow{ID: id, Resource: grant.Kind + ":" + grant.Resource, Operations: strings.Join(grant.Operations, ", "), Subjects: strings.Join(subjects, ", "), Condition: condition})
+		}
+		return view
+	}
 	general, order, roles := decodeSharing(access, exists)
 	platform := s.platformName()
 	view := sharingView{Site: site, Platform: platform, General: general}
@@ -206,6 +246,14 @@ func (s *Server) manageUpdateSharing(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := r.ParseForm(); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid form")
+		return
+	}
+	if r.PostForm.Has("policy") {
+		s.updatePortalPermissions(w, r, identity, site, access, exists)
+		return
+	}
+	if access.Version == 2 {
+		writeError(w, http.StatusBadRequest, "the sharing form uses legacy permissions; reload the page to edit the version 2 policy")
 		return
 	}
 

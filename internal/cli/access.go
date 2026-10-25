@@ -9,6 +9,8 @@ import (
 	"os"
 	"strings"
 
+	hex "github.com/crazycatviking/hex/server"
+
 	"github.com/spf13/cobra"
 )
 
@@ -25,15 +27,13 @@ func (a *App) whoamiCommand() *cobra.Command {
 func (a *App) accessCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "access",
-		Short: "Manage who can view, edit and publish a site",
-		Long: "Manage a site's access policy on the platform. A site without a policy is open " +
-			"to every signed-in user. Owners manage the policy and publish the site, editors " +
-			"write its data and viewers see it; empty viewers means everyone, and empty editors " +
-			"means every viewer. Principals are user:<id or email>, group:<object id> or " +
-			"role:<value>; use hex whoami to see your own. Path and data rules are easiest to " +
-			"keep in the access section of hex.json, which hex publish applies.",
+		Short: "Manage site membership, application roles and permission grants",
+		Long: "Version 2 policies separate site owners from application roles and explicit operation grants. " +
+			"Use --file for the complete policy. No grant means no application access. " +
+			"Principals use stable user IDs, group IDs or identity-provider role values. " +
+			"Publishing merges local changes while preserving portal edits. Existing policies migrate automatically.",
 	}
-	command.AddCommand(a.accessShowCommand(), a.accessSetCommand(), a.accessClearCommand(), a.permissionsCommand())
+	command.AddCommand(a.accessShowCommand(), a.accessSetCommand(), a.accessClearCommand(), a.permissionsCommand(), a.accessReconcileCommand())
 	return command
 }
 
@@ -47,6 +47,37 @@ func (a *App) accessShowCommand() *cobra.Command {
 			return a.accessRequest(cmd.Context(), options, args[0], http.MethodGet, "/access", nil)
 		},
 	}
+	options.register(command)
+	return command
+}
+
+func (a *App) accessReconcileCommand() *cobra.Command {
+	options := &accessOptions{}
+	var file string
+	command := &cobra.Command{
+		Use:   "reconcile <site>",
+		Short: "Record a local baseline without changing live permissions",
+		Long:  "Explicitly establish the accepted local policy for three-way publication merging. Live access is preserved; differences from this file are treated as portal changes on the next publication.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if file == "" {
+				return errors.New("provide --file with a local version 2 policy")
+			}
+			data, err := os.ReadFile(resolvePath(a.Dir, file))
+			if err != nil {
+				return err
+			}
+			var policy hex.SiteAccess
+			if err := json.Unmarshal(data, &policy); err != nil {
+				return err
+			}
+			if err := hex.ValidatePublishedAccess(policy); err != nil {
+				return err
+			}
+			return a.accessRequest(cmd.Context(), options, args[0], http.MethodPost, "/access/baseline", policy)
+		},
+	}
+	command.Flags().StringVar(&file, "file", "", "Local policy JSON (not the enclosing hex.json)")
 	options.register(command)
 	return command
 }
@@ -85,7 +116,8 @@ func (a *App) accessSetCommand() *cobra.Command {
 					return fmt.Errorf("principal %q needs a user:, group: or role: prefix", principal)
 				}
 			}
-			return a.accessRequest(cmd.Context(), options, args[0], http.MethodPut, "/access", access)
+			policy := hex.MigrateSiteAccess(hex.SiteAccess{Owners: access.Owners, Editors: access.Editors, Viewers: access.Viewers})
+			return a.accessRequest(cmd.Context(), options, args[0], http.MethodPut, "/access", policy)
 		},
 	}
 	command.Flags().StringArrayVar(&access.Owners, "owner", nil, "Principal that manages and publishes the site (repeatable)")
@@ -153,6 +185,21 @@ func (a *App) accessRequest(ctx context.Context, options *accessOptions, site, m
 			return err
 		}
 	}
+	if body != nil {
+		encoded, err := json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		var policy hex.SiteAccess
+		if err := json.Unmarshal(encoded, &policy); err != nil {
+			return fmt.Errorf("invalid access policy: %w", err)
+		}
+		if policy.Version == 2 {
+			if err := a.requirePermissionVersion(ctx, project); err != nil {
+				return err
+			}
+		}
+	}
 
 	data, err := a.apiCall(ctx, project, method, "/api/hex/sites/"+site+suffix, body)
 	if err != nil {
@@ -163,4 +210,21 @@ func (a *App) accessRequest(ctx context.Context, options *accessOptions, site, m
 		return nil
 	}
 	return a.printJSON(json.RawMessage(data))
+}
+
+// Old servers ignore unknown policy fields and could interpret version 2 as
+// empty legacy lists. Never send a new policy without live version support.
+func (a *App) requirePermissionVersion(ctx context.Context, project Project) error {
+	data, err := a.apiRequest(ctx, project, "/api/hex/capabilities")
+	if err != nil {
+		return fmt.Errorf("verify platform permission support: %w", err)
+	}
+	var capabilities Capabilities
+	if err := json.Unmarshal(data, &capabilities); err != nil {
+		return fmt.Errorf("read platform permission support: %w", err)
+	}
+	if capabilities.PermissionVersion < 2 {
+		return errors.New("this platform does not support version 2 permission policies; update the server before publishing or changing access. Sending the policy to an older server could open the site")
+	}
+	return nil
 }

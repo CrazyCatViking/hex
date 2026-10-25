@@ -26,7 +26,7 @@ func (d *Database) GetSiteAccess(ctx context.Context, site string) (hex.SiteAcce
 	}
 
 	var access hex.SiteAccess
-	if err := json.Unmarshal(data, &access); err != nil {
+	if err := decodeSitePolicy(data, &access); err != nil {
 		return hex.SiteAccess{}, fmt.Errorf("decode site policy for %s: %w", site, err)
 	}
 	return hex.NormalizeSiteAccess(access), nil
@@ -71,7 +71,7 @@ func (d *Database) UpdateSiteAccess(ctx context.Context, site string, update hex
 	}
 	var current hex.SiteAccess
 	if exists {
-		if err := json.Unmarshal(data, &current); err != nil {
+		if err := decodeSitePolicy(data, &current); err != nil {
 			return fmt.Errorf("decode site policy for update: %w", err)
 		}
 	}
@@ -82,7 +82,7 @@ func (d *Database) UpdateSiteAccess(ctx context.Context, site string, update hex
 	if next == nil {
 		_, err = transaction.Exec(ctx, `DELETE FROM hex_site_policies WHERE site = $1`, site)
 	} else {
-		data, err = json.Marshal(hex.NormalizeSiteAccess(*next))
+		data, err = encodeSitePolicy(hex.NormalizeSiteAccess(*next))
 		if err != nil {
 			return fmt.Errorf("encode site policy for %s: %w", site, err)
 		}
@@ -97,4 +97,32 @@ func (d *Database) UpdateSiteAccess(ctx context.Context, site string, update hex
 		return fmt.Errorf("commit site policy update: %w", err)
 	}
 	return nil
+}
+
+// Old binaries must fail closed during a rolling upgrade, not interpret a v2
+// policy's absent legacy lists as permission for everybody. Their SiteAccess
+// decoder rejects this envelope's boolean owners field. New binaries unwrap it.
+func encodeSitePolicy(policy hex.SiteAccess) ([]byte, error) {
+	if policy.Version != 2 {
+		return json.Marshal(policy)
+	}
+	return json.Marshal(struct {
+		Version int            `json:"version"`
+		Policy  hex.SiteAccess `json:"policy"`
+		Owners  bool           `json:"owners"`
+	}{Version: 2, Policy: policy})
+}
+
+func decodeSitePolicy(data []byte, policy *hex.SiteAccess) error {
+	var envelope struct {
+		Version int             `json:"version"`
+		Policy  json.RawMessage `json:"policy"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return err
+	}
+	if envelope.Version == 2 && len(envelope.Policy) > 0 {
+		data = envelope.Policy
+	}
+	return json.Unmarshal(data, policy)
 }

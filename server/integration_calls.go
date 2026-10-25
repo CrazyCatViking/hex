@@ -63,7 +63,7 @@ type IntegrationEndpointInfo struct {
 
 func (s *Server) listSiteIntegrations(w http.ResponseWriter, r *http.Request) {
 	authorization := requestAuthorization(r)
-	caller := integrationCaller{site: r.PathValue("site"), identity: authorization.identity, role: authorization.role}
+	caller := integrationCaller{site: r.PathValue("site"), identity: authorization.identity, role: authorization.role, authorization: &authorization}
 	result, err := s.siteIntegrations(r.Context(), caller)
 	if err != nil {
 		writeServerError(w, err)
@@ -164,7 +164,7 @@ func (s *Server) callIntegrationEndpoint(w http.ResponseWriter, r *http.Request)
 	}
 
 	authorization := requestAuthorization(r)
-	caller := integrationCaller{site: r.PathValue("site"), identity: authorization.identity, role: authorization.role}
+	caller := integrationCaller{site: r.PathValue("site"), identity: authorization.identity, role: authorization.role, authorization: &authorization}
 	output, cached, err := s.callIntegration(r.Context(), caller, endpoint, input)
 	if err != nil {
 		s.writeIntegrationError(w, endpoint, err)
@@ -203,7 +203,15 @@ func (s *Server) integrationAccess(caller integrationCaller, endpoint *registere
 	if !s.granted(caller, endpoint.permission()) {
 		return &IntegrationError{Status: http.StatusForbidden, Message: "you do not have the " + endpoint.permission() + " permission"}
 	}
-	if endpoint.endpoint.Write && !caller.isAutomation() && caller.role < roleEditor {
+	if caller.authorization != nil && caller.authorization.access.Version == 2 {
+		operation := "read"
+		if endpoint.endpoint.Write {
+			operation = "write"
+		}
+		if !caller.authorization.permits("integration", endpoint.qualifiedName(), operation) {
+			return &IntegrationError{Status: http.StatusForbidden, Message: "the site's permission policy does not allow this integration operation"}
+		}
+	} else if endpoint.endpoint.Write && !caller.isAutomation() && caller.role < roleEditor {
 		return &IntegrationError{Status: http.StatusForbidden, Message: "changing data through integrations needs the site's editor role"}
 	}
 	if endpoint.integration.integration.Connector != "" && caller.isAutomation() {
@@ -230,6 +238,13 @@ func (s *Server) approvalStatus(ctx context.Context, site, integration string) (
 // by the HTTP API, AI tool use and automations, so all three apply the same
 // grants, approvals and contracts.
 func (s *Server) callIntegration(ctx context.Context, caller integrationCaller, endpoint *registeredEndpoint, input json.RawMessage) (json.RawMessage, bool, error) {
+	if caller.isAutomation() {
+		authorization, err := s.automationAuthorization(ctx, caller.site, caller.automation)
+		if err != nil {
+			return nil, false, err
+		}
+		caller.authorization = &authorization
+	}
 	if err := s.integrationAccess(caller, endpoint); err != nil {
 		return nil, false, err
 	}

@@ -335,7 +335,7 @@ func TestPublishingAppliesTheAccessPolicy(t *testing.T) {
 	config := Project{
 		Name:   "demo",
 		Server: platform.URL,
-		Access: json.RawMessage(`{"viewers":["group:sales"],"paths":[{"prefix":"/admin/","viewers":"owners"}]}`),
+		Access: migratedPolicyFixture(t, `{"viewers":["group:sales"],"paths":[{"prefix":"/admin/","viewers":"owners"}]}`),
 	}
 	if err := writeJSONFile(filepath.Join(project, "hex.json"), config); err != nil {
 		t.Fatal(err)
@@ -346,7 +346,7 @@ func TestPublishingAppliesTheAccessPolicy(t *testing.T) {
 		t.Fatalf("policy was not applied: %s", policy)
 	}
 
-	config.Access = json.RawMessage(`{"viewers":["sales"]}`)
+	config.Access = json.RawMessage(`{"version":2,"admission":{"principals":["sales"]}}`)
 	if err := writeJSONFile(filepath.Join(project, "hex.json"), config); err != nil {
 		t.Fatal(err)
 	}
@@ -367,7 +367,7 @@ func TestRepublishingKeepsAccessChangedOutsideHexJSON(t *testing.T) {
 	run(t, directory, "init", project, "--name", "demo", "--server", platform.URL)
 	createBuild(t, project)
 
-	config := Project{Name: "demo", Server: platform.URL, Access: json.RawMessage(`{"viewers":["user:alex","group:sales","group:support"]}`)}
+	config := Project{Name: "demo", Server: platform.URL, Access: migratedPolicyFixture(t, `{"viewers":["user:alex","group:sales","group:support"]}`)}
 	if err := writeJSONFile(filepath.Join(project, "hex.json"), config); err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +375,7 @@ func TestRepublishingKeepsAccessChangedOutsideHexJSON(t *testing.T) {
 	run(t, project, "access", "set", "demo", "--viewer", "user:alex", "--viewer", "group:sales", "--server", platform.URL)
 
 	output := run(t, project, "publish")
-	if !strings.Contains(output, "group:support: editor in hex.json, not listed on the site") || !strings.Contains(output, "--replace-access") {
+	if !strings.Contains(output, "group:support") || !strings.Contains(output, "--replace-access") {
 		t.Fatalf("the difference from hex.json was not reported: %s", output)
 	}
 	if policy := run(t, project, "access", "show", "demo", "--server", platform.URL); strings.Contains(policy, "group:support") {
@@ -437,6 +437,7 @@ func TestPublishingDeclaresActions(t *testing.T) {
 	config := Project{
 		Name:   "demo",
 		Server: platform.URL,
+		Access: migratedPolicyFixture(t, `{}`),
 		Actions: json.RawMessage(`[{"name":"log-call","description":"Log a customer call.","operation":"create","collection":"calls",
 			"input":{"type":"object","properties":{"customer":{"type":"string"}},"required":["customer"],"additionalProperties":false}}]`),
 	}
@@ -465,4 +466,17 @@ func TestPublishingDeclaresActions(t *testing.T) {
 	if err := app.Execute(context.Background(), []string{"publish"}, "test"); err == nil || !strings.Contains(err.Error(), "operation") {
 		t.Fatalf("invalid action accepted: %v\n%s", err, output)
 	}
+}
+
+func migratedPolicyFixture(t *testing.T, source string) json.RawMessage {
+	t.Helper()
+	var policy hex.SiteAccess
+	if err := json.Unmarshal([]byte(source), &policy); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(hex.MigrateSiteAccess(policy))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
 }

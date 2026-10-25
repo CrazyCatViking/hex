@@ -164,15 +164,15 @@ func (s *Server) uploadSiteFile(w http.ResponseWriter, r *http.Request) {
 // files that are no longer part of the site, and records the manifest,
 // metadata and optional access policy.
 func (s *Server) completePublish(w http.ResponseWriter, r *http.Request) {
+	request, ok := s.readPublishRequest(w, r)
+	if !ok {
+		return
+	}
 	site, identity, ok := s.publishCaller(w, r, false, nil)
 	if !ok {
 		return
 	}
 
-	request, ok := s.readPublishRequest(w, r)
-	if !ok {
-		return
-	}
 	savedAccess, drift, ok := s.applyPublishAccess(w, r, site, identity, request)
 	if !ok {
 		return
@@ -220,17 +220,8 @@ func (s *Server) completePublish(w http.ResponseWriter, r *http.Request) {
 
 // applyPublishAccess saves restrictions before touching served files or
 // issuing direct-upload URLs. Interrupted uploads retain those restrictions.
-// Artifacts are shared by their publisher, so their access is replaced
-// rather than merged.
 func (s *Server) applyPublishAccess(w http.ResponseWriter, r *http.Request, site string, identity *Identity, request publishRequest) (*SiteAccess, []string, bool) {
 	if request.Access == nil {
-		if identity == nil {
-			return nil, nil, true
-		}
-		if err := s.rememberUnmanagedAccess(r.Context(), site); err != nil {
-			writeServerError(w, err)
-			return nil, nil, false
-		}
 		return nil, nil, true
 	}
 	if s.config.Access == nil || identity == nil {
@@ -238,8 +229,7 @@ func (s *Server) applyPublishAccess(w http.ResponseWriter, r *http.Request, site
 		return nil, nil, false
 	}
 
-	replace := request.ReplaceAccess || s.readSiteMetadata(r.Context(), site).Kind == KindArtifact
-	saved, drift, status, err := s.publishSiteAccess(r.Context(), identity, site, *request.Access, replace)
+	saved, drift, status, err := s.publishSiteAccess(r.Context(), identity, site, *request.Access, request.ReplaceAccess)
 	if err != nil {
 		if status == 0 {
 			writeServerError(w, err)
@@ -331,9 +321,19 @@ func (s *Server) publishCaller(w http.ResponseWriter, r *http.Request, claim boo
 		writeError(w, http.StatusForbidden, "you are not allowed to create sites on this platform")
 		return "", nil, false
 	}
-	requested := SiteAccess{}
+	requested := SiteAccess{Version: 2, Admission: Subjects{Owners: true}, Grants: map[string]PermissionGrant{
+		"site-pages": {Kind: "path", Resource: "*", Operations: []string{"read"}, Subjects: Subjects{Owners: true}},
+	}}
 	if initialAccess != nil {
-		requested = *initialAccess
+		if _, _, status, err := s.publishSiteAccess(r.Context(), identity, site, *initialAccess, false); err != nil {
+			if status == 0 {
+				writeServerError(w, err)
+			} else {
+				writeError(w, status, err.Error())
+			}
+			return "", nil, false
+		}
+		return site, identity, true
 	}
 	if _, status, err := s.replaceSiteAccess(r.Context(), identity, site, requested); err != nil {
 		if status == 0 {
@@ -356,6 +356,12 @@ func (s *Server) readPublishRequest(w http.ResponseWriter, r *http.Request) (pub
 	if err := json.Unmarshal(data, &request); err != nil {
 		writeError(w, http.StatusBadRequest, "expected a JSON publication manifest: "+err.Error())
 		return request, false
+	}
+	if request.Access != nil {
+		if err := ValidatePublishedAccess(*request.Access); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return request, false
+		}
 	}
 	if err := s.validateManifest(request.Files); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())

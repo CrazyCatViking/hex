@@ -2,7 +2,6 @@ package hex
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"maps"
 	"net/http"
@@ -18,12 +17,14 @@ import (
 
 // publishSiteAccess applies a publication's access section on behalf of the
 // caller. New sites and replace requests take it as it is. Otherwise it is
-// merged into the live policy; a site without a recorded section, published
-// before sections were recorded, adopts this one as its base and keeps its
-// live policy. It returns the saved policy and how it still differs from the
+// merged into the live policy; a missing baseline requires explicit
+// reconciliation. It returns the saved policy and how it still differs from the
 // section. A non-zero status describes a client error; zero means err is a
 // server failure.
 func (s *Server) publishSiteAccess(ctx context.Context, identity *Identity, site string, published SiteAccess, replace bool) (SiteAccess, []string, int, error) {
+	if err := ValidatePublishedAccess(published); err != nil {
+		return SiteAccess{}, nil, http.StatusBadRequest, err
+	}
 	if err := s.validateSiteAccess(published); err != nil {
 		return SiteAccess{}, nil, http.StatusBadRequest, err
 	}
@@ -33,6 +34,9 @@ func (s *Server) publishSiteAccess(ctx context.Context, identity *Identity, site
 	var saved SiteAccess
 	status := 0
 	err := s.config.Access.UpdateSiteAccess(ctx, site, func(existing SiteAccess, exists bool) (*SiteAccess, error) {
+		if exists {
+			existing = MigrateSiteAccess(existing)
+		}
 		if err := s.mayChangeAccess(identity, existing, exists); err != nil {
 			status = http.StatusForbidden
 			return nil, err
@@ -53,6 +57,9 @@ func (s *Server) publishSiteAccess(ctx context.Context, identity *Identity, site
 				return nil, fmt.Errorf("merging the access section of hex.json into %s gives an invalid policy: %w; publish with --replace-access to apply hex.json as it is", site, err)
 			}
 			next = merged
+		default:
+			status = http.StatusConflict
+			return nil, fmt.Errorf("%s has no recorded local permission baseline; reconcile explicitly with 'hex access reconcile %s --file <policy.json>' to preserve the live policy, or use --replace-access to replace it. Publishing without access leaves permissions unchanged", site, site)
 		}
 		next.Published = nil
 		if err := s.keepsCallerOwner(identity, next); err != nil {
@@ -71,37 +78,12 @@ func (s *Server) publishSiteAccess(ctx context.Context, identity *Identity, site
 	return saved, accessDrift(published, saved), 0, nil
 }
 
-var errAccessUnchanged = errors.New("access policy unchanged")
-
-// rememberUnmanagedAccess records an empty access section for a site
-// published without one, so a section added to hex.json later is applied in
-// full. Sites with a recorded section keep it, and sites without a policy
-// stay open.
-func (s *Server) rememberUnmanagedAccess(ctx context.Context, site string) error {
-	if s.config.Access == nil {
-		return nil
-	}
-	current, exists, err := s.sitePolicy(ctx, site)
-	if err != nil || !exists || current.Published != nil {
-		return err
-	}
-
-	err = s.config.Access.UpdateSiteAccess(ctx, site, func(existing SiteAccess, exists bool) (*SiteAccess, error) {
-		if !exists || existing.Published != nil {
-			return nil, errAccessUnchanged
-		}
-		existing.Published = &SiteAccess{}
-		return &existing, nil
-	})
-	if errors.Is(err, errAccessUnchanged) {
-		return nil
-	}
-	return err
-}
-
 // mergeSiteAccess applies the changes from base to next on top of live. It
 // returns the merged policy and the parts changed differently on both sides.
 func mergeSiteAccess(base, live, next SiteAccess) (SiteAccess, []string) {
+	if next.Version == 2 {
+		return mergePermissionPolicy(base, live, next)
+	}
 	if len(next.Owners) == 0 {
 		// A section without owners keeps whoever owns the site.
 		next.Owners = base.Owners
@@ -294,6 +276,9 @@ func sameRule(a, b DataRule) bool {
 // accessDrift describes how the live policy differs from the published
 // access section, comparing people by the role they effectively have.
 func accessDrift(published, live SiteAccess) []string {
+	if published.Version == 2 {
+		return permissionDrift(published, live)
+	}
 	if len(published.Owners) == 0 {
 		published.Owners = live.Owners
 	}
@@ -349,8 +334,11 @@ func sameEntry[V any](a, b entry[V], equal func(V, V) bool) bool {
 	return !a.present || equal(a.value, b.value)
 }
 
-func sortedKeys[V any](a, b map[string]V) []string {
-	keys := slices.Concat(slices.Collect(maps.Keys(a)), slices.Collect(maps.Keys(b)))
+func sortedKeys[V any](values ...map[string]V) []string {
+	var keys []string
+	for _, value := range values {
+		keys = append(keys, slices.Sorted(maps.Keys(value))...)
+	}
 	slices.Sort(keys)
 	return slices.Compact(keys)
 }

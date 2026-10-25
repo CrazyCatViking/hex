@@ -421,7 +421,7 @@ type collectionsView struct {
 }
 
 func (s *Server) manageCollections(w http.ResponseWriter, r *http.Request) {
-	_, site, _, _, ok := s.manageCaller(w, r)
+	identity, site, access, exists, ok := s.manageCaller(w, r)
 	if !ok {
 		return
 	}
@@ -433,7 +433,17 @@ func (s *Server) manageCollections(w http.ResponseWriter, r *http.Request) {
 			writeServerError(w, err)
 			return
 		}
-		view.Collections = collections
+		a := siteAuthorization{identity: identity, access: access, role: s.siteRole(identity, access, exists)}
+		for _, collection := range collections {
+			filter, allowed := a.readFilter(collection.Name)
+			if !allowed {
+				continue
+			}
+			if filter != nil {
+				collection.Documents = -1
+			}
+			view.Collections = append(view.Collections, collection)
+		}
 	}
 	s.renderFragment(w, "collections", view)
 }
@@ -452,15 +462,16 @@ type documentRow struct {
 }
 
 func (s *Server) manageDocuments(w http.ResponseWriter, r *http.Request) {
-	_, site, _, _, ok := s.manageCaller(w, r)
+	identity, site, access, exists, ok := s.manageCaller(w, r)
 	if !ok || !validateIdentifiers(w, r) {
 		return
 	}
 	collection := r.PathValue("collection")
 	after := r.URL.Query().Get("after")
-	documents, err := s.config.Database.List(r.Context(), site, collection, ListOptions{After: after, Limit: managePageSize + 1})
+	a := siteAuthorization{identity: identity, access: access, role: s.siteRole(identity, access, exists)}
+	documents, err := s.listAuthorizedDocuments(r.Context(), a, site, collection, ListOptions{After: after, Limit: managePageSize + 1})
 	if err != nil {
-		writeServerError(w, err)
+		writePermissionError(w, err)
 		return
 	}
 
@@ -507,13 +518,18 @@ func preview(data json.RawMessage, limit int) string {
 }
 
 func (s *Server) manageDocument(w http.ResponseWriter, r *http.Request) {
-	_, site, _, _, ok := s.manageCaller(w, r)
+	identity, site, access, exists, ok := s.manageCaller(w, r)
 	if !ok || !validateIdentifiers(w, r) {
 		return
 	}
 	document, err := s.config.Database.Get(r.Context(), site, r.PathValue("collection"), r.PathValue("id"))
 	if err != nil {
 		writeServerError(w, err)
+		return
+	}
+	a := siteAuthorization{identity: identity, access: access, role: s.siteRole(identity, access, exists)}
+	if !a.canReadDocument(r.PathValue("collection"), document) {
+		writePermissionError(w, ErrNotFound)
 		return
 	}
 	var pretty bytes.Buffer
@@ -527,14 +543,15 @@ func (s *Server) manageDocument(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) manageDeleteDocument(w http.ResponseWriter, r *http.Request) {
-	identity, site, _, _, ok := s.manageCaller(w, r)
+	identity, site, access, exists, ok := s.manageCaller(w, r)
 	if !ok || !validateIdentifiers(w, r) {
 		return
 	}
 	collection := r.PathValue("collection")
 	id := r.PathValue("id")
-	if err := s.config.Database.Delete(r.Context(), site, collection, id, WriteOptions{}); err != nil && !errors.Is(err, ErrNotFound) {
-		writeServerError(w, err)
+	a := siteAuthorization{identity: identity, access: access, role: s.siteRole(identity, access, exists)}
+	if _, err := s.mutateAuthorizedDocument(r.Context(), a, site, collection, id, nil, true); err != nil && !errors.Is(err, ErrNotFound) {
+		writePermissionError(w, err)
 		return
 	}
 	slog.Info("document deleted in the portal", "site", site, "collection", collection, "id", id, "by", identityName(identity))
@@ -554,7 +571,7 @@ type fileRow struct {
 }
 
 func (s *Server) manageFiles(w http.ResponseWriter, r *http.Request) {
-	_, site, _, _, ok := s.manageCaller(w, r)
+	identity, site, access, exists, ok := s.manageCaller(w, r)
 	if !ok {
 		return
 	}
@@ -566,8 +583,12 @@ func (s *Server) manageFiles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	view := filesView{Site: site}
+	a := siteAuthorization{identity: identity, access: access, role: s.siteRole(identity, access, exists)}
 	for _, object := range objects {
 		key := strings.TrimPrefix(object.Key, prefix)
+		if !a.permits("file", key, "read") {
+			continue
+		}
 		view.Files = append(view.Files, fileRow{
 			Key:        key,
 			Link:       "/api/sites/" + site + "/files/" + escapePath(key),
@@ -580,13 +601,18 @@ func (s *Server) manageFiles(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) manageDeleteFile(w http.ResponseWriter, r *http.Request) {
-	identity, site, _, _, ok := s.manageCaller(w, r)
+	identity, site, access, exists, ok := s.manageCaller(w, r)
 	if !ok {
 		return
 	}
 	key := r.PathValue("key")
 	if !validKey(key) {
 		writeError(w, http.StatusBadRequest, "invalid file key")
+		return
+	}
+	a := siteAuthorization{identity: identity, access: access, role: s.siteRole(identity, access, exists)}
+	if !a.permits("file", key, "delete") {
+		writePermissionError(w, ErrForbidden)
 		return
 	}
 	if err := s.config.Files.Delete(r.Context(), site+"/"+key); err != nil && !errors.Is(err, ErrNotFound) {

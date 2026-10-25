@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -23,13 +24,18 @@ import (
 // input property named IDField, "id" by default, which the input schema must
 // require. Audience defaults to the site's editors, like registered actions.
 type DeclaredAction struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	Operation   string          `json:"operation"`
-	Collection  string          `json:"collection"`
-	IDField     string          `json:"idField,omitempty"`
-	Input       json.RawMessage `json:"input"`
-	Audience    Audience        `json:"audience,omitzero"`
+	Name          string                     `json:"name"`
+	Description   string                     `json:"description"`
+	Operation     string                     `json:"operation"`
+	Collection    string                     `json:"collection"`
+	IDField       string                     `json:"idField,omitempty"`
+	Input         json.RawMessage            `json:"input"`
+	Audience      Audience                   `json:"audience,omitzero"`
+	Authorization string                     `json:"authorization,omitempty"`
+	Fields        []string                   `json:"fields,omitempty"`
+	Set           map[string]json.RawMessage `json:"set,omitempty"`
+	Where         *RecordCondition           `json:"where,omitempty"`
+	Check         *RecordCondition           `json:"check,omitempty"`
 }
 
 const (
@@ -79,6 +85,30 @@ func compileDeclaredAction(action DeclaredAction) (*registeredAction, error) {
 		return nil, fmt.Errorf("invalid action name %q; use letters, digits, - and _", action.Name)
 	}
 	label := "action " + action.Name
+	if action.Authorization != "" && action.Authorization != "caller" && action.Authorization != "action" {
+		return nil, fmt.Errorf("%s: authorization must be caller or action", label)
+	}
+	if action.Authorization != "action" && (action.Set != nil || action.Fields != nil || action.Where != nil || action.Check != nil) {
+		return nil, fmt.Errorf("%s: fixed effects and record constraints require action authorization", label)
+	}
+	if len(action.Fields) > 64 || len(action.Set) > 64 {
+		return nil, fmt.Errorf("%s: at most 64 input fields and fixed effects are allowed", label)
+	}
+	for _, field := range action.Fields {
+		if !validCollectionName(field) {
+			return nil, fmt.Errorf("%s: invalid input field %q", label, field)
+		}
+	}
+	for field := range action.Set {
+		if !validCollectionName(field) {
+			return nil, fmt.Errorf("%s: invalid fixed-effect field %q", label, field)
+		}
+	}
+	for _, condition := range []*RecordCondition{action.Where, action.Check} {
+		if err := validateRecordCondition(condition); err != nil {
+			return nil, fmt.Errorf("%s: %w", label, err)
+		}
+	}
 	description := strings.TrimSpace(action.Description)
 	if description == "" || utf8.RuneCountInString(description) > maxActionDescriptionSize {
 		return nil, fmt.Errorf("%s needs a description of at most %d characters", label, maxActionDescriptionSize)
@@ -191,72 +221,95 @@ func (s *Server) declaredActions(ctx context.Context, site string) ([]*registere
 // rule applies exactly as for the data API, including creator-only rules.
 func (s *Server) declaredHandler(action DeclaredAction) func(context.Context, ActionContext, json.RawMessage) (any, error) {
 	return func(ctx context.Context, caller ActionContext, input json.RawMessage) (any, error) {
-		options, err := caller.CollectionWriteOptions(action.Collection)
+		return s.executeDeclaredMutation(ctx, caller, action, input)
+	}
+}
+
+func (s *Server) executeDeclaredMutation(ctx context.Context, caller ActionContext, action DeclaredAction, input json.RawMessage) (any, error) {
+	if !caller.authorization.permits("action", action.Name, "run") {
+		return nil, ErrForbidden
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(input, &fields); err != nil || fields == nil {
+		return nil, &ActionError{Message: "the input must be a JSON object"}
+	}
+
+	var id string
+	if action.Operation == OperationCreate {
+		generated, err := newID()
 		if err != nil {
+			return nil, err
+		}
+		id = generated
+	} else if err := json.Unmarshal(fields[action.idField()], &id); err != nil || !namePattern.MatchString(id) {
+		return nil, &ActionError{Message: fmt.Sprintf("%q must be a document ID", action.idField())}
+	}
+	database, supported := s.config.Database.(GuardedDatabase)
+	if !supported {
+		return nil, ErrAuthorizationUnsupported
+	}
+	_, err := database.Mutate(ctx, caller.Site, action.Collection, id, caller.authorization.creator(), func(before *Document) (json.RawMessage, error) {
+		if action.Operation != OperationCreate && before == nil {
+			return nil, &ActionError{Message: "no document " + id + " in " + action.Collection}
+		}
+		if action.Operation == OperationCreate && before != nil {
 			return nil, ErrForbidden
 		}
-		var fields map[string]json.RawMessage
-		if err := json.Unmarshal(input, &fields); err != nil || fields == nil {
-			return nil, &ActionError{Message: "the input must be a JSON object"}
-		}
-
-		if action.Operation == OperationCreate {
-			id, err := newID()
-			if err != nil {
+		data := map[string]json.RawMessage{}
+		after := Document{ID: id, CreatedBy: caller.authorization.creator()}
+		if before != nil {
+			after = *before
+			if err := json.Unmarshal(before.Data, &data); err != nil {
 				return nil, err
 			}
-			document, err := s.config.Database.Put(ctx, caller.Site, action.Collection, id, input, options)
-			if err != nil {
-				return nil, err
-			}
-			return map[string]string{"id": document.ID}, nil
-		}
-
-		var id string
-		if err := json.Unmarshal(fields[action.idField()], &id); err != nil || !namePattern.MatchString(id) {
-			return nil, &ActionError{Message: fmt.Sprintf("%q must be a document ID", action.idField())}
-		}
-		missing := &ActionError{Message: fmt.Sprintf("no document %s in %s", id, action.Collection)}
-
-		if action.Operation == OperationDelete {
-			err := s.config.Database.Delete(ctx, caller.Site, action.Collection, id, options)
-			if errors.Is(err, ErrNotFound) {
-				return nil, missing
-			}
-			if err != nil {
-				return nil, err
-			}
-			return map[string]string{"id": id}, nil
-		}
-
-		// Update merges the input's top-level fields, except the ID, into
-		// the existing document; it never creates one.
-		existing, err := s.config.Database.Get(ctx, caller.Site, action.Collection, id)
-		if errors.Is(err, ErrNotFound) {
-			return nil, missing
-		}
-		if err != nil {
-			return nil, err
-		}
-		var data map[string]json.RawMessage
-		if err := json.Unmarshal(existing.Data, &data); err != nil || data == nil {
-			data = make(map[string]json.RawMessage)
 		}
 		for name, value := range fields {
-			if name != action.idField() {
-				data[name] = value
+			if action.Operation != OperationCreate && name == action.idField() {
+				continue
 			}
+			if action.Authorization == "action" && !slices.Contains(action.Fields, name) {
+				return nil, &ActionError{Message: "the action does not accept changes to " + name}
+			}
+			data[name] = value
 		}
-		merged, err := json.Marshal(data)
+		for field, value := range action.Set {
+			switch conditionString(value) {
+			case "$actor.id":
+				value, _ = json.Marshal(caller.authorization.creator())
+			case "$now":
+				value, _ = json.Marshal(time.Now().UTC().Format(time.RFC3339Nano))
+			}
+			data[field] = value
+		}
+		encoded, err := json.Marshal(data)
 		if err != nil {
 			return nil, err
 		}
-		if len(merged) > MaxActionInputBytes {
-			return nil, &ActionError{Message: "the updated document would exceed 1 MiB"}
+		after.Data = encoded
+		if !caller.authorization.canChangeRecord("action", action.Name, "run", before, after) {
+			return nil, ErrForbidden
 		}
-		if _, err := s.config.Database.Put(ctx, caller.Site, action.Collection, id, merged, options); err != nil {
-			return nil, err
+		if action.Authorization == "action" {
+			old := after
+			if before != nil {
+				old = *before
+			}
+			if !resolveRecordCondition(action.Where, caller.Identity).Matches(old) || !resolveRecordCondition(action.Check, caller.Identity).Matches(after) {
+				return nil, ErrForbidden
+			}
+		} else if !caller.authorization.canMutate(action.Collection, action.Operation, before, after) {
+			return nil, ErrForbidden
 		}
-		return map[string]string{"id": id}, nil
+		if action.Operation == OperationDelete {
+			return nil, nil
+		}
+		if err := ValidateDocumentData(encoded); err != nil {
+			return nil, &ActionError{Message: err.Error()}
+		}
+		return encoded, nil
+	})
+	if err != nil {
+		return nil, err
 	}
+	return map[string]string{"id": id}, nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 )
 
@@ -24,6 +25,7 @@ const (
 	grantNone grant = iota
 	grantOwn
 	grantAll
+	grantConditional
 )
 
 func (s *Server) isAdmin(identity *Identity) bool {
@@ -52,6 +54,25 @@ func (s *Server) siteRole(identity *Identity, access SiteAccess, exists bool) si
 	}
 	if s.isAdmin(identity) {
 		return roleOwner
+	}
+	if exists && access.Version == 2 {
+		if identity.matchesAny(access.Owners) {
+			return roleOwner
+		}
+		authorization := siteAuthorization{identity: identity, access: access, role: roleViewer}
+		admitted := authorization.subjectsMatch(access.Admission)
+		for _, binding := range access.Bindings {
+			if slices.Contains(access.Admission.Roles, binding.Role) && identity.matchesAny([]string{binding.Principal}) {
+				admitted = true
+			}
+		}
+		if !admitted {
+			return roleNone
+		}
+		if authorization.subjectsMatch(Subjects{Roles: []string{"legacy-editor"}}) {
+			return roleEditor
+		}
+		return roleViewer
 	}
 	if !exists {
 		return roleEditor
@@ -156,6 +177,20 @@ func keyHasPrefix(key, prefix string) bool {
 // A rule for /admin/ also covers /admin itself, which NGINX would otherwise
 // resolve to /admin/index.html after this check.
 func (s *Server) pathAllowed(role siteRole, identity *Identity, access SiteAccess, path string) bool {
+	if access.Version == 2 {
+		access = CloneSiteAccess(access)
+		for id, grant := range access.Grants {
+			if grant.Kind == "path" {
+				grant.Resource = s.pathComparisonKey(grant.Resource)
+				for i := range grant.Except {
+					grant.Except[i] = s.pathComparisonKey(grant.Except[i])
+				}
+				access.Grants[id] = grant
+			}
+		}
+		authorization := siteAuthorization{identity: identity, access: access, role: role}
+		return authorization.permits("path", s.pathComparisonKey(path), "read")
+	}
 	path = s.pathComparisonKey(path)
 	var matched *PathRule
 	for i := range access.Paths {
@@ -186,11 +221,27 @@ type siteAuthorization struct {
 }
 
 func (a siteAuthorization) collection(name string) dataAccess {
+	if a.access.Version == 2 {
+		return dataAccess{read: a.operationGrant("collection", name, "read"), write: a.operationGrant("collection", name, "update")}
+	}
 	return ruleAccess(a.role, a.identity, namedRule(a.access.Collections, name))
 }
 
 // collectionWriteOptions records the creator and applies creator-only writes.
 func (a siteAuthorization) collectionWriteOptions(name string) (WriteOptions, error) {
+	if a.access.Version == 2 {
+		// The old provider API cannot safely represent field or state conditions.
+		// Registered handlers must use guarded mutations for those policies.
+		own := false
+		for _, operation := range []string{"create", "update", "delete"} {
+			grant := a.operationGrant("collection", name, operation)
+			if grant != grantAll && grant != grantOwn {
+				return WriteOptions{}, ErrForbidden
+			}
+			own = own || grant == grantOwn
+		}
+		return WriteOptions{Creator: a.creator(), CreatorOnly: own}, nil
+	}
 	options := WriteOptions{Creator: a.creator()}
 	switch a.collection(name).write {
 	case grantNone:
@@ -202,10 +253,16 @@ func (a siteAuthorization) collectionWriteOptions(name string) (WriteOptions, er
 }
 
 func (a siteAuthorization) file(key string) dataAccess {
+	if a.access.Version == 2 {
+		return dataAccess{read: a.operationGrant("file", key, "read"), write: a.operationGrant("file", key, "upload")}
+	}
 	return ruleAccess(a.role, a.identity, fileRule(a.access.Files, key))
 }
 
 func (a siteAuthorization) channel(name string) dataAccess {
+	if a.access.Version == 2 {
+		return dataAccess{read: a.operationGrant("channel", name, "read"), write: a.operationGrant("channel", name, "send")}
+	}
 	return ruleAccess(a.role, a.identity, namedRule(a.access.Channels, name))
 }
 
@@ -222,10 +279,14 @@ func (s *Server) authorizeSite(ctx context.Context, identity *Identity, site str
 	if err != nil {
 		return siteAuthorization{}, err
 	}
+	role := s.siteRole(identity, access, exists)
+	if !exists {
+		access = MigrateSiteAccess(access)
+	}
 	return siteAuthorization{
 		identity: identity,
 		access:   access,
-		role:     s.siteRole(identity, access, exists),
+		role:     role,
 	}, nil
 }
 
@@ -246,6 +307,31 @@ func (s *Server) sitePolicy(ctx context.Context, site string) (SiteAccess, bool,
 	if err := s.validatePathPrefixes(access.Paths); err != nil {
 		return SiteAccess{}, false, err
 	}
+	if access.Version == 0 {
+		actions, automations, err := s.migrationExtras(ctx, site)
+		if err != nil {
+			return SiteAccess{}, false, err
+		}
+		err = s.config.Access.UpdateSiteAccess(ctx, site, func(current SiteAccess, exists bool) (*SiteAccess, error) {
+			if !exists {
+				return nil, ErrNotFound
+			}
+			if err := s.validatePathPrefixes(current.Paths); err != nil {
+				return nil, err
+			}
+			access = current
+			if current.Version == 0 {
+				access = migratePermissionExtras(MigrateSiteAccess(current), actions, automations)
+			}
+			return &access, nil
+		})
+		if err != nil {
+			return SiteAccess{}, false, err
+		}
+	}
+	if err := validatePermissionPolicy(access); err != nil {
+		return SiteAccess{}, false, err
+	}
 	return NormalizeSiteAccess(access), true, nil
 }
 
@@ -254,7 +340,7 @@ func (s *Server) canViewSite(ctx context.Context, identity *Identity, site strin
 	if err != nil {
 		return false, err
 	}
-	return authorization.role != roleNone, nil
+	return authorization.applicationAdmitted(), nil
 }
 
 type siteAuthorizationKey struct{}
@@ -284,7 +370,7 @@ func (s *Server) siteScoped(next http.HandlerFunc) http.HandlerFunc {
 			writeServerError(w, err)
 			return
 		}
-		if authorization.role == roleNone {
+		if !authorization.applicationAdmitted() {
 			writeError(w, http.StatusForbidden, "access to this site is restricted")
 			return
 		}
@@ -327,6 +413,8 @@ func (s *Server) staticAuthz(w http.ResponseWriter, r *http.Request) {
 }
 
 type permissionsDocument struct {
+	Version     int                       `json:"version"`
+	Roles       []string                  `json:"roles"`
 	Role        string                    `json:"role"`
 	Admin       bool                      `json:"admin"`
 	Publish     bool                      `json:"publish"`
@@ -342,8 +430,13 @@ type pathPermission struct {
 }
 
 type dataPermission struct {
-	Read  string `json:"read"`
-	Write string `json:"write"`
+	Read   string `json:"read"`
+	Write  string `json:"write"`
+	Create string `json:"create,omitempty"`
+	Update string `json:"update,omitempty"`
+	Delete string `json:"delete,omitempty"`
+	Upload string `json:"upload,omitempty"`
+	Send   string `json:"send,omitempty"`
 }
 
 var roleNames = map[siteRole]string{
@@ -354,9 +447,10 @@ var roleNames = map[siteRole]string{
 }
 
 var grantNames = map[grant]string{
-	grantNone: "none",
-	grantOwn:  "own",
-	grantAll:  "all",
+	grantNone:        "none",
+	grantOwn:         "own",
+	grantAll:         "all",
+	grantConditional: "conditional",
 }
 
 // permissions describes what the caller may do on a site, so apps can hide
@@ -374,6 +468,13 @@ func (s *Server) permissions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	role := s.siteRole(identity, access, exists)
+	if !exists {
+		access = MigrateSiteAccess(access)
+	}
+	if access.Version == 2 {
+		s.describePermissionPolicy(w, identity, access, role, exists)
+		return
+	}
 
 	// Callers who cannot view the site learn nothing about its rules.
 	if role == roleNone {

@@ -31,24 +31,41 @@ func NewDatabase() *Database {
 }
 
 func (d *Database) Put(ctx context.Context, site, collection, id string, data json.RawMessage, options hex.WriteOptions) (hex.Document, error) {
+	return d.Mutate(ctx, site, collection, id, options.Creator, func(current *hex.Document) (json.RawMessage, error) {
+		if current != nil && options.CreatorOnly && current.CreatedBy != options.Creator {
+			return nil, hex.ErrForbidden
+		}
+		return data, nil
+	})
+}
+
+func (d *Database) Mutate(ctx context.Context, site, collection, id, creator string, mutation hex.DocumentMutation) (hex.Document, error) {
 	if err := ctx.Err(); err != nil {
 		return hex.Document{}, err
 	}
-
 	d.mu.Lock()
 	defer d.mu.Unlock()
-
 	key := documentKey{site: site, collection: collection, id: id}
 	stored, exists := d.documents[key]
-	if exists && options.CreatorOnly && stored.createdBy != options.Creator {
-		return hex.Document{}, hex.ErrForbidden
+	var current *hex.Document
+	if exists {
+		current = &hex.Document{ID: id, Data: slices.Clone(stored.data), CreatedBy: stored.createdBy}
+	} else {
+		stored.createdBy = creator
 	}
-	if !exists {
-		stored.createdBy = options.Creator
+	data, err := mutation(current)
+	if err != nil {
+		return hex.Document{}, err
+	}
+	if data == nil {
+		delete(d.documents, key)
+		return hex.Document{ID: id, CreatedBy: stored.createdBy}, nil
+	}
+	if err := hex.ValidateDocumentData(data); err != nil {
+		return hex.Document{}, err
 	}
 	stored.data = slices.Clone(data)
 	d.documents[key] = stored
-
 	return hex.Document{ID: id, Data: slices.Clone(data), CreatedBy: stored.createdBy}, nil
 }
 
@@ -70,6 +87,10 @@ func (d *Database) Get(ctx context.Context, site, collection, id string) (hex.Do
 }
 
 func (d *Database) List(ctx context.Context, site, collection string, options hex.ListOptions) ([]hex.Document, error) {
+	return d.ListMatching(ctx, site, collection, options, nil)
+}
+
+func (d *Database) ListMatching(ctx context.Context, site, collection string, options hex.ListOptions, filter *hex.RecordCondition) ([]hex.Document, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -86,6 +107,9 @@ func (d *Database) List(ctx context.Context, site, collection string, options he
 			continue
 		}
 		if options.CreatedBy != "" && stored.createdBy != options.CreatedBy {
+			continue
+		}
+		if !filter.Matches(hex.Document{ID: key.id, Data: stored.data, CreatedBy: stored.createdBy}) {
 			continue
 		}
 		if len(ids) < options.Limit {
@@ -119,24 +143,16 @@ func (d *Database) List(ctx context.Context, site, collection string, options he
 }
 
 func (d *Database) Delete(ctx context.Context, site, collection, id string, options hex.WriteOptions) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	key := documentKey{site: site, collection: collection, id: id}
-	stored, ok := d.documents[key]
-	if !ok {
-		return hex.ErrNotFound
-	}
-	if options.CreatorOnly && stored.createdBy != options.Creator {
-		return hex.ErrForbidden
-	}
-
-	delete(d.documents, key)
-	return nil
+	_, err := d.Mutate(ctx, site, collection, id, options.Creator, func(current *hex.Document) (json.RawMessage, error) {
+		if current == nil {
+			return nil, hex.ErrNotFound
+		}
+		if options.CreatorOnly && current.CreatedBy != options.Creator {
+			return nil, hex.ErrForbidden
+		}
+		return nil, nil
+	})
+	return err
 }
 
 func (d *Database) ListCollections(ctx context.Context, site string) ([]hex.Collection, error) {

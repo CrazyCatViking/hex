@@ -423,11 +423,12 @@ func permissionMatches(pattern, permission string) bool {
 // integrationCaller is who an integration, AI or automation request runs
 // for: a signed-in visitor of the site, or one of the site's automations.
 type integrationCaller struct {
-	site       string
-	identity   *Identity
-	role       siteRole
-	automation string
-	dryRun     bool
+	authorization *siteAuthorization
+	site          string
+	identity      *Identity
+	role          siteRole
+	automation    string
+	dryRun        bool
 }
 
 func (c integrationCaller) isAutomation() bool {

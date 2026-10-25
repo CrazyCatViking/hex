@@ -61,7 +61,9 @@ func (s *Server) createArtifact(w http.ResponseWriter, r *http.Request) {
 	}
 
 	owner := "user:" + identity.ID
-	access := NormalizeSiteAccess(SiteAccess{Owners: []string{owner}, Viewers: []string{owner}})
+	access := MigrateSiteAccess(SiteAccess{Owners: []string{owner}, Viewers: []string{owner}})
+	baseline := CloneSiteAccess(access)
+	access.Published = &baseline
 	site, err := s.reserveArtifactName(r, access)
 	if err != nil {
 		writeServerError(w, err)
@@ -83,7 +85,7 @@ func (s *Server) createArtifact(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("artifact created", "site", site, "creator", identityName(identity))
 	siteURL, _ := s.siteURL(site)
-	writeJSON(w, http.StatusCreated, artifactSummary{Name: site, URL: siteURL, Title: metadata.Title, CreatedAt: metadata.CreatedAt, Viewers: access.Viewers})
+	writeJSON(w, http.StatusCreated, artifactSummary{Name: site, URL: siteURL, Title: metadata.Title, CreatedAt: metadata.CreatedAt, Viewers: []string{owner}})
 }
 
 // reserveArtifactName picks a random name that no site uses or owns.

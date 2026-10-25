@@ -73,7 +73,11 @@ func setupAutomations(t *testing.T, grants ...hex.IntegrationGrant) (*hex.Server
 		}
 	})
 	access := memory.NewAccessStore()
-	if err := access.PutSiteAccess(context.Background(), "demo", hex.SiteAccess{Owners: []string{"user:owner"}}); err != nil {
+	policy := hex.MigrateSiteAccess(hex.SiteAccess{Owners: []string{"user:owner"}})
+	policy.Grants["test-automation-data"] = hex.PermissionGrant{Kind: "collection", Resource: "*", Operations: []string{"read", "create", "update", "delete"}, Subjects: hex.Subjects{Principals: []string{"automation:action-contract", "automation:weekly-report", "automation:birthdays"}}}
+	policy.Grants["test-automation-actions"] = hex.PermissionGrant{Kind: "action", Resource: "*", Operations: []string{"run"}, Subjects: hex.Subjects{Principals: []string{"automation:action-contract", "automation:weekly-report"}}}
+	policy.Grants["test-automation-integrations"] = hex.PermissionGrant{Kind: "integration", Resource: "*", Operations: []string{"read", "write"}, Subjects: hex.Subjects{Principals: []string{"automation:action-contract", "automation:weekly-report", "automation:birthdays", "automation:post"}}}
+	if err := access.PutSiteAccess(context.Background(), "demo", policy); err != nil {
 		t.Fatal(err)
 	}
 	store := memory.NewAutomationStore()
@@ -89,6 +93,16 @@ func setupAutomations(t *testing.T, grants ...hex.IntegrationGrant) (*hex.Server
 }
 
 var demoGrant = hex.IntegrationGrant{Principal: "site:demo", Permissions: []string{"defects.*", "chat.post"}}
+
+func automationIntegrationPolicy(owner string, names ...string) hex.SiteAccess {
+	policy := hex.MigrateSiteAccess(hex.SiteAccess{Owners: []string{"user:" + owner}})
+	var principals []string
+	for _, name := range names {
+		principals = append(principals, "automation:"+name)
+	}
+	policy.Grants["automation-integrations"] = hex.PermissionGrant{Kind: "integration", Resource: "*", Operations: []string{"read", "write"}, Subjects: hex.Subjects{Principals: principals}}
+	return policy
+}
 
 func TestAutomationsNeedSiteGrants(t *testing.T) {
 	server, _, _, posted := setupAutomations(t,

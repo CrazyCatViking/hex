@@ -39,9 +39,12 @@ func actionExecutionServer(t *testing.T, handler func(context.Context, hex.Actio
 		}
 	})
 	access := memory.NewAccessStore()
-	if err := access.PutSiteAccess(t.Context(), "demo", hex.SiteAccess{
+	policy := hex.MigrateSiteAccess(hex.SiteAccess{
 		Owners: []string{"user:owner"}, Editors: []string{"user:editor"},
-	}); err != nil {
+	})
+	policy.Grants["test-action-runner"] = hex.PermissionGrant{Kind: "action", Resource: "*", Operations: []string{"run"}, Subjects: hex.Subjects{Principals: []string{"automation:action-contract"}}}
+	policy.Grants["test-action-data"] = hex.PermissionGrant{Kind: "collection", Resource: "*", Operations: []string{"read"}, Subjects: hex.Subjects{Principals: []string{"automation:action-contract"}}}
+	if err := access.PutSiteAccess(t.Context(), "demo", policy); err != nil {
 		t.Fatal(err)
 	}
 	database := memory.NewDatabase()
@@ -85,7 +88,7 @@ func TestSharedActionExecutionTransportContracts(t *testing.T) {
 				if ctx.Err() != nil || caller.Site != "demo" || caller.Identity == nil {
 					t.Errorf("missing caller context: %+v, %v", caller, ctx.Err())
 				} else if caller.Identity.Provider == "automation" {
-					if caller.Identity.ID != "automation:action-contract" || caller.Role != "owner" {
+					if caller.Identity.ID != "automation:action-contract" || caller.Role != "viewer" {
 						t.Errorf("incorrect automation caller: %+v", caller)
 					}
 				} else if caller.Identity.ID != "editor" || caller.Role != "editor" {

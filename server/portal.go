@@ -328,6 +328,9 @@ func (s *Server) personalSites(ctx context.Context, identity *Identity, all bool
 		owned := exists && identity.matchesAny(access.Owners)
 		sharedWithViewer := exists && !owned &&
 			((len(access.Viewers) > 0 && identity.matchesAny(access.Viewers)) || identity.matchesAny(access.Editors))
+		if access.Version == 2 {
+			sharedWithViewer = exists && !owned && !access.Admission.SignedIn && s.siteRole(identity, access, exists) != roleNone
+		}
 		if !owned && !sharedWithViewer && !all {
 			continue
 		}
@@ -358,6 +361,32 @@ func (s *Server) personalSites(ctx context.Context, identity *Identity, all bool
 
 // audience summarizes who can open a site.
 func audience(access SiteAccess, exists bool) (string, string) {
+	if access.Version == 2 {
+		if access.Admission.SignedIn {
+			return "Everyone", "everyone"
+		}
+		principals := slices.Clone(access.Admission.Principals)
+		for _, role := range access.Admission.Roles {
+			if access.Roles[role].SignedIn {
+				return "Everyone", "everyone"
+			}
+			for _, binding := range access.Bindings {
+				if binding.Role == role {
+					principals = appendUnique(principals, binding.Principal)
+				}
+			}
+		}
+		others := 0
+		for _, principal := range principals {
+			if !slices.Contains(access.Owners, principal) {
+				others++
+			}
+		}
+		if others == 0 {
+			return "Only owners", "private"
+		}
+		return fmt.Sprintf("Shared with %d", others), "shared"
+	}
 	switch {
 	case !exists || len(access.Viewers) == 0:
 		return "Everyone", "everyone"

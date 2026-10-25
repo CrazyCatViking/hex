@@ -126,7 +126,7 @@ func TestSiteAccessLifecycle(t *testing.T) {
 	// Omitting owners keeps the current ones.
 	putPolicy(t, server, owner, "demo", `{"viewers":["group:sales"]}`)
 	policy := requestAs(t, server, owner, "GET", "/api/hex/sites/demo/access", nil, 200).Body.String()
-	if !strings.Contains(policy, `"owners":["user:owner-id","group:ops"]`) {
+	if !strings.Contains(policy, `"owners":["group:ops","user:owner-id"]`) {
 		t.Fatalf("owners were not kept: %s", policy)
 	}
 

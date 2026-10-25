@@ -69,7 +69,8 @@ func TestAdminAnalyticsInventoryHistoryAndAuthorization(t *testing.T) {
 	if err := json.Unmarshal(artifact.Body.Bytes(), &created); err != nil {
 		t.Fatal(err)
 	}
-	publishSite(t, server, bea, created.Name, map[string]string{"index.html": "file"}, "")
+	files := map[string]string{"index.html": "file"}
+	publishPublication(t, server, bea, created.Name, files, publication{Files: manifest(files)})
 	for _, path := range []string{"/admin", "/admin/sites", "/admin/users", "/api/hex/admin/analytics"} {
 		requestAs(t, server, nil, "GET", path, nil, http.StatusUnauthorized)
 		requestAs(t, server, alex, "GET", path, nil, http.StatusForbidden)

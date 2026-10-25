@@ -99,7 +99,7 @@ func TestAutomationScriptActionsAndLimits(t *testing.T) {
 	var calls atomic.Int32
 	server, _ := actionExecutionServer(t, func(_ context.Context, caller hex.ActionContext, input json.RawMessage) (any, error) {
 		calls.Add(1)
-		if caller.Site != "demo" || caller.Role != "owner" || caller.Identity.ID != "automation:action-contract" {
+		if caller.Site != "demo" || caller.Role != "viewer" || caller.Identity.ID != "automation:action-contract" {
 			t.Errorf("wrong script identity: %+v", caller)
 		}
 		if string(input) != `{"value":"{{ site }}"}` {
@@ -228,7 +228,7 @@ func TestAutomationScriptApprovalsAndConnectedAccounts(t *testing.T) {
 		}
 	}
 	access := memory.NewAccessStore()
-	if err := access.PutSiteAccess(t.Context(), "demo", hex.SiteAccess{Owners: []string{"user:owner"}}); err != nil {
+	if err := access.PutSiteAccess(t.Context(), "demo", automationIntegrationPolicy("owner", "action-contract")); err != nil {
 		t.Fatal(err)
 	}
 	store := memory.NewIntegrationStore()
@@ -267,7 +267,7 @@ func TestAutomationScriptAIUsesSiteBudgetAndSimulatesTools(t *testing.T) {
 			assistantTurn(hex.StopEndTurn, hex.AIContent{Type: hex.ContentText, Text: "preview"}),
 		}}
 		access := memory.NewAccessStore()
-		if err := access.PutSiteAccess(t.Context(), "demo", hex.SiteAccess{Owners: []string{"user:owner"}}); err != nil {
+		if err := access.PutSiteAccess(t.Context(), "demo", automationIntegrationPolicy("owner", "action-contract")); err != nil {
 			t.Fatal(err)
 		}
 		permissions := []string{"chat.post"}
@@ -329,7 +329,7 @@ func TestAutomationAdmissionLimitsManualRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	access := memory.NewAccessStore()
-	if err := access.PutSiteAccess(t.Context(), "demo", hex.SiteAccess{Owners: []string{"user:owner"}}); err != nil {
+	if err := access.PutSiteAccess(t.Context(), "demo", automationIntegrationPolicy("owner", "wait")); err != nil {
 		t.Fatal(err)
 	}
 	server := hex.New(hex.Config{Automations: memory.NewAutomationStore(), Access: access, Identity: easyauth.Resolver{}, Integrations: registry, IntegrationGrants: []hex.IntegrationGrant{{Principal: "site:demo", Permissions: []string{"wait.read"}}}})

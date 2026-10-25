@@ -44,6 +44,9 @@ func (c ActionContext) CanReadDocument(collection string, document Document) boo
 	if !namePattern.MatchString(collection) {
 		return false
 	}
+	if c.authorization.access.Version == 2 {
+		return c.authorization.canReadDocument(collection, document)
+	}
 	switch c.authorization.collection(collection).read {
 	case grantAll:
 		return true
@@ -60,6 +63,51 @@ func (c ActionContext) CanReadFile(key string) bool {
 
 func (c ActionContext) CanWriteFile(key string) bool {
 	return validKey(key) && c.authorization.file(key).write == grantAll
+}
+
+func (c ActionContext) CanDeleteFile(key string) bool {
+	return validKey(key) && c.authorization.permits("file", key, "delete")
+}
+
+// MutateDocument applies a trusted handler's proposed change under the provider
+// lock and checks one complete collection grant against original/proposed data.
+// Returning nil data deletes the record. The callback must not reenter storage.
+func (c ActionContext) MutateDocument(ctx context.Context, database Database, collection, id string, mutation DocumentMutation) (Document, error) {
+	if !validCollectionName(collection) || !validCollectionName(id) || mutation == nil {
+		return Document{}, errors.New("invalid document mutation")
+	}
+	guarded, supported := database.(GuardedDatabase)
+	if !supported {
+		return Document{}, ErrAuthorizationUnsupported
+	}
+	return guarded.Mutate(ctx, c.Site, collection, id, c.authorization.creator(), func(current *Document) (json.RawMessage, error) {
+		operation := "create"
+		after := Document{ID: id, CreatedBy: c.authorization.creator()}
+		var before *Document
+		if current != nil {
+			original := *current
+			original.Data = slices.Clone(current.Data)
+			before = &original
+			after.CreatedBy = original.CreatedBy
+			operation = "update"
+		}
+		data, err := mutation(current)
+		if err != nil {
+			return nil, err
+		}
+		after.Data = data
+		if data == nil {
+			if before == nil {
+				return nil, ErrNotFound
+			}
+			operation = "delete"
+			after = *before
+		}
+		if !c.authorization.canMutate(collection, operation, before, after) {
+			return nil, ErrForbidden
+		}
+		return data, nil
+	})
 }
 
 // ActionError reports a user-correctable business-rule failure as HTTP 400.
@@ -200,6 +248,12 @@ func (r *ActionRegistry) actions(site string) []*registeredAction {
 }
 
 func actionAllowed(action *registeredAction, authorization siteAuthorization) bool {
+	if authorization.access.Version == 2 {
+		if action.effect == "" {
+			return authorization.operationGrant("action", action.definition.Name, "run") == grantAll
+		}
+		return authorization.permits("action", action.definition.Name, "run")
+	}
 	return audienceGrant(authorization.role, authorization.identity, action.audience, LevelEditors) == grantAll
 }
 

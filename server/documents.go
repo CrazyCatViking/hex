@@ -22,17 +22,9 @@ func (s *Server) listDocuments(w http.ResponseWriter, r *http.Request) {
 	authorization := requestAuthorization(r)
 	collection := r.PathValue("collection")
 	options := ListOptions{After: r.URL.Query().Get("after"), Limit: limit}
-	switch authorization.collection(collection).read {
-	case grantNone:
-		writeError(w, http.StatusForbidden, "reading this collection is restricted")
-		return
-	case grantOwn:
-		options.CreatedBy = authorization.creator()
-	}
-
-	documents, err := s.config.Database.List(r.Context(), r.PathValue("site"), collection, options)
+	documents, err := s.listAuthorizedDocuments(r.Context(), authorization, r.PathValue("site"), collection, options)
 	if err != nil {
-		writeServerError(w, err)
+		writePermissionError(w, err)
 		return
 	}
 
@@ -55,11 +47,6 @@ func (s *Server) putDocument(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) writeDocument(w http.ResponseWriter, r *http.Request, status int) {
-	options, ok := documentWriteOptions(w, r)
-	if !ok {
-		return
-	}
-
 	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "expected a JSON object of at most 1 MiB")
@@ -75,13 +62,9 @@ func (s *Server) writeDocument(w http.ResponseWriter, r *http.Request, status in
 	site := r.PathValue("site")
 	collection := r.PathValue("collection")
 	id := r.PathValue("id")
-	document, err := s.config.Database.Put(r.Context(), site, collection, id, data, options)
-	if errors.Is(err, ErrForbidden) {
-		writeError(w, http.StatusForbidden, "only the creator can change this document")
-		return
-	}
+	document, err := s.mutateAuthorizedDocument(r.Context(), requestAuthorization(r), site, collection, id, data, false)
 	if err != nil {
-		writeServerError(w, err)
+		writePermissionError(w, err)
 		return
 	}
 
@@ -90,8 +73,7 @@ func (s *Server) writeDocument(w http.ResponseWriter, r *http.Request, status in
 
 func (s *Server) getDocument(w http.ResponseWriter, r *http.Request) {
 	authorization := requestAuthorization(r)
-	read := authorization.collection(r.PathValue("collection")).read
-	if read == grantNone {
+	if _, allowed := authorization.readFilter(r.PathValue("collection")); !allowed {
 		writeError(w, http.StatusForbidden, "reading this collection is restricted")
 		return
 	}
@@ -106,7 +88,7 @@ func (s *Server) getDocument(w http.ResponseWriter, r *http.Request) {
 	}
 	// Other people's documents under a creator-only rule look missing, so
 	// their IDs cannot be probed.
-	if read == grantOwn && document.CreatedBy != authorization.creator() {
+	if !authorization.canReadDocument(collection, document) {
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
@@ -115,25 +97,29 @@ func (s *Server) getDocument(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteDocument(w http.ResponseWriter, r *http.Request) {
-	options, ok := documentWriteOptions(w, r)
-	if !ok {
-		return
-	}
-
 	site := r.PathValue("site")
 	collection := r.PathValue("collection")
 	id := r.PathValue("id")
-	err := s.config.Database.Delete(r.Context(), site, collection, id, options)
-	if errors.Is(err, ErrForbidden) {
-		writeError(w, http.StatusForbidden, "only the creator can delete this document")
-		return
-	}
+	_, err := s.mutateAuthorizedDocument(r.Context(), requestAuthorization(r), site, collection, id, nil, true)
 	if err != nil {
-		writeServerError(w, err)
+		writePermissionError(w, err)
 		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func writePermissionError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ErrForbidden):
+		writeError(w, http.StatusForbidden, "this operation is not permitted by the site's permission policy")
+	case errors.Is(err, ErrNotFound):
+		writeError(w, http.StatusNotFound, "not found")
+	case errors.Is(err, ErrAuthorizationUnsupported):
+		writeError(w, http.StatusNotImplemented, err.Error())
+	default:
+		writeServerError(w, err)
+	}
 }
 
 // documentWriteOptions applies the collection's write rule: full write

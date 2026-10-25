@@ -150,6 +150,7 @@ func (s *Server) registerRoutes() {
 	if s.config.Identity != nil && s.config.Access != nil {
 		s.mux.HandleFunc("GET /api/hex/sites/{site}/access", s.getSiteAccess)
 		s.mux.HandleFunc("PUT /api/hex/sites/{site}/access", s.putSiteAccess)
+		s.mux.HandleFunc("POST /api/hex/sites/{site}/access/baseline", s.reconcileAccess)
 		s.mux.HandleFunc("DELETE /api/hex/sites/{site}/access", s.deleteSiteAccess)
 	}
 	s.mux.HandleFunc("GET /api/hex/sites/{site}/permissions", s.permissions)
@@ -174,6 +175,7 @@ func (s *Server) registerRoutes() {
 	}
 
 	if s.config.Database != nil {
+		s.mux.HandleFunc("POST /api/sites/{site}/permissions/check", s.siteScoped(s.checkPermission))
 		s.mux.HandleFunc("GET /api/sites/{site}/db/{collection}", s.siteScoped(s.listDocuments))
 		s.mux.HandleFunc("POST /api/sites/{site}/db/{collection}", s.siteScoped(s.createDocument))
 		s.mux.HandleFunc("PUT /api/sites/{site}/db/{collection}/{id}", s.siteScoped(s.putDocument))
@@ -348,21 +350,22 @@ func (s *Server) capabilities(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) capabilityDescription() map[string]any {
 	return map[string]any{
-		"version":        1,
-		"files":          s.config.Files != nil,
-		"database":       s.config.Database != nil,
-		"realtime":       s.config.Realtime != nil,
-		"sites":          s.config.Sites != nil,
-		"identity":       s.config.Identity != nil,
-		"accessControl":  s.config.Identity != nil && s.config.Access != nil,
-		"publishing":     s.config.Publisher != nil,
-		"artifacts":      s.artifactsEnabled(),
-		"actions":        s.actionsEnabled(),
-		"analytics":      s.config.Analytics != nil,
-		"integrations":   s.integrationsEnabled(),
-		"connections":    s.connectionsEnabled(),
-		"ai":             s.aiEnabled(),
-		"automations":    s.automationsEnabled(),
-		"maxUploadBytes": s.config.MaxUploadBytes,
+		"version":           1,
+		"files":             s.config.Files != nil,
+		"database":          s.config.Database != nil,
+		"realtime":          s.config.Realtime != nil,
+		"sites":             s.config.Sites != nil,
+		"identity":          s.config.Identity != nil,
+		"accessControl":     s.config.Identity != nil && s.config.Access != nil,
+		"permissionVersion": 2,
+		"publishing":        s.config.Publisher != nil,
+		"artifacts":         s.artifactsEnabled(),
+		"actions":           s.actionsEnabled(),
+		"analytics":         s.config.Analytics != nil,
+		"integrations":      s.integrationsEnabled(),
+		"connections":       s.connectionsEnabled(),
+		"ai":                s.aiEnabled(),
+		"automations":       s.automationsEnabled(),
+		"maxUploadBytes":    s.config.MaxUploadBytes,
 	}
 }

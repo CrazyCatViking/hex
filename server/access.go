@@ -1,6 +1,7 @@
 package hex
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,26 +16,51 @@ import (
 
 // SiteAccess is the server-owned access policy for a site.
 //
-// Owners manage the policy and publish the site. Editors may write the site's
-// data and viewers may see it; an empty Editors list lets every viewer edit,
-// and an empty Viewers list lets every signed-in user view. Paths restrict
-// static URL prefixes further, and Collections, Files and Channels override
-// who may read and write each part of the site's data. Values are typed
-// principals: user:<stable identity id>, group:<id> or role:<value>.
+// Version 2 separates Admission, management Owners, application Roles, scoped
+// Bindings and operation Grants. Management authority never implicitly grants
+// application access. Editors, Viewers, Paths and resource rule maps represent
+// historical policies only; deployed policies migrate before authorization.
 //
 // Published is server-owned: the access section of the site's last
 // publication, against which the next publication is merged. Nil means no
 // publication has recorded one yet. It is never returned to clients and is
 // ignored in requested policies.
 type SiteAccess struct {
-	Owners      []string            `json:"owners"`
-	Editors     []string            `json:"editors"`
-	Viewers     []string            `json:"viewers"`
-	Paths       []PathRule          `json:"paths,omitempty"`
-	Collections map[string]DataRule `json:"collections,omitempty"`
-	Files       map[string]DataRule `json:"files,omitempty"`
-	Channels    map[string]DataRule `json:"channels,omitempty"`
-	Published   *SiteAccess         `json:"published,omitempty"`
+	legacyFields bool
+	Version      int                        `json:"version,omitempty"`
+	Admission    Subjects                   `json:"admission,omitzero"`
+	Roles        map[string]ApplicationRole `json:"roles,omitempty"`
+	Bindings     map[string]RoleBinding     `json:"bindings,omitempty"`
+	Grants       map[string]PermissionGrant `json:"grants,omitempty"`
+	Owners       []string                   `json:"owners"`
+	Editors      []string                   `json:"editors,omitempty"`
+	Viewers      []string                   `json:"viewers,omitempty"`
+	Paths        []PathRule                 `json:"paths,omitempty"`
+	Collections  map[string]DataRule        `json:"collections,omitempty"`
+	Files        map[string]DataRule        `json:"files,omitempty"`
+	Channels     map[string]DataRule        `json:"channels,omitempty"`
+	Published    *SiteAccess                `json:"published,omitempty"`
+}
+
+func (access *SiteAccess) UnmarshalJSON(data []byte) error {
+	type plain SiteAccess
+	var decoded plain
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	for _, name := range []string{"editors", "viewers", "paths", "collections", "files", "channels"} {
+		if _, exists := fields[name]; exists {
+			decoded.legacyFields = true
+		}
+	}
+	*access = SiteAccess(decoded)
+	return nil
 }
 
 // PathRule limits the static assets under Prefix to Viewers. Matching follows
@@ -111,7 +137,7 @@ type AccessUpdate func(current SiteAccess, exists bool) (*SiteAccess, error)
 
 var (
 	identityIDPattern = regexp.MustCompile(`^[!-~]{1,256}$`)
-	principalPattern  = regexp.MustCompile(`^(user|group|role):[!-~]{1,256}$`)
+	principalPattern  = regexp.MustCompile(`^(user|group|role|automation):[!-~]{1,256}$`)
 	pathPrefixPattern = regexp.MustCompile(`^/[A-Za-z0-9._~/-]{0,255}$`)
 )
 
@@ -124,6 +150,9 @@ const (
 // NormalizeSiteAccess replaces nil principal lists with empty ones so that
 // stored and returned policies always carry arrays.
 func NormalizeSiteAccess(access SiteAccess) SiteAccess {
+	if access.Version == 2 {
+		return normalizePermissionPolicy(access)
+	}
 	if access.Owners == nil {
 		access.Owners = []string{}
 	}
@@ -139,6 +168,19 @@ func NormalizeSiteAccess(access SiteAccess) SiteAccess {
 // CloneSiteAccess returns a deep copy, for stores that keep policies in
 // memory.
 func CloneSiteAccess(access SiteAccess) SiteAccess {
+	if access.Version != 0 {
+		// Policies contain only JSON values. Round-tripping detaches nested
+		// condition trees, assignments and the publication baseline together.
+		data, err := json.Marshal(access)
+		if err != nil {
+			panic(fmt.Sprintf("clone validated access policy: %v", err))
+		}
+		var cloned SiteAccess
+		if err := json.Unmarshal(data, &cloned); err != nil {
+			panic(fmt.Sprintf("clone validated access policy: %v", err))
+		}
+		return cloned
+	}
 	cloned := SiteAccess{
 		Owners:      slices.Clone(access.Owners),
 		Editors:     slices.Clone(access.Editors),
@@ -173,6 +215,12 @@ func cloneAudience(audience Audience) Audience {
 }
 
 func validateSiteAccess(access SiteAccess) error {
+	if access.Version != 0 {
+		return validatePermissionPolicy(access)
+	}
+	if len(access.Roles) > 0 || len(access.Bindings) > 0 || len(access.Grants) > 0 || access.Admission.SignedIn || access.Admission.Owners || len(access.Admission.Principals) > 0 || len(access.Admission.Roles) > 0 {
+		return errors.New("application roles and grants require access.version 2")
+	}
 	lists := map[string][]string{"owners": access.Owners, "editors": access.Editors, "viewers": access.Viewers}
 	for _, name := range slices.Sorted(maps.Keys(lists)) {
 		if err := validatePrincipals(name, lists[name]); err != nil {
@@ -344,10 +392,20 @@ func (s *Server) replaceSiteAccess(ctx context.Context, identity *Identity, site
 		return SiteAccess{}, http.StatusBadRequest, err
 	}
 	requested.Published = nil
+	if requested.Version == 0 {
+		actions, automations, err := s.migrationExtras(ctx, site)
+		if err != nil {
+			return SiteAccess{}, 0, err
+		}
+		requested = migratePermissionExtras(MigrateSiteAccess(requested), actions, automations)
+	}
 
 	var saved SiteAccess
 	status := 0
 	err := s.config.Access.UpdateSiteAccess(ctx, site, func(existing SiteAccess, exists bool) (*SiteAccess, error) {
+		if exists {
+			existing = MigrateSiteAccess(existing)
+		}
 		if err := s.mayChangeAccess(identity, existing, exists); err != nil {
 			status = http.StatusForbidden
 			return nil, err
@@ -448,9 +506,9 @@ func (s *Server) accessCaller(w http.ResponseWriter, r *http.Request) (*Identity
 }
 
 func readSiteAccess(w http.ResponseWriter, r *http.Request) (SiteAccess, bool) {
-	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 64<<10))
+	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "expected a JSON access policy of at most 64 KiB")
+		writeError(w, http.StatusBadRequest, "expected a JSON access policy of at most 1 MiB")
 		return SiteAccess{}, false
 	}
 

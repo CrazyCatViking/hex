@@ -399,7 +399,8 @@
     {{template "footer" .Chrome}}
   </body>
 </html>
-{{end}} {{define "general-summary"}} {{if eq .General "restricted"}}Only the
+{{end}} {{define "general-summary"}} {{if .V2}}Admission and data permissions
+are managed independently below.{{else if eq .General "restricted"}}Only the
 people and groups below can open it.{{else if eq .General "view"}}Everyone at
 {{.Platform}} can open it.{{else}}Everyone at {{.Platform}} can open and edit
 it.{{end}} {{end}} {{define "person"}}
@@ -421,7 +422,77 @@ it.{{end}} {{end}} {{define "person"}}
     edit{{else}}Can view{{end}}</span
   >
 </li>
-{{end}} {{define "sharing"}}
+{{end}} {{define "sharing"}} {{if .V2}}
+<form
+  id="permission-form"
+  class="sharing"
+  hx-put="/api/hex/manage/sites/{{.Site}}/sharing"
+  hx-target="this"
+  hx-swap="outerHTML"
+>
+  {{if .Message}}
+  <p class="banner banner-success" role="status">{{.Message}}</p>
+  {{end}} {{if .Error}}
+  <p class="banner banner-error" role="alert">{{.Error}}</p>
+  {{end}}
+  <h3>Application permissions · version 2</h3>
+  <dl>
+    {{range .RoleRows}}
+    <dt><code>{{.ID}}</code>{{if .SignedIn}} · all signed-in users{{end}}</dt>
+    <dd>{{.Description}}</dd>
+    {{end}}
+  </dl>
+  <p class="field-hint">
+    Site owners manage publishing and sharing. Application roles and grants
+    control data independently. No grant means no access. Migrated sites keep
+    their previous access through explicit grants.
+  </p>
+  <div style="overflow-x: auto">
+    <table>
+      <thead>
+        <tr>
+          <th>Resource</th>
+          <th>Operations</th>
+          <th>Who</th>
+          <th>Limits</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Matrix}}
+        <tr>
+          <td><code>{{.Resource}}</code><br /><small>{{.ID}}</small></td>
+          <td>{{.Operations}}</td>
+          <td>{{.Subjects}}</td>
+          <td>{{.Condition}}</td>
+        </tr>
+        {{else}}
+        <tr>
+          <td colspan="4">No application grants. Data access is denied.</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  <details class="advanced" open>
+    <summary>Edit roles, assignments and grants</summary>
+    <p class="field-hint">
+      Assign people and groups in <code>bindings</code>; define operations and
+      record conditions in <code>grants</code>. Keep map IDs stable so
+      publications can merge safely. Removing a binding does not remove access
+      through other groups or grants.
+    </p>
+    <label class="field"
+      ><span>Permission policy (JSON)</span
+      ><textarea name="policy" rows="24" spellcheck="false">
+{{.Policy}}</textarea>
+    </label>
+    <input type="hidden" name="base" value="{{.Base}}" />
+  </details>
+  <div class="form-actions">
+    <button class="button" type="submit">Save permissions</button>
+  </div>
+</form>
+{{else}}
 <form
   id="sharing-form"
   class="sharing"
@@ -557,7 +628,7 @@ it.{{end}} {{end}} {{define "person"}}
     >
   </div>
 </form>
-{{end}} {{define "collections"}}
+{{end}} {{end}} {{define "collections"}}
 <div class="collections">
   {{if .Unsupported}}
   <p class="muted">This platform's database cannot list its contents.</p>
@@ -572,7 +643,7 @@ it.{{end}} {{end}} {{define "person"}}
         hx-get="/api/hex/manage/sites/{{$.Site}}/collections/{{.Name}}"
         hx-target="#documents"
       >
-        {{.Name}} <span>{{.Documents}}</span>
+        {{.Name}} {{if ge .Documents 0}}<span>{{.Documents}}</span>{{end}}
       </button>
     </li>
     {{end}}

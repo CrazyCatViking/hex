@@ -217,6 +217,18 @@ func (a *App) publish(ctx context.Context, project Project, directory, name stri
 // files directly to them (index.html last), and completes the publication.
 func (a *App) publishFiles(ctx context.Context, project Project, name string, sources []sourceFile, metadata *hex.SiteMetadata, access json.RawMessage, replaceAccess bool) (publishResult, error) {
 	var result publishResult
+	if len(access) > 0 && string(access) != "null" {
+		var policy hex.SiteAccess
+		if err := json.Unmarshal(access, &policy); err != nil {
+			return result, fmt.Errorf("invalid access policy: %w", err)
+		}
+		if err := hex.ValidatePublishedAccess(policy); err != nil {
+			return result, fmt.Errorf("publishing blocked: %w", err)
+		}
+		if err := a.requirePermissionVersion(ctx, project); err != nil {
+			return result, err
+		}
+	}
 	files, err := manifest(sources)
 	if err != nil {
 		return result, err

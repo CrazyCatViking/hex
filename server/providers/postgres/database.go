@@ -212,26 +212,12 @@ func (d *Database) migrateSitePolicies(ctx context.Context) error {
 }
 
 func (d *Database) Put(ctx context.Context, site, collection, id string, data json.RawMessage, options hex.WriteOptions) (hex.Document, error) {
-	// The conditional update leaves other creators' documents untouched and
-	// then returns no row, which is how creator-only writes are refused.
-	const query = `
-		INSERT INTO hex_documents (site, collection, id, data, created_by)
-		VALUES ($1, $2, $3, $4, $5)
-		ON CONFLICT (site, collection, id)
-		DO UPDATE SET data = EXCLUDED.data
-		WHERE NOT $6 OR hex_documents.created_by = $5
-		RETURNING created_by`
-
-	document := hex.Document{ID: id, Data: data}
-	err := d.pool.QueryRow(ctx, query, site, collection, id, data, options.Creator, options.CreatorOnly).Scan(&document.CreatedBy)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return hex.Document{}, hex.ErrForbidden
-	}
-	if err != nil {
-		return hex.Document{}, fmt.Errorf("save document %s/%s/%s: %w", site, collection, id, err)
-	}
-
-	return document, nil
+	return d.Mutate(ctx, site, collection, id, options.Creator, func(current *hex.Document) (json.RawMessage, error) {
+		if current != nil && options.CreatorOnly && current.CreatedBy != options.Creator {
+			return nil, hex.ErrForbidden
+		}
+		return data, nil
+	})
 }
 
 func (d *Database) Get(ctx context.Context, site, collection, id string) (hex.Document, error) {
@@ -287,23 +273,16 @@ func (d *Database) List(ctx context.Context, site, collection string, options he
 }
 
 func (d *Database) Delete(ctx context.Context, site, collection, id string, options hex.WriteOptions) error {
-	const query = `
-		DELETE FROM hex_documents
-		WHERE site = $1 AND collection = $2 AND id = $3
-		AND (NOT $4 OR created_by = $5)`
-
-	result, err := d.pool.Exec(ctx, query, site, collection, id, options.CreatorOnly, options.Creator)
-	if err != nil {
-		return fmt.Errorf("delete document %s/%s/%s: %w", site, collection, id, err)
-	}
-	if result.RowsAffected() > 0 {
-		return nil
-	}
-
-	if _, err := d.Get(ctx, site, collection, id); err != nil {
-		return err
-	}
-	return hex.ErrForbidden
+	_, err := d.Mutate(ctx, site, collection, id, options.Creator, func(current *hex.Document) (json.RawMessage, error) {
+		if current == nil {
+			return nil, hex.ErrNotFound
+		}
+		if options.CreatorOnly && current.CreatedBy != options.Creator {
+			return nil, hex.ErrForbidden
+		}
+		return nil, nil
+	})
+	return err
 }
 
 func (d *Database) ListCollections(ctx context.Context, site string) ([]hex.Collection, error) {

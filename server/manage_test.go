@@ -118,13 +118,21 @@ func TestPortalSharing(t *testing.T) {
 	requestAs(t, server, bea, "GET", "/api/hex/me", nil, 200)
 
 	path := "/api/hex/manage/sites/dashboard/sharing"
+	initial := showAccess(t, server, alex, "dashboard")
+	policyV2 := hex.SiteAccess{
+		Version: 2, Owners: []string{"user:alex-id"}, Admission: hex.Subjects{Principals: []string{"group:sales-id", "user:bea-id", "user:new-person-id"}},
+		Roles:    map[string]hex.ApplicationRole{"sales": {Description: "Sales"}, "editor": {Description: "<img src=x onerror=alert(1)>"}},
+		Bindings: map[string]hex.RoleBinding{"bea": {Principal: "user:bea-id", Role: "editor"}},
+		Grants: map[string]hex.PermissionGrant{
+			"pages": {Kind: "path", Resource: "*", Except: []string{"/admin/"}, Operations: []string{"read"}, Subjects: hex.Subjects{SignedIn: true}},
+			"admin": {Kind: "path", Resource: "/admin/", Operations: []string{"read"}, Subjects: hex.Subjects{Owners: true}},
+			"edit":  {Kind: "collection", Resource: "*", Operations: []string{"create", "update", "delete"}, Subjects: hex.Subjects{Roles: []string{"editor"}}},
+		},
+	}
 	saved := formRequest(t, server, alex, "PUT", path, url.Values{
-		"principal": {"user:alex-id", "group:sales-id", "user:bea-id", "user:new-person-id"},
-		"role":      {"owner", "viewer", "editor", "viewer"},
-		"general":   {"restricted"},
-		"rules":     {`{"paths":[{"prefix":"/admin/","viewers":"owners"}]}`},
+		"base": {string(encode(t, initial))}, "policy": {string(encode(t, policyV2))},
 	}, 200)
-	if !strings.Contains(saved, "Saved") || !strings.Contains(saved, "Sales") || !strings.Contains(saved, "/admin/") {
+	if !strings.Contains(saved, "Permissions saved") || !strings.Contains(saved, "Sales") || !strings.Contains(saved, "/admin/") {
 		t.Fatalf("sharing form did not save: %s", saved)
 	}
 	// Names from the directory are escaped.
@@ -136,34 +144,28 @@ func TestPortalSharing(t *testing.T) {
 	if err := json.Unmarshal(requestAs(t, server, alex, "GET", "/api/hex/sites/dashboard/access", nil, 200).Body.Bytes(), &policy); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(policy.Owners, []string{"user:alex-id"}) || !slices.Equal(policy.Editors, []string{"user:bea-id"}) ||
-		!slices.Equal(policy.Viewers, []string{"group:sales-id", "user:new-person-id"}) || len(policy.Paths) != 1 {
+	if policy.Version != 2 || !slices.Equal(policy.Owners, []string{"user:alex-id"}) || policy.Bindings["bea"].Principal != "user:bea-id" || policy.Grants["admin"].Resource != "/admin/" {
 		t.Fatalf("unexpected policy: %+v", policy)
 	}
 
 	// Opening it to everyone keeps the people who may edit.
+	base := string(encode(t, policy))
+	policy.Admission.SignedIn = true
+	delete(policy.Grants, "admin")
 	formRequest(t, server, alex, "PUT", path, url.Values{
-		"principal": {"user:alex-id", "user:bea-id"},
-		"role":      {"owner", "editor"},
-		"general":   {"view"},
+		"base": {base}, "policy": {string(encode(t, policy))},
 	}, 200)
 	policy = hex.SiteAccess{}
 	if err := json.Unmarshal(requestAs(t, server, alex, "GET", "/api/hex/sites/dashboard/access", nil, 200).Body.Bytes(), &policy); err != nil {
 		t.Fatal(err)
 	}
-	if len(policy.Viewers) != 0 || !slices.Equal(policy.Editors, []string{"user:bea-id"}) || len(policy.Paths) != 0 {
+	if !policy.Admission.SignedIn || policy.Bindings["bea"].Principal != "user:bea-id" {
 		t.Fatalf("everyone-can-view policy: %+v", policy)
 	}
 
 	// Mistakes are shown in the form, not applied.
-	for _, values := range []url.Values{
-		{"principal": {"user:bea-id"}, "role": {"viewer"}, "general": {"restricted"}},
-		{"principal": {"user:someone-else"}, "role": {"owner"}, "general": {"restricted"}},
-		{"principal": {"user:alex-id"}, "role": {"owner"}, "general": {"restricted"}, "rules": {"{not json"}},
-		{"principal": {"user:alex-id"}, "role": {"owner"}, "general": {"restricted"}, "rules": {`{"owners":["user:x"]}`}},
-		{"principal": {"user:alex-id", "sales"}, "role": {"owner", "viewer"}, "general": {"restricted"}},
-		{"principal": {"user:alex-id"}, "role": {"owner", "viewer"}, "general": {"restricted"}},
-	} {
+	for _, invalid := range []string{`{not json`, `{"version":2,"owners":["user:someone-else"]}`, `{"version":2,"owners":["user:alex-id"],"admission":{"roles":["missing"]}}`} {
+		values := url.Values{"base": {string(encode(t, policy))}, "policy": {invalid}}
 		if body := formRequest(t, server, alex, "PUT", path, values, 200); !strings.Contains(body, "banner-error") {
 			t.Fatalf("invalid sharing form was accepted: %v: %s", values, body)
 		}

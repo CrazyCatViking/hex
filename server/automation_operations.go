@@ -37,17 +37,20 @@ func (r *automationRunner) runAction(ctx context.Context, name string, input jso
 		return nil, "", fmt.Errorf("the site has no action %s", name)
 	}
 	action := actions[index]
+	authorization, err := r.server.automationAuthorization(ctx, r.site, r.automation.Name)
+	if err != nil {
+		return nil, "", automationError(err)
+	}
+	if !actionAllowed(action, authorization) {
+		return nil, "", ErrForbidden
+	}
 	if r.run.DryRun {
 		if err := action.validateInput(input); err != nil {
 			return nil, "", fmt.Errorf("invalid input for action %s: %w", name, err)
 		}
 		return map[string]any{"wouldRun": name, "input": json.RawMessage(input)}, OperationDryRun, nil
 	}
-	authorization, err := r.server.automationAuthorization(ctx, r.site, r.automation.Name)
-	if err != nil {
-		return nil, "", automationError(err)
-	}
-	caller := ActionContext{Site: r.site, Identity: authorization.identity, Role: roleNames[roleOwner], authorization: authorization}
+	caller := ActionContext{Site: r.site, Identity: authorization.identity, Role: roleNames[authorization.role], authorization: authorization}
 	output, err := action.execute(ctx, caller, input)
 	if err != nil {
 		var inputError *actionInputError
@@ -60,12 +63,17 @@ func (r *automationRunner) runAction(ctx context.Context, name string, input jso
 }
 
 func (s *Server) automationAuthorization(ctx context.Context, site, automation string) (siteAuthorization, error) {
-	access, _, err := s.sitePolicy(ctx, site)
+	access, exists, err := s.sitePolicy(ctx, site)
 	if err != nil {
 		return siteAuthorization{}, err
 	}
 	identity := &Identity{Provider: "automation", ID: "automation:" + automation, Name: automation}
-	return siteAuthorization{identity: identity, access: access, role: roleOwner}, nil
+	role := roleViewer
+	if !exists {
+		access = MigrateSiteAccess(access)
+		role = roleOwner
+	}
+	return siteAuthorization{identity: identity, access: access, role: role}, nil
 }
 
 func (r *automationRunner) askAI(ctx context.Context, input *automationAIRequest) (any, error) {
@@ -97,6 +105,10 @@ func (r *automationRunner) queryDocuments(ctx context.Context, collection string
 	if limit == 0 {
 		limit = 100
 	}
+	authorization, err := r.server.automationAuthorization(ctx, r.site, r.automation.Name)
+	if err != nil {
+		return nil, err
+	}
 	matches := make([]any, 0)
 	matchedBytes := 2
 	after := ""
@@ -110,7 +122,7 @@ func (r *automationRunner) queryDocuments(ctx context.Context, collection string
 		}
 		// A single bounded row keeps provider and decoder allocations bounded,
 		// including for nonmatching documents. Budgets are shared across queries.
-		page, err := r.server.config.Database.List(ctx, r.site, collection, ListOptions{After: after, Limit: 1, MaxDocumentBytes: min(maxAutomationOutput, maxScannedBytes-r.scannedBytes)})
+		page, err := r.server.listAuthorizedDocuments(ctx, authorization, r.site, collection, ListOptions{After: after, Limit: 1, MaxDocumentBytes: min(maxAutomationOutput, maxScannedBytes-r.scannedBytes)})
 		if err != nil {
 			if errors.Is(err, ErrDocumentReadLimit) {
 				r.hostBudgetError = errAutomationHostBudget
@@ -183,7 +195,11 @@ func (r *automationRunner) saveDocument(ctx context.Context, collection, id stri
 	if r.run.DryRun {
 		return map[string]any{"wouldSave": collection, "id": id, "data": json.RawMessage(document)}, OperationDryRun, nil
 	}
-	stored, err := r.server.config.Database.Put(ctx, r.site, collection, id, document, WriteOptions{Creator: "automation:" + r.automation.Name})
+	authorization, err := r.server.automationAuthorization(ctx, r.site, r.automation.Name)
+	if err != nil {
+		return nil, "", err
+	}
+	stored, err := r.server.mutateAuthorizedDocument(ctx, authorization, r.site, collection, id, document, false)
 	if err != nil {
 		return nil, "", automationError(err)
 	}

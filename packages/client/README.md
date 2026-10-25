@@ -24,6 +24,22 @@ const identity = await hex.identity();
 
 Deployed applications use same-origin `/api/` requests. The hosting gateway handles authentication. `identity()` is for personalization and convenience branching; authorization is enforced by the platform's site access entries, never by frontend checks.
 
+## Permissions
+
+Version 2 policies separate site admission, management owners and application roles. Application access is denied without an explicit grant; ownership alone does not grant data access.
+
+```ts
+const permissions = await hex.permissions();
+// Grants are all, own, conditional or none; roles are application role IDs.
+const check = await hex.can({
+  collection: "expenses", operation: "update", id: "expense-id",
+  data: { amount: 20, status: "draft" },
+});
+if (check.allowed) { /* enable the UI operation */ }
+```
+
+Checks are advisory, not authorization tokens. The platform enforces conditions against actual records and proposed mutations under the storage lock. See [policy configuration, migration and publishing reconciliation](../../docs/access-control.md). `PermissionPolicy`, `PermissionSubjects` and `RecordCondition` are exported TypeScript types.
+
 ## Integrations
 
 When the platform has integrations, apps call their typed endpoints through the server. Credentials never reach the browser, and every call is checked against the viewer's permissions and, for some integrations, an admin's approval of the site.

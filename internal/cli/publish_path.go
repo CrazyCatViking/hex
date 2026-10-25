@@ -150,7 +150,7 @@ func (a *App) shareAccess(ctx context.Context, project Project, with []string) (
 	if err := json.Unmarshal(data, &me); err != nil || me.ID == "" {
 		return nil, errors.New("the platform did not return your identity")
 	}
-	return json.Marshal(map[string][]string{"viewers": append([]string{"user:" + me.ID}, with...)})
+	return json.Marshal(hex.MigrateSiteAccess(hex.SiteAccess{Viewers: append([]string{"user:" + me.ID}, with...)}))
 }
 
 // shareFiles lists what to publish for a file or folder, adding a generated

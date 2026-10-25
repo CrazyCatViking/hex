@@ -53,7 +53,7 @@ hex actions run --site my-app create-task --input @task.json
 
 Before changing data, discover an available action and read its description and input/output schemas. Save the intended JSON input to a file and pass `--input @<path>`. The CLI fetches the current contract and validates input before sending; the backend also checks permissions and the contract. Do not infer undeclared action names or execution URLs. Extra fields are rejected when the schema sets `additionalProperties: false`. Do not automatically retry a mutating action after an ambiguous failure; check the resulting state first.
 
-Actions run as the existing user, default to the site's editors, and use existing site/data permissions. No separate agent sign-in or scopes are needed.
+Actions run as the existing user. Version 2 requires an explicit action/run grant, and by default the matching collection-operation grant. No separate agent sign-in is needed.
 
 When building an app whose data people or agents should change from the CLI, declare actions in the `actions` array of its hex.json; `hex publish` registers them and the platform performs them, so no server code is needed. Each action has a `name`, a `description` written for agents, an `operation` (`create` stores the input as a new document and returns its ID; `update` merges the input's fields into an existing document; `delete` removes one), a `collection`, an `input` JSON Schema with `"type": "object"` (prefer `additionalProperties: false`), an optional `idField` for update/delete (default `id`, which the schema must require) and an optional `audience` (`viewers`, `editors` (default), `owners` or principals). Callers also need write access to the collection. Declare one action per real task, such as `log-call` or `close-ticket`, rather than generic "edit anything" actions. Logic beyond one create, update or delete needs an action registered by the platform's Go backend in `hex.Config.Actions`; ask the platform developer for that.
 
@@ -80,33 +80,36 @@ Use same-origin requests in deployed apps; no API keys or identity code is neede
 
 ## Access control
 
-Without an access policy every signed-in user can view and edit a site. Put the policy in the `access` section of hex.json; `hex publish` applies it and the platform enforces it on pages, files, documents and realtime channels. Republishing merges hex.json changes into changes owners made in the portal, so never use `--replace-access` unless the user asks to discard those. Frontend checks are never enforcement.
+Use `access.version: 2`. Site admission, management owners and application grants are independent; no grant means no data access, even for owners. Existing deployed policies migrate automatically, including their previous local publication baselines. Legacy permission sections are rejected before publication changes anything. Read `hex access show <site>` to obtain a migrated policy; changing only the version number is not enough. Republishing merges local changes with portal edits, so never use `--replace-access` unless the user asks to discard those. Frontend checks are never enforcement.
 
 ```json
 {
   "name": "team-dashboard",
   "access": {
-    "viewers": ["group:<object-id>"],
-    "editors": ["group:<object-id>"],
-    "paths": [{ "prefix": "/admin/", "viewers": "owners" }],
-    "collections": {
-      "settings": { "read": "viewers", "write": "owners" },
-      "drafts": { "read": "creator", "write": "creator" }
+    "version": 2,
+    "admission": { "roles": ["member"] },
+    "roles": { "member": { "description": "Team member" } },
+    "bindings": {
+      "team-members": { "principal": "group:<object-id>", "role": "member" }
     },
-    "files": { "exports/": { "read": "owners", "write": "owners" } },
-    "channels": { "announcements": { "write": "owners" } }
+    "grants": {
+      "pages": { "kind": "path", "resource": "*", "operations": ["read"], "subjects": { "roles": ["member"] } },
+      "tasks": { "kind": "collection", "resource": "tasks", "operations": ["read", "create", "update"], "subjects": { "roles": ["member"] } }
+    }
   }
 }
 ```
 
-- Principals are `user:<id or email>`, `group:<object id>` or `role:<value>`; get real values from the user or `hex whoami`, never invent them. Omitted `owners` keep the current owners; the first publisher of a new name becomes its owner.
-- Empty `viewers` means every signed-in user; empty `editors` means every viewer. Owners and platform admins pass every rule.
-- Audiences are `viewers`, `editors`, `owners`, `creator` or an array of principals. Unset `read` defaults to viewers and unset `write` to editors; `"*"` sets the default for unlisted names.
-- `creator` (collections only): documents carry a server-recorded `createdBy`; other people's documents return 404 and changing them returns 403.
+- Principals are `user:<stable id>`, `group:<object id>`, `role:<identity-provider value>` or `automation:<name>`. Never use email/display-name matching or invent real directory IDs. Omitted owners retain existing owners; first publishers own new names.
+- Subjects select principals, application roles, `signedIn: true`, or `owners: true`. Application roles have no implicit hierarchy; bindings may carry `{kind,id}` scope. Scoped grants name the corresponding record field with `{kind,field}`.
+- Collection operations are read/create/update/delete; file operations read/upload/delete; channel operations read/send; paths read; actions run. A wildcard is additive, not overridden by more specific grants; use `except` to exclude resources.
+- Collection/action grants support `where` (existing record), `check` (proposed record), and top-level writable `fields`. Conditions use all/any or field/op/value with eq/ne/in/contains. Fields start with `data.` or use server metadata `id`/`createdBy`; a value `"$actor.id"` resolves to the caller. Missing fields never match. Each mutation needs one complete grant, not a union of partial constraints.
 - Path rules protect separately served files. Build admin areas as a separate HTML entry such as `admin/index.html` (a multi-page build), not a hash route inside the public page, and protect their data with collection rules.
 - Expect `HexError` with status 403 for restricted reads and writes, and handle it in the UI.
-- Use `await hex.permissions()` to show or hide links and controls: it returns `{ role, admin, publish, paths: [{ prefix, allowed }], collections, files, channels }` with `read`/`write` grants of `all`, `own` or `none` per rule (including `"*"`).
-- `hex access show|set|clear|check <site>` manages or inspects policies directly.
+- `await hex.permissions()` includes application roles and per-operation grants: all/own/conditional/none. For a record-specific advisory check use `hex.can({collection,operation,id,data})`. Handle 404 for unreadable records and 403 for denied mutations.
+- Stable role, binding and grant map IDs drive three-way merging. Unchanged local configuration preserves portal additions and revocations. Differing edits to the same ID conflict. Omitted access preserves deployed policy and baseline. A missing baseline requires explicit `hex access reconcile <site> --file local-policy.json`, which records the baseline without changing live access.
+- `hex access show|set|clear|check|reconcile <site>` manages or inspects policies. `set` replaces the live policy; `clear` opens the site. Review those effects before using them.
+- For constrained workflow actions use `authorization: "action"`, explicit allowed input `fields`, fixed `set` effects (`$actor.id`/`$now` supported), and where/check conditions, plus an action/run grant scoped to authorized records. Normal actions use `authorization: "caller"` and also require collection authority. Legacy action audience names do not create v2 grants.
 
 ## Files
 
@@ -166,7 +169,7 @@ For TypeScript apps, prefer generating typed wrappers for the endpoints the app 
 From an app, `GET /api/sites/<site>/integrations` lists integrations (same shape as `--json`), and `POST /api/sites/<site>/integrations/<integration>/<endpoint>` with a JSON body calls one; the browser client wraps both: `await hex.integrations.list()` and `await hex.integrations.call('crm', 'deals', { stage: 'won' })`. A 409 throws `HexConnectionRequiredError`; `await hex.integrations.connect(error)` opens the platform's connect page in a popup and resolves when it closes, and `hex.integrations.callWithConnect(...)` connects and retries once. Use same-origin requests only.
 
 - Every endpoint needs a permission such as `hubspot.deals`, granted by platform administrators to users, groups or Entra app roles. It is separate from site access policies; you cannot grant it in hex.json. Expect 403 and explain in the UI which access to request; use the `allowed` flag to hide unavailable features.
-- Endpoints marked `write` change data in the other system and need the site's editor role.
+- With version 2, endpoints also need an `integration` grant (`resource: "integration.endpoint"` or `"integration.*"`) for `read` or `write`, according to the endpoint's mutation flag. These grants restrict but never replace platform permissions and approvals.
 - Some integrations require a platform admin to approve each site (`requiresApproval`). A site owner asks with `hex integrations request --site my-app hubspot --reason "..."`; admins use `hex integrations approvals`, `approve` and `revoke`. Until approved, calls answer 403.
 - Results are shaped and may be cached briefly by the platform; do not poll endpoints in tight loops.
 

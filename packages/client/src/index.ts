@@ -21,6 +21,7 @@ export interface Capabilities {
   sites: boolean;
   identity?: boolean;
   accessControl?: boolean;
+  permissionVersion?: number;
   publishing?: boolean;
   artifacts?: boolean;
   actions?: boolean;
@@ -49,11 +50,58 @@ export interface Document<T> {
 }
 
 /** "all" covers everything, "own" only the caller's own documents. */
-export type Grant = "all" | "own" | "none";
+export type Grant = "all" | "own" | "conditional" | "none";
+
+export interface PermissionSubjects {
+  signedIn?: boolean;
+  owners?: boolean;
+  principals?: string[];
+  roles?: string[];
+}
+
+export type RecordCondition =
+  | { all: RecordCondition[] }
+  | { any: RecordCondition[] }
+  | { field: string; op: "eq" | "ne" | "in" | "contains"; value: unknown };
+
+export interface PermissionPolicy {
+  version: 2;
+  owners?: string[];
+  admission?: PermissionSubjects;
+  roles?: Record<string, { description?: string; signedIn?: boolean }>;
+  bindings?: Record<
+    string,
+    {
+      principal: string;
+      role: string;
+      scope?: { kind: string; id: string };
+    }
+  >;
+  grants?: Record<
+    string,
+    {
+      kind:
+        "collection" | "file" | "channel" | "path" | "action" | "integration";
+      resource: string;
+      except?: string[];
+      operations: string[];
+      subjects: PermissionSubjects;
+      scope?: { kind: string; field: string };
+      where?: RecordCondition;
+      check?: RecordCondition;
+      fields?: string[] | null;
+    }
+  >;
+}
 
 export interface DataPermission {
   read: Grant;
   write: Grant;
+  create?: Grant;
+  update?: Grant;
+  delete?: Grant;
+  upload?: Grant;
+  send?: Grant;
 }
 
 /**
@@ -62,6 +110,8 @@ export interface DataPermission {
  * Rule maps include "*", the rule for names without their own entry.
  */
 export interface Permissions {
+  version: number;
+  roles: string[];
   role: "owner" | "editor" | "viewer" | "none";
   admin: boolean;
   publish: boolean;
@@ -224,6 +274,18 @@ export function createHexClient(options: ClientOptions) {
     permissions() {
       return requestJSON<Permissions>(
         `/api/hex/sites/${validateName(options.site)}/permissions`,
+      );
+    },
+    /** Advisory only: mutations always recheck the live policy atomically. */
+    can(input: {
+      collection: string;
+      operation: "read" | "create" | "update" | "delete";
+      id?: string;
+      data?: Record<string, unknown>;
+    }) {
+      return requestJSON<{ allowed: boolean; version: number }>(
+        `${root}/permissions/check`,
+        jsonBody("POST", input),
       );
     },
     async identity(): Promise<Identity | null> {

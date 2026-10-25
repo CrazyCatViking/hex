@@ -2,7 +2,6 @@ package hex_test
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"testing"
 
@@ -53,7 +52,7 @@ func TestPublicationRestrictionsPrecedeUploads(t *testing.T) {
 			// are visible to other replicas serving the same storage.
 			config.Publisher = checkedDirectPublisher{SitePublisher: store, check: checkRestricted}
 			server = hex.New(config)
-			body := publication{Files: manifest(files), Access: json.RawMessage(policy)}
+			body := publication{Files: manifest(files), Access: migratedAccessJSON(t, policy)}
 			requestAs(t, server, owner, "POST", "/api/hex/sites/demo/publish", encode(t, body), 200)
 			for file, content := range files {
 				requestAs(t, server, owner, "PUT", "/api/hex/sites/demo/publish/files/"+file, []byte(content), 204)
@@ -72,7 +71,7 @@ func TestPublicationRestrictionsPrecedeUploads(t *testing.T) {
 func TestRejectedPublicationDoesNotClaimName(t *testing.T) {
 	server, _ := setupWithAccess(t)
 	owner := principalHeaders("owner")
-	body := publication{Files: manifest(map[string]string{"index.html": "private"}), Access: json.RawMessage(`{"owners":["user:other"]}`)}
+	body := publication{Files: manifest(map[string]string{"index.html": "private"}), Access: migratedAccessJSON(t, `{"owners":["user:other"]}`)}
 	requestAs(t, server, owner, "POST", "/api/hex/sites/demo/publish", encode(t, body), http.StatusBadRequest)
 	putPolicy(t, server, principalHeaders("other"), "demo", `{"owners":["user:other"]}`)
 }

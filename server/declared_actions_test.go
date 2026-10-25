@@ -31,6 +31,7 @@ func publishWithActions(t *testing.T, server http.Handler, headers http.Header, 
 	t.Helper()
 	files := map[string]string{"index.html": "<h1>calls</h1>"}
 	body := map[string]any{"files": manifest(files)}
+	body["access"] = migratedAccessJSON(t, `{}`)
 	if actions != "" {
 		body["actions"] = json.RawMessage(actions)
 	}

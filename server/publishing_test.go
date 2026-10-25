@@ -54,10 +54,17 @@ func encode(t *testing.T, value any) []byte {
 func publishSite(t *testing.T, server http.Handler, headers http.Header, site string, files map[string]string, access string) publishPlan {
 	t.Helper()
 	body := publication{Files: manifest(files), Metadata: &hex.SiteMetadata{Title: "Demo"}}
-	if access != "" {
-		body.Access = json.RawMessage(access)
+	// Older scenarios use collaborative sharing fixtures. Publish their
+	// explicit migrated policy; legacy publishing input is tested separately.
+	if access == "" {
+		access = `{}`
 	}
+	body.Access = migratedAccessJSON(t, access)
+	return publishPublication(t, server, headers, site, files, body)
+}
 
+func publishPublication(t *testing.T, server http.Handler, headers http.Header, site string, files map[string]string, body publication) publishPlan {
+	t.Helper()
 	response := requestAs(t, server, headers, "POST", "/api/hex/sites/"+site+"/publish", encode(t, body), 200)
 	var plan publishPlan
 	if err := json.Unmarshal(response.Body.Bytes(), &plan); err != nil {
@@ -71,6 +78,15 @@ func publishSite(t *testing.T, server http.Handler, headers http.Header, site st
 	}
 	requestAs(t, server, headers, "POST", "/api/hex/sites/"+site+"/publish/complete", encode(t, body), 200)
 	return plan
+}
+
+func migratedAccessJSON(t *testing.T, source string) json.RawMessage {
+	t.Helper()
+	var access hex.SiteAccess
+	if err := json.Unmarshal([]byte(source), &access); err != nil {
+		t.Fatal(err)
+	}
+	return encode(t, hex.MigrateSiteAccess(access))
 }
 
 func readSiteFile(t *testing.T, store *local.Store, site, path string) (string, bool) {

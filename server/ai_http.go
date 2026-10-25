@@ -25,7 +25,7 @@ func (s *Server) registerAIRoutes() {
 
 func siteCaller(r *http.Request) integrationCaller {
 	authorization := requestAuthorization(r)
-	return integrationCaller{site: r.PathValue("site"), identity: authorization.identity, role: authorization.role}
+	return integrationCaller{site: r.PathValue("site"), identity: authorization.identity, role: authorization.role, authorization: &authorization}
 }
 
 func (s *Server) listAIModels(w http.ResponseWriter, r *http.Request) {
