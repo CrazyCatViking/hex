@@ -141,6 +141,283 @@ try {
     await dialog.waitFor({ state: "hidden" });
   };
 
+  const verifyDirectoryPicker = async () => {
+    const originalPolicy = await policy();
+    const pickerPage = await browser.newPage({
+      viewport: { width: 1440, height: 1000 },
+    });
+    pickerPage.setDefaultTimeout(7000);
+    pickerPage.on("pageerror", (error) => errors.push(error.message));
+    const people = Array.from({ length: 20 }, (_, i) => ({
+      id: `picker-person-${i}`,
+      name: `Test person ${i}`,
+      email: `person${i}@example.test`,
+    }));
+    const groups = Array.from({ length: 20 }, (_, i) => ({
+      id: `picker-group-${i}`,
+      name: `Directory group ${i} with a very long name that should not overflow the picker or the viewport`,
+    }));
+    let receiveDelayed;
+    const delayed = new Promise((resolve) => {
+      receiveDelayed = resolve;
+    });
+    const routeDirectory = async (route) => {
+      const query = new URL(route.request().url()).searchParams.get("query");
+      if (query === "delayed") {
+        receiveDelayed(route);
+        return;
+      }
+      await route.fulfill({
+        status: query === "error" ? 503 : 200,
+        json:
+          query === "empty"
+            ? { people: [], groups: [] }
+            : query === "single"
+              ? { people: people.slice(0, 1), groups: [] }
+              : { people, groups },
+      });
+    };
+    await pickerPage.route("**/api/hex/directory?*", routeDirectory);
+    await pickerPage.goto(`${url}/manage/demo?tab=sharing`);
+    await pickerPage
+      .getByRole("button", { name: "+ Add person or group", exact: true })
+      .click();
+    const pickerDialog = pickerPage.locator("[data-permission-dialog]");
+    const input = pickerDialog.getByRole("combobox");
+    const options = pickerDialog.getByRole("listbox");
+    const geometry = () =>
+      pickerDialog.evaluate((dialog) => ({
+        height: dialog.offsetHeight,
+        scrollHeight: dialog.scrollHeight,
+        scrollTop: dialog.scrollTop,
+        top: dialog.getBoundingClientRect().top,
+      }));
+    await pickerDialog.getByRole("option").last().waitFor();
+    await input.press("Escape");
+    assert.equal(
+      await pickerDialog.isVisible(),
+      true,
+      "Escape dismisses results before dismissing the modal",
+    );
+    const closed = await geometry();
+    await input.fill("single");
+    await pickerDialog.getByRole("option").first().waitFor();
+    assert.deepEqual(
+      await geometry(),
+      closed,
+      "one result must not enlarge or move the modal",
+    );
+    await input.fill("many");
+    await pickerDialog.getByRole("option").nth(39).waitFor();
+    assert.deepEqual(
+      await geometry(),
+      closed,
+      "many results must not enlarge the modal or its scroll area",
+    );
+    const popup = await options.evaluate((list) => {
+      const rect = list.getBoundingClientRect();
+      const dialog = list.closest("dialog").getBoundingClientRect();
+      const hit = document.elementFromPoint(rect.left + 20, rect.bottom - 20);
+      return {
+        height: rect.height,
+        scrolling: list.scrollHeight > list.clientHeight,
+        outsideDialog: rect.bottom > dialog.bottom || rect.top < dialog.top,
+        hit: list.contains(hit),
+        withinViewport:
+          rect.left >= 0 &&
+          rect.right <= innerWidth &&
+          rect.top >= 0 &&
+          rect.bottom <= innerHeight,
+      };
+    });
+    assert.deepEqual(
+      popup,
+      {
+        height: 300,
+        scrolling: true,
+        outsideDialog: true,
+        hit: true,
+        withinViewport: true,
+      },
+      "results should be a capped, unclipped overlay even beyond the modal's bounds",
+    );
+    if (process.env.HEX_PORTAL_SCREENSHOTS)
+      await pickerPage.screenshot({
+        path: `${process.env.HEX_PORTAL_SCREENSHOTS}-people-dropdown.png`,
+      });
+    await input.press("Escape");
+    await input.press("ArrowUp");
+    await pickerDialog.getByRole("option").nth(39).waitFor();
+    assert.equal(
+      await pickerDialog
+        .getByRole("option")
+        .last()
+        .getAttribute("aria-selected"),
+      "true",
+    );
+    assert.equal(
+      await options.evaluate((list) => list.scrollTop > 0),
+      true,
+      "keyboard navigation scrolls results, not the dialog",
+    );
+    assert.deepEqual(await geometry(), closed);
+    await input.press("Tab");
+    assert.equal(await input.getAttribute("aria-expanded"), "false");
+    await input.click();
+    await options.waitFor();
+    await pickerDialog.locator(".muted").click();
+    assert.equal(
+      await input.getAttribute("aria-expanded"),
+      "false",
+      "clicking outside dismisses results",
+    );
+    await input.fill("delayed");
+    const pending = await delayed;
+    await input.press("Escape");
+    await pending.fulfill({ json: { people, groups } });
+    await pickerPage.waitForLoadState("networkidle");
+    assert.equal(
+      await input.getAttribute("aria-expanded"),
+      "false",
+      "late responses must not reopen a dismissed dropdown",
+    );
+    for (const [query, message] of [
+      ["empty", "No match."],
+      ["error", "Could not load people."],
+    ]) {
+      await input.fill(query);
+      await options.getByText(message, { exact: false }).waitFor();
+      assert.deepEqual(
+        await geometry(),
+        closed,
+        "empty/error states stay in the overlay",
+      );
+      assert.equal(
+        await pickerDialog.getByRole("option").count(),
+        0,
+        "failed searches must not retain selectable stale results",
+      );
+    }
+    await input.fill("many");
+    await pickerDialog.getByRole("option").nth(39).waitFor();
+    await input.press("Escape");
+    await input.press("ArrowUp");
+    await pickerPage.waitForFunction(() =>
+      document
+        .querySelector('[role="combobox"]')
+        .getAttribute("aria-activedescendant")
+        ?.endsWith("-39"),
+    );
+    await input.press("Enter");
+    await pickerDialog.waitFor({ state: "hidden" });
+    assert.equal(
+      await pickerPage
+        .locator('[data-permission-row="user:picker-person-19"]')
+        .count(),
+      1,
+      "Enter selects the highlighted person",
+    );
+    assert.equal(
+      await pickerPage.locator(".combobox-options:popover-open").count(),
+      0,
+    );
+
+    // The same picker also serves owners and advanced direct recipients.
+    await pickerPage
+      .getByRole("button", { name: "Manage site owners", exact: true })
+      .click();
+    const ownerInput = pickerDialog.getByRole("combobox", {
+      name: "Add site owner",
+      exact: true,
+    });
+    await ownerInput.fill("single");
+    await pickerDialog.getByRole("option").click();
+    assert.match(
+      await pickerDialog.locator(".permission-members").innerText(),
+      /Test person 0/,
+    );
+    assert.equal(
+      await ownerInput.getAttribute("aria-expanded"),
+      "false",
+      "selection in a multi-select picker closes only its dropdown",
+    );
+    await ownerInput.click();
+    await pickerDialog.getByRole("option").nth(39).waitFor();
+    await pickerPage.setViewportSize({ width: 390, height: 400 });
+    await pickerPage.emulateMedia({ colorScheme: "dark" });
+    await ownerInput.scrollIntoViewIfNeeded();
+    await ownerInput.click();
+    await pickerDialog.getByRole("option").nth(39).waitFor();
+    await pickerPage.waitForFunction(() => {
+      const list = document.querySelector('[role="listbox"]');
+      const rect = list.getBoundingClientRect();
+      const input = list
+        .closest(".permission-picker")
+        .querySelector("input")
+        .getBoundingClientRect();
+      return (
+        rect.bottom <= input.top &&
+        rect.top >= 0 &&
+        rect.right <= innerWidth &&
+        rect.bottom <= innerHeight
+      );
+    });
+    const placement = await options.evaluate((list) => {
+      const rect = list.getBoundingClientRect();
+      const input = list
+        .closest(".permission-picker")
+        .querySelector("input")
+        .getBoundingClientRect();
+      return {
+        above: rect.bottom <= input.top,
+        fits:
+          rect.top >= 0 &&
+          rect.right <= innerWidth &&
+          rect.bottom <= innerHeight,
+      };
+    });
+    assert.deepEqual(
+      placement,
+      { above: true, fits: true },
+      "near the bottom of a short viewport the popup opens above the field",
+    );
+    if (process.env.HEX_PORTAL_SCREENSHOTS)
+      await pickerPage.screenshot({
+        path: `${process.env.HEX_PORTAL_SCREENSHOTS}-people-dropdown-mobile-dark.png`,
+      });
+    await pickerPage.close();
+
+    const touchPage = await browser.newPage({
+      viewport: { width: 390, height: 844 },
+      isMobile: true,
+      hasTouch: true,
+    });
+    touchPage.on("pageerror", (error) => errors.push(error.message));
+    await touchPage.route("**/api/hex/directory?*", routeDirectory);
+    await touchPage.goto(`${url}/manage/demo?tab=sharing`);
+    await touchPage
+      .getByRole("button", {
+        name: "+ Add a person or directory group",
+        exact: true,
+      })
+      .tap();
+    const touchDialog = touchPage.locator("[data-permission-dialog]");
+    await touchDialog.getByRole("option").first().tap();
+    await touchDialog.waitFor({ state: "hidden" });
+    assert.match(
+      await touchPage.locator("[data-admission-entries]").innerText(),
+      /Directory group 0/,
+    );
+    await touchPage.close();
+    assert.deepEqual(
+      await policy(),
+      originalPolicy,
+      "searching and picking draft recipients must not save or reset access",
+    );
+  };
+
+  await verifyDirectoryPicker();
+
   await page.goto(`${url}/manage/demo?tab=sharing`);
   await page.locator('#permission-manager[data-ready="true"]').waitFor();
   const initial = await policy();

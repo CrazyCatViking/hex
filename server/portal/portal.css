@@ -711,9 +711,10 @@ main > div > .pagination {
   position: relative;
 }
 .permission-picker .combobox-options {
-  z-index: 8;
+  position: fixed;
+  inset: auto;
+  margin: 0;
   max-height: 300px;
-  overflow-y: auto;
 }
 .permission-edit-form {
   display: grid;
@@ -2012,6 +2013,9 @@ textarea:focus {
   list-style: none;
   max-height: min(360px, 60vh);
   overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  color: var(--text);
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -2039,6 +2043,11 @@ textarea:focus {
 .combobox-option .option-main {
   display: grid;
   min-width: 0;
+}
+.combobox-option .option-main strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .combobox-option .option-main span {
   font-size: 13px;

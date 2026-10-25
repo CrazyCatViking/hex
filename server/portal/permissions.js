@@ -161,13 +161,102 @@
     let active = -1;
     let request = 0;
     let timer;
-    const status = element("p", "", "field-hint");
+    const status = element("p", "", "visually-hidden");
     status.setAttribute("role", "status");
     wrapper.append(status);
+    const position = () => {
+      if (list.hidden) return;
+      const anchor = control.getBoundingClientRect();
+      const viewport = window.visualViewport;
+      const left = viewport?.offsetLeft || 0;
+      const top = viewport?.offsetTop || 0;
+      const width = viewport?.width || document.documentElement.clientWidth;
+      const height = viewport?.height || innerHeight;
+      const gap = 6;
+      const edge = 8;
+      const modal = wrapper.closest("dialog")?.getBoundingClientRect();
+      const visibleTop = Math.max(top, modal?.top ?? top);
+      const visibleBottom = Math.min(
+        top + height,
+        modal?.bottom ?? top + height,
+      );
+      if (
+        !control.isConnected ||
+        anchor.bottom <= visibleTop ||
+        anchor.top >= visibleBottom
+      ) {
+        close();
+        return;
+      }
+      const below = Math.max(0, top + height - anchor.bottom - gap - edge);
+      const above = Math.max(0, anchor.top - top - gap - edge);
+      const openAbove =
+        below < Math.min(300, list.scrollHeight) && above > below;
+      const popupWidth = Math.min(anchor.width, Math.max(0, width - edge * 2));
+      const popupLeft = Math.max(
+        left + edge,
+        Math.min(anchor.left, left + width - popupWidth - edge),
+      );
+      list.style.width = `${popupWidth}px`;
+      list.style.left = `${popupLeft}px`;
+      list.style.maxHeight = `${Math.min(300, openAbove ? above : below)}px`;
+      list.style.top = `${openAbove ? anchor.top - gap - list.offsetHeight : anchor.bottom + gap}px`;
+    };
+    const resize = new ResizeObserver(position);
+    const outside = (event) => {
+      if (!wrapper.contains(event.target)) close();
+    };
     const close = () => {
+      clearTimeout(timer);
+      request++;
+      if (list.hidePopover && list.matches(":popover-open")) list.hidePopover();
       list.hidden = true;
+      status.textContent = "";
+      active = -1;
+      list.removeAttribute("aria-busy");
       control.setAttribute("aria-expanded", "false");
       control.removeAttribute("aria-activedescendant");
+      document.removeEventListener("pointerdown", outside, true);
+      document.removeEventListener("scroll", position, true);
+      window.removeEventListener("resize", position);
+      window.visualViewport?.removeEventListener("resize", position);
+      window.visualViewport?.removeEventListener("scroll", position);
+      resize.disconnect();
+    };
+    const open = () => {
+      list.hidden = false;
+      // The top layer avoids clipping inside a scrollable modal. Fixed
+      // positioning also keeps results out of the dialog's layout/scroll area.
+      if (list.showPopover && !list.matches(":popover-open"))
+        list.showPopover();
+      control.setAttribute("aria-expanded", "true");
+      position();
+      if (list.hidden) return;
+      document.addEventListener("pointerdown", outside, true);
+      document.addEventListener("scroll", position, true);
+      window.addEventListener("resize", position);
+      window.visualViewport?.addEventListener("resize", position);
+      window.visualViewport?.addEventListener("scroll", position);
+      resize.observe(control);
+      resize.observe(wrapper.closest("dialog") || wrapper);
+    };
+    list.addEventListener("toggle", (event) => {
+      if (
+        event.newState === "closed" &&
+        !list.hidden &&
+        !list.matches(":popover-open")
+      )
+        close();
+    });
+    const message = (text) => {
+      items = [];
+      active = -1;
+      control.removeAttribute("aria-activedescendant");
+      const notice = element("li", text, "combobox-empty");
+      notice.setAttribute("role", "presentation");
+      list.replaceChildren(notice);
+      status.textContent = text;
+      open();
     };
     const highlight = (index) => {
       active = index;
@@ -176,21 +265,29 @@
       );
       if (items[index]) {
         control.setAttribute("aria-activedescendant", items[index].node.id);
-        items[index].node.scrollIntoView({ block: "nearest" });
+        const option = items[index].node;
+        if (option.offsetTop < list.scrollTop)
+          list.scrollTop = option.offsetTop;
+        else if (
+          option.offsetTop + option.offsetHeight >
+          list.scrollTop + list.clientHeight
+        )
+          list.scrollTop =
+            option.offsetTop + option.offsetHeight - list.clientHeight;
       }
     };
     const pick = (index) => {
       if (!items[index]) return;
-      clearTimeout(timer);
-      request++;
-      choose(items[index].entry);
+      const entry = items[index].entry;
       close();
       control.value = "";
-      control.focus();
+      choose(entry);
     };
-    const search = async () => {
+    const search = async (last = false) => {
+      if (!control.isConnected || document.activeElement !== control) return;
       const current = ++request;
-      status.textContent = "";
+      message("Searching people and groups…");
+      list.setAttribute("aria-busy", "true");
       try {
         const response = await fetch(
           `/api/hex/directory?limit=20&query=${encodeURIComponent(control.value.trim())}`,
@@ -225,6 +322,7 @@
         for (const entry of entries) {
           const option = element("li", undefined, "combobox-option");
           option.id = `${id}-${items.length}`;
+          option.title = `${entry.name}\n${entry.detail}`;
           option.setAttribute("role", "option");
           const main = element("span", undefined, "option-main");
           main.append(
@@ -235,40 +333,42 @@
           const index = items.length;
           option.addEventListener("mousedown", (event) => {
             event.preventDefault();
-            pick(index);
           });
+          option.addEventListener("click", () => pick(index));
           items.push({ node: option, entry });
           list.append(option);
         }
-        if (!items.length)
-          list.append(
-            element(
-              "li",
-              "No match. Ask the person to sign in first, or choose a known directory group.",
-              "combobox-empty",
-            ),
+        list.removeAttribute("aria-busy");
+        if (!items.length) {
+          message(
+            "No match. Ask the person to sign in first, or choose a known directory group.",
           );
-        list.hidden = false;
-        control.setAttribute("aria-expanded", "true");
-        highlight(items.length ? 0 : -1);
+          return;
+        }
+        status.textContent = `${items.length} results. Use the arrow keys to choose and Enter to add.`;
+        open();
+        highlight(last ? items.length - 1 : 0);
       } catch (error) {
-        if (current === request) status.textContent = error.message;
+        if (current !== request || document.activeElement !== control) return;
+        list.removeAttribute("aria-busy");
+        message(error.message);
       }
     };
     control.addEventListener("input", () => {
-      clearTimeout(timer);
-      request++;
       items = [];
       list.replaceChildren();
       close();
-      timer = setTimeout(search, 150);
+      timer = setTimeout(() => search(), 150);
     });
-    control.addEventListener("focus", search);
-    control.addEventListener("blur", () => setTimeout(close, 100));
+    control.addEventListener("focus", () => search());
+    control.addEventListener("click", () => {
+      if (list.hidden) search();
+    });
+    control.addEventListener("blur", close);
     control.addEventListener("keydown", (event) => {
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault();
-        if (list.hidden) search();
+        if (list.hidden) search(event.key === "ArrowUp");
         else
           highlight(
             Math.max(
@@ -282,7 +382,11 @@
       } else if (event.key === "Enter") {
         event.preventDefault();
         if (!list.hidden) pick(active);
-      } else if (event.key === "Escape") {
+      } else if (event.key === "Escape" && !list.hidden) {
+        event.preventDefault();
+        event.stopPropagation();
+        close();
+      } else if (event.key === "Tab") {
         close();
       }
     });
@@ -297,6 +401,7 @@
     control.setAttribute("aria-autocomplete", "list");
     control.setAttribute("aria-expanded", "false");
     const list = element("ul", undefined, "combobox-options");
+    list.setAttribute("popover", "manual");
     list.setAttribute("role", "listbox");
     list.setAttribute("aria-label", "People and groups");
     list.hidden = true;
