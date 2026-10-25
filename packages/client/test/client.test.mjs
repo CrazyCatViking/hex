@@ -131,9 +131,15 @@ test("record permission checks are site-scoped advisory requests", async () => {
     id: "one",
     data: { amount: 20 },
   };
+  const calls = [];
   const hex = createHexClient({
     site: "demo",
     fetch: async (url, init) => {
+      calls.push(url);
+      if (url === "/api/hex/capabilities") {
+        assert.equal(init.headers.get("X-Hex-Request"), "1");
+        return new Response('{"permissionVersion":2}');
+      }
       assert.equal(url, "/api/sites/demo/permissions/check");
       assert.equal(init.method, "POST");
       assert.equal(init.headers.get("X-Hex-Request"), "1");
@@ -142,6 +148,118 @@ test("record permission checks are site-scoped advisory requests", async () => {
     },
   });
   assert.deepEqual(await hex.can(input), { allowed: true, version: 2 });
+  assert.deepEqual(calls, [
+    "/api/hex/capabilities",
+    "/api/sites/demo/permissions/check",
+  ]);
+});
+
+const permissionUpgradeMessage =
+  "hex.can() requires version 2 permission support. Ask the platform operator to upgrade the Hex server/workspace runtime. Updating the CLI or browser SDK alone will not fix this. No permission check was sent.";
+
+test("record checks explain server upgrades without calling unsupported endpoints", async (t) => {
+  for (const { name, body, status } of [
+    { name: "missing version", body: "{}", status: 200 },
+    { name: "old version", body: '{"permissionVersion":1}', status: 200 },
+    { name: "invalid version", body: '{"permissionVersion":"2"}', status: 200 },
+    {
+      name: "missing capabilities endpoint",
+      body: '{"error":"not found"}',
+      status: 404,
+    },
+  ]) {
+    await t.test(name, async () => {
+      let requests = 0;
+      const hex = createHexClient({
+        site: "demo",
+        fetch: async (url, init) => {
+          requests++;
+          assert.equal(url, "/api/hex/capabilities");
+          assert.equal(init.method, undefined);
+          return new Response(body, { status });
+        },
+      });
+      await assert.rejects(
+        hex.can({ collection: "expenses", operation: "read", id: "one" }),
+        (error) =>
+          error instanceof HexError &&
+          error.status === 501 &&
+          error.message === permissionUpgradeMessage,
+      );
+      assert.equal(requests, 1);
+    });
+  }
+});
+
+test("record checks preserve real HTTP failures instead of recommending upgrades", async (t) => {
+  for (const stage of ["capabilities", "check"]) {
+    for (const status of [401, 403, 404, 500]) {
+      if (stage === "capabilities" && status === 404) continue;
+      await t.test(`${stage} ${status}`, async () => {
+        const calls = [];
+        const hex = createHexClient({
+          site: "demo",
+          fetch: async (url) => {
+            calls.push(url);
+            if (stage === "check" && url === "/api/hex/capabilities") {
+              return new Response('{"permissionVersion":2}');
+            }
+            return new Response('{"error":"original failure"}', { status });
+          },
+        });
+        await assert.rejects(
+          hex.can({ collection: "expenses", operation: "read", id: "one" }),
+          (error) =>
+            error instanceof HexError &&
+            error.status === status &&
+            error.message === "original failure",
+        );
+        assert.deepEqual(
+          calls,
+          stage === "check"
+            ? ["/api/hex/capabilities", "/api/sites/demo/permissions/check"]
+            : ["/api/hex/capabilities"],
+        );
+      });
+    }
+  }
+});
+
+test("record checks preserve network failures", async () => {
+  const failure = new TypeError("network unavailable");
+  const hex = createHexClient({
+    site: "demo",
+    fetch: async () => {
+      throw failure;
+    },
+  });
+  await assert.rejects(
+    hex.can({ collection: "expenses", operation: "read" }),
+    (error) => error === failure,
+  );
+});
+
+test("record checks use live capabilities across upgrades and downgrades", async () => {
+  let version = 1;
+  let checks = 0;
+  const hex = createHexClient({
+    site: "demo",
+    fetch: async (url) => {
+      if (url === "/api/hex/capabilities") {
+        return new Response(JSON.stringify({ permissionVersion: version }));
+      }
+      assert.equal(url, "/api/sites/demo/permissions/check");
+      checks++;
+      return new Response('{"allowed":false,"version":2}');
+    },
+  });
+  const input = { collection: "expenses", operation: "delete", id: "one" };
+  await assert.rejects(hex.can(input), { message: permissionUpgradeMessage });
+  version = 2;
+  assert.deepEqual(await hex.can(input), { allowed: false, version: 2 });
+  version = 1;
+  await assert.rejects(hex.can(input), { message: permissionUpgradeMessage });
+  assert.equal(checks, 1);
 });
 
 function sseResponse(chunks, { signal } = {}) {

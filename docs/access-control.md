@@ -176,6 +176,13 @@ PostgreSQL stores v2 policies in a fail-closed envelope: older binaries reject i
 
 The CLI also checks live `capabilities.permissionVersion` before sending a version 2 policy. Upgrade the server first: an older server might otherwise ignore new fields and interpret absent legacy lists as open access.
 
+### Version mismatch guidance
+
+- **Legacy publication configuration:** the CLI and server reject it with instructions to upgrade an outdated CLI using `hex update` (or rerun the platform installer), then retrieve the migrated policy with `hex access show <site>` and update `hex.json`. A CLI upgrade alone does not migrate local configuration.
+- **New CLI, old server:** policy writes are blocked before sending the policy. The error directs the platform operator to upgrade the Hex server/workspace runtime; updating the CLI alone is not sufficient. Missing permission-version support or a missing capabilities endpoint is unsupported, not permission to fall back to legacy writes.
+- **New browser SDK, old server:** `hex.can()` checks live permission capabilities before every call and throws `HexError` status 501 with server/runtime upgrade instructions when v2 is unsupported. The record-check request is not sent. Other failures, including 401, 403 and server outages, retain their original errors rather than suggesting an upgrade.
+- **Old browser SDK, new server:** existing operations remain server-authorized, but older UI code may not understand application roles or `conditional` summaries. Old SDKs have no automatic version warning. Update `@crazycatviking/hex` in the app, commit its lockfile, rebuild, and republish to adopt the new APIs. Updating the CLI does not update an app's bundled SDK.
+
 ## Managing policies and inspecting access
 
 ```sh

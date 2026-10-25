@@ -215,8 +215,13 @@ func (a *App) accessRequest(ctx context.Context, options *accessOptions, site, m
 // Old servers ignore unknown policy fields and could interpret version 2 as
 // empty legacy lists. Never send a new policy without live version support.
 func (a *App) requirePermissionVersion(ctx context.Context, project Project) error {
+	const upgradeMessage = "this platform does not support version 2 permission policies; ask the platform operator to upgrade the Hex server/workspace runtime before publishing or changing access. Updating the CLI alone will not fix this. No policy was sent. Sending the policy to an older server could open the site"
 	data, err := a.apiRequest(ctx, project, "/api/hex/capabilities")
 	if err != nil {
+		var status *apiStatusError
+		if errors.As(err, &status) && status.Status == http.StatusNotFound {
+			return errors.New(upgradeMessage)
+		}
 		return fmt.Errorf("verify platform permission support: %w", err)
 	}
 	var capabilities Capabilities
@@ -224,7 +229,7 @@ func (a *App) requirePermissionVersion(ctx context.Context, project Project) err
 		return fmt.Errorf("read platform permission support: %w", err)
 	}
 	if capabilities.PermissionVersion < 2 {
-		return errors.New("this platform does not support version 2 permission policies; update the server before publishing or changing access. Sending the policy to an older server could open the site")
+		return errors.New(upgradeMessage)
 	}
 	return nil
 }

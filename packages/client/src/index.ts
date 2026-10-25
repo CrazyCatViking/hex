@@ -232,6 +232,26 @@ export function createHexClient(options: ClientOptions) {
     return response.json() as Promise<T>;
   }
 
+  async function requirePermissionVersion(): Promise<void> {
+    const upgradeMessage =
+      "hex.can() requires version 2 permission support. Ask the platform operator to upgrade the Hex server/workspace runtime. Updating the CLI or browser SDK alone will not fix this. No permission check was sent.";
+    let capabilities: Capabilities;
+    try {
+      capabilities = await requestJSON<Capabilities>("/api/hex/capabilities");
+    } catch (error) {
+      if (error instanceof HexError && error.status === 404) {
+        throw new HexError(501, upgradeMessage, { cause: error });
+      }
+      throw error;
+    }
+    if (
+      typeof capabilities.permissionVersion !== "number" ||
+      capabilities.permissionVersion < 2
+    ) {
+      throw new HexError(501, upgradeMessage);
+    }
+  }
+
   function collection<T extends object = Record<string, unknown>>(
     name: string,
   ) {
@@ -276,13 +296,14 @@ export function createHexClient(options: ClientOptions) {
         `/api/hex/sites/${validateName(options.site)}/permissions`,
       );
     },
-    /** Advisory only: mutations always recheck the live policy atomically. */
-    can(input: {
+    /** Requires permissionVersion >= 2. Advisory only: mutations always recheck. */
+    async can(input: {
       collection: string;
       operation: "read" | "create" | "update" | "delete";
       id?: string;
       data?: Record<string, unknown>;
     }) {
+      await requirePermissionVersion();
       return requestJSON<{ allowed: boolean; version: number }>(
         `${root}/permissions/check`,
         jsonBody("POST", input),

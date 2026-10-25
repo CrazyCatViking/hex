@@ -56,7 +56,10 @@ type PermissionGrant struct {
 	Fields     []string         `json:"fields,omitzero"`
 }
 
-const legacyPolicyError = "legacy permission configuration: Hex requires access.version 2 with application roles and explicit operation grants; the deployed site is unchanged. Run 'hex access show <site>', copy the migrated policy into hex.json, review it, and publish again. Changing only the version number is not sufficient"
+const legacyPolicyError = "legacy permission configuration: Hex requires access.version 2 with application roles and explicit operation grants; the deployed site is unchanged. " +
+	"If your CLI is outdated, upgrade it with 'hex update' (or rerun the platform installer). " +
+	"Then run 'hex access show <site>', copy the migrated policy into hex.json, review it, and publish again. " +
+	"Upgrading the CLI alone does not migrate hex.json. Changing only the version number is not sufficient"
 
 // ValidatePublishedAccess is also used by the CLI before making a publication.
 func ValidatePublishedAccess(access SiteAccess) error {

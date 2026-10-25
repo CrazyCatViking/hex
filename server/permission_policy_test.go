@@ -170,8 +170,16 @@ func TestPermissionPolicyRejectsLegacyBeforeClaimOrFiles(t *testing.T) {
 	for _, policy := range []string{`{"viewers":[]}`, `{"version":2,"viewers":[]}`, `{"version":1}`} {
 		body := `{"files":[{"path":"index.html","size":1}],"access":` + policy + `}`
 		response := requestAs(t, server, principalHeaders("owner-id"), "POST", "/api/hex/sites/new-site/publish", []byte(body), 400)
-		if !strings.Contains(response.Body.String(), "legacy permission configuration") || !strings.Contains(response.Body.String(), "hex access show") {
-			t.Fatal(response.Body.String())
+		var failure struct {
+			Error string `json:"error"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &failure); err != nil {
+			t.Fatal(err)
+		}
+		for _, guidance := range []string{"legacy permission configuration", "the deployed site is unchanged", "upgrade it with 'hex update'", "rerun the platform installer", "hex access show <site>", "copy the migrated policy into hex.json", "Upgrading the CLI alone does not migrate hex.json", "Changing only the version number is not sufficient"} {
+			if !strings.Contains(failure.Error, guidance) {
+				t.Fatalf("legacy rejection missing %q: %s", guidance, failure.Error)
+			}
 		}
 		if _, err := policies.GetSiteAccess(context.Background(), "new-site"); err == nil {
 			t.Fatal("legacy publication claimed a name")

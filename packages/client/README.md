@@ -40,6 +40,14 @@ if (check.allowed) { /* enable the UI operation */ }
 
 Checks are advisory, not authorization tokens. The platform enforces conditions against actual records and proposed mutations under the storage lock. See [policy configuration, migration and publishing reconciliation](../../docs/access-control.md). `PermissionPolicy`, `PermissionSubjects` and `RecordCondition` are exported TypeScript types.
 
+### Version compatibility and upgrades
+
+`hex.can()` checks live `capabilities.permissionVersion` before each call. If the server advertises less than 2, omits the field, or has no capabilities endpoint (404), it throws `HexError` with status 501 and instructions to ask the platform operator to upgrade the Hex server/workspace runtime. No permission-check request is sent. Authentication failures, permission denials, and server outages retain their original errors; they are not treated as version mismatches.
+
+Existing database, file, and realtime methods do not require this capability check. Apps supporting older servers can check `(await hex.capabilities()).permissionVersion` before offering v2-only features. Older permission responses may omit `version`, `roles`, and per-operation fields; do not assume those fields exist on an older server. Old SDKs cannot automatically warn about new permission semantics such as `conditional` grants.
+
+To adopt these APIs, update the app's dependency (for example, `npm install @crazycatviking/hex@latest`), commit its lockfile, rebuild the app, and republish. Running `hex update` updates the CLI, not the browser SDK bundled into an already deployed app. Updating either client does not upgrade the server/runtime or migrate a legacy `hex.json` policy.
+
 ## Integrations
 
 When the platform has integrations, apps call their typed endpoints through the server. Credentials never reach the browser, and every call is checked against the viewer's permissions and, for some integrations, an admin's approval of the site.
