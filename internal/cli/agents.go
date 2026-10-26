@@ -8,6 +8,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
@@ -16,6 +18,17 @@ import (
 
 const instructionStart = "<!-- hex:managed:start -->"
 const instructionEnd = "<!-- hex:managed:end -->"
+
+// Harnesses configured by --target auto. The first group is always set up,
+// because people often install Hex before the harness. The desktop
+// applications are set up only when their configuration directory exists on
+// this machine, so an installation never seeds configuration for software the
+// person does not use.
+var (
+	alwaysInstalledHarnesses = []string{"claude-code", "codex", "opencode"}
+	detectedHarnesses        = []string{"claude-desktop", "cursor", "vscode", "windsurf", "gemini"}
+	userOnlyHarnesses        = map[string]bool{"claude-desktop": true, "windsurf": true}
+)
 
 func hexDefaults() string {
 	data, err := assets.ReadFile("assets/DEFAULTS.md")
@@ -74,15 +87,37 @@ func installProjectInstructions(directory string) error {
 	return nil
 }
 
+// agentInstallation describes one harness integration. Skill and
+// Instructions are empty for harnesses without file-based guidance; their
+// Current flags are then true because nothing can be stale.
 type agentInstallation struct {
 	Target       string `json:"target"`
-	Skill        string `json:"skill"`
-	Instructions string `json:"instructions"`
+	Skill        string `json:"skill,omitempty"`
+	Instructions string `json:"instructions,omitempty"`
 	MCP          string `json:"mcp"`
 	SkillCurrent bool   `json:"skillCurrent"`
 	RulesCurrent bool   `json:"rulesCurrent"`
 	MCPCurrent   bool   `json:"mcpCurrent"`
 	MCPError     string `json:"mcpError,omitempty"`
+}
+
+// desktopConfigDirectory is where desktop applications such as Claude Desktop
+// and VS Code keep per-user configuration on each operating system.
+func desktopConfigDirectory(goos, home, application string) string {
+	switch goos {
+	case "darwin":
+		return filepath.Join(home, "Library", "Application Support", application)
+	case "windows":
+		if appData := os.Getenv("APPDATA"); appData != "" {
+			return filepath.Join(appData, application)
+		}
+		return filepath.Join(home, "AppData", "Roaming", application)
+	default:
+		if configHome := os.Getenv("XDG_CONFIG_HOME"); configHome != "" {
+			return filepath.Join(configHome, application)
+		}
+		return filepath.Join(home, ".config", application)
+	}
 }
 
 func agentPaths(target, home, project string) (agentInstallation, error) {
@@ -120,22 +155,96 @@ func agentPaths(target, home, project string) (agentInstallation, error) {
 		}
 	case "opencode":
 		return openCodePaths(home, project)
-	case "cursor", "vscode":
-		if project == "" {
-			return result, fmt.Errorf("%s setup requires --project; its Hex default is scoped to that project", target)
+	case "claude-desktop":
+		if project != "" {
+			return result, errors.New("claude-desktop setup is per user: Claude Desktop has no project configuration, so omit --project")
 		}
-		result.Skill = filepath.Join(base, ".agents", "skills", "hex", "SKILL.md")
-		if target == "cursor" {
-			result.Instructions = filepath.Join(base, ".cursor", "rules", "hex.mdc")
-			result.MCP = filepath.Join(base, ".cursor", "mcp.json")
-		} else {
-			result.Instructions = filepath.Join(base, ".github", "copilot-instructions.md")
-			result.MCP = filepath.Join(base, ".vscode", "mcp.json")
+		// Claude Desktop has no skill or instruction files. The MCP tool
+		// descriptions and hex_get_docs carry the guidance instead.
+		result.MCP = filepath.Join(desktopConfigDirectory(runtime.GOOS, home, "Claude"), "claude_desktop_config.json")
+	case "cursor":
+		if project != "" {
+			result.Skill = filepath.Join(project, ".agents", "skills", "hex", "SKILL.md")
+			result.Instructions = filepath.Join(project, ".cursor", "rules", "hex.mdc")
+			result.MCP = filepath.Join(project, ".cursor", "mcp.json")
+			break
 		}
+		// Cursor keeps user rules in its settings rather than a file, so the
+		// user-level default relies on the skill's description to trigger.
+		cursor := filepath.Join(home, ".cursor")
+		result.Skill = filepath.Join(cursor, "skills", "hex", "SKILL.md")
+		result.MCP = filepath.Join(cursor, "mcp.json")
+	case "vscode":
+		if project != "" {
+			result.Skill = filepath.Join(project, ".agents", "skills", "hex", "SKILL.md")
+			result.Instructions = filepath.Join(project, ".github", "copilot-instructions.md")
+			result.MCP = filepath.Join(project, ".vscode", "mcp.json")
+			break
+		}
+		user := filepath.Join(desktopConfigDirectory(runtime.GOOS, home, "Code"), "User")
+		result.Skill = filepath.Join(home, ".copilot", "skills", "hex", "SKILL.md")
+		result.Instructions = filepath.Join(user, "prompts", "hex.instructions.md")
+		result.MCP = filepath.Join(user, "mcp.json")
+	case "windsurf":
+		if project != "" {
+			return result, errors.New("windsurf setup is per user: Windsurf reads MCP servers from its user configuration only, so omit --project")
+		}
+		windsurf := filepath.Join(home, ".codeium", "windsurf")
+		result.Skill = filepath.Join(windsurf, "skills", "hex", "SKILL.md")
+		result.Instructions = filepath.Join(windsurf, "memories", "global_rules.md")
+		result.MCP = filepath.Join(windsurf, "mcp_config.json")
+	case "gemini":
+		gemini := filepath.Join(home, ".gemini")
+		result.Instructions = filepath.Join(gemini, "GEMINI.md")
+		if project != "" {
+			gemini = filepath.Join(project, ".gemini")
+			result.Instructions = filepath.Join(project, "GEMINI.md")
+		}
+		result.Skill = filepath.Join(gemini, "skills", "hex", "SKILL.md")
+		result.MCP = filepath.Join(gemini, "settings.json")
 	default:
-		return result, fmt.Errorf("unknown harness %q; use claude-code, codex, opencode, cursor or vscode", target)
+		known := strings.Join(slices.Concat(alwaysInstalledHarnesses, detectedHarnesses), ", ")
+		return result, fmt.Errorf("unknown harness %q; use auto or one of %s", target, known)
 	}
 	return result, nil
+}
+
+// harnessInstalled reports whether a harness's user configuration directory
+// exists, which is the evidence --target auto needs before configuring it.
+func harnessInstalled(target, home string) (bool, error) {
+	paths, err := agentPaths(target, home, "")
+	if err != nil {
+		return false, err
+	}
+	info, err := os.Stat(filepath.Dir(paths.MCP))
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return info.IsDir(), nil
+}
+
+// autoTargets lists the harnesses --target auto configures in this scope,
+// and the detected-only harnesses it skipped because they are not installed.
+func autoTargets(home, project string) (targets, skipped []string, err error) {
+	targets = slices.Clone(alwaysInstalledHarnesses)
+	for _, name := range detectedHarnesses {
+		if project != "" && userOnlyHarnesses[name] {
+			continue
+		}
+		installed, err := harnessInstalled(name, home)
+		if err != nil {
+			return nil, nil, err
+		}
+		if installed {
+			targets = append(targets, name)
+		} else {
+			skipped = append(skipped, name)
+		}
+	}
+	return targets, skipped, nil
 }
 
 func agentMCPConfig(installation agentInstallation, executable string, original []byte) ([]byte, error) {
@@ -222,32 +331,54 @@ func configureAgent(paths agentInstallation, executable string, skill []byte, in
 			configuration = updated
 		}
 	}
-	installedSkill, err := readOptionalFile(paths.Skill)
-	if err != nil {
-		return paths, err
+	paths.SkillCurrent = true
+	if paths.Skill != "" {
+		installedSkill, err := readOptionalFile(paths.Skill)
+		if err != nil {
+			return paths, err
+		}
+		paths.SkillCurrent = bytes.Equal(installedSkill, skill)
 	}
-	instructions, err := readOptionalFile(paths.Instructions)
-	if err != nil {
-		return paths, err
+	paths.RulesCurrent = true
+	if paths.Instructions != "" {
+		instructions, err := readOptionalFile(paths.Instructions)
+		if err != nil {
+			return paths, err
+		}
+		paths.RulesCurrent = strings.Contains(string(instructions), strings.TrimSpace(hexDefaults()))
 	}
-	paths.SkillCurrent = bytes.Equal(installedSkill, skill)
-	paths.RulesCurrent = strings.Contains(string(instructions), strings.TrimSpace(hexDefaults()))
 	paths.MCPCurrent = configError == nil && bytes.Equal(configuration, updated)
 	return paths, nil
 }
 
-func installAgentGuidance(paths agentInstallation, skill []byte) error {
-	if err := atomicWrite(paths.Skill, skill, 0644); err != nil {
-		return err
+// instructionHeader is the frontmatter some harnesses require at the very
+// beginning of a rule file before the rule applies everywhere.
+func instructionHeader(path string) string {
+	switch {
+	case strings.HasSuffix(path, ".mdc"):
+		return "---\nalwaysApply: true\n---\n"
+	case strings.HasSuffix(path, ".instructions.md"):
+		return "---\napplyTo: \"**\"\n---\n"
 	}
-	if paths.Target == "cursor" {
-		// Cursor frontmatter must be at the beginning of its rule file.
+	return ""
+}
+
+func installAgentGuidance(paths agentInstallation, skill []byte) error {
+	if paths.Skill != "" {
+		if err := atomicWrite(paths.Skill, skill, 0644); err != nil {
+			return err
+		}
+	}
+	if paths.Instructions == "" {
+		return nil
+	}
+	if header := instructionHeader(paths.Instructions); header != "" {
 		existing, err := readOptionalFile(paths.Instructions)
 		if err != nil {
 			return err
 		}
 		if len(existing) == 0 {
-			if err := atomicWrite(paths.Instructions, []byte("---\nalwaysApply: true\n---\n"), 0644); err != nil {
+			if err := atomicWrite(paths.Instructions, []byte(header), 0644); err != nil {
 				return err
 			}
 		}
@@ -255,8 +386,28 @@ func installAgentGuidance(paths agentInstallation, skill []byte) error {
 	return installInstructions(paths.Instructions, hexDefaults())
 }
 
+// agentManaged reports whether Hex guidance was installed for this harness
+// before, which is what refresh updates without adding MCP registrations.
+func agentManaged(paths agentInstallation) (bool, error) {
+	if paths.Instructions != "" {
+		instructions, err := readOptionalFile(paths.Instructions)
+		if err != nil {
+			return false, err
+		}
+		return strings.Contains(string(instructions), instructionStart), nil
+	}
+	if paths.Skill == "" {
+		return false, nil
+	}
+	_, err := os.Stat(paths.Skill)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 func (a *App) agentsCommand() *cobra.Command {
-	root := &cobra.Command{Use: "agents", Short: "Install and diagnose Hex integrations for coding harnesses"}
+	root := &cobra.Command{Use: "agents", Short: "Install and diagnose Hex integrations for coding harnesses and desktop assistants"}
 	for _, operation := range []string{"install", "status", "refresh"} {
 		var target string
 		var projectScope, useMCP bool
@@ -276,8 +427,12 @@ func (a *App) agentsCommand() *cobra.Command {
 					project = a.Dir
 				}
 				targets := []string{target}
+				var skipped []string
 				if target == "auto" {
-					targets = []string{"claude-code", "codex", "opencode"}
+					targets, skipped, err = autoTargets(home, project)
+					if err != nil {
+						return err
+					}
 				}
 				skill, err := assets.ReadFile("assets/SKILL.md")
 				if err != nil {
@@ -290,11 +445,11 @@ func (a *App) agentsCommand() *cobra.Command {
 						return err
 					}
 					if operation == "refresh" {
-						instructions, err := readOptionalFile(paths.Instructions)
+						managed, err := agentManaged(paths)
 						if err != nil {
 							return err
 						}
-						if !strings.Contains(string(instructions), instructionStart) {
+						if !managed {
 							continue
 						}
 					}
@@ -306,12 +461,13 @@ func (a *App) agentsCommand() *cobra.Command {
 				}
 				return a.printJSON(struct {
 					Integrations []agentInstallation `json:"integrations"`
+					Skipped      []string            `json:"skipped,omitempty"`
 					Next         string              `json:"next"`
-				}{results, "Start a new harness session. Ask the assistant to sign into Hex when needed; complete company sign-in in your browser. The harness must provide file editing, build tools and a filesystem shared with Hex."})
+				}{results, skipped, "Start a new harness session; restart desktop applications so they load the MCP server. Ask the assistant to sign into Hex when needed; complete company sign-in in your browser. The harness must provide file editing, build tools and a filesystem shared with Hex. Skipped harnesses are not installed on this machine; configure one anyway with --target."})
 			},
 		}
-		command.Flags().StringVar(&target, "target", "auto", "Harness: auto (Claude Code, Codex and OpenCode), claude-code, codex, opencode, cursor or vscode")
-		command.Flags().BoolVar(&projectScope, "project", false, "Install in this project instead of user configuration (required for Cursor and VS Code)")
+		command.Flags().StringVar(&target, "target", "auto", "Harness: auto (Claude Code, Codex and OpenCode, plus Claude Desktop, Cursor, VS Code, Windsurf and Gemini CLI when installed), claude-code, codex, opencode, claude-desktop, cursor, vscode, windsurf or gemini")
+		command.Flags().BoolVar(&projectScope, "project", false, "Install in this project instead of user configuration (Claude Desktop and Windsurf are user-level only)")
 		command.Flags().BoolVar(&useMCP, "mcp", true, "Register local MCP as well as skills and default instructions")
 		root.AddCommand(command)
 	}

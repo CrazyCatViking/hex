@@ -55,7 +55,7 @@ try {
     }
     $env:Path = "$binDirectory;$env:Path"
     Write-Host "`nHex is installed at $binary and connected to your platform."
-    Write-Host 'Start a new Claude Code, Codex or OpenCode session and ask it to build an app. For other harnesses, run: hex agents --help'
+    Write-Host 'Start a new Claude Code, Codex or OpenCode session, or restart a configured desktop app such as Claude Desktop, Cursor or VS Code, and ask it to build an app. For other harnesses, run: hex agents --help'
 } finally {
     Remove-Item -LiteralPath $temporary -Recurse -Force
 }

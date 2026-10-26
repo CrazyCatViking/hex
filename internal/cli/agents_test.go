@@ -13,6 +13,7 @@ func agentHome(t *testing.T) string {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
 	t.Setenv("CODEX_HOME", "")
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))

@@ -96,4 +96,4 @@ if [[ "${SHELL:-}" == */fish ]]; then
 fi
 
 printf '\nHex is installed at %s/hex and connected to your platform.\n' "$bin_directory"
-printf 'Start a new Claude Code, Codex or OpenCode session and ask it to build an app. For other harnesses, run: hex agents --help\n'
+printf 'Start a new Claude Code, Codex or OpenCode session, or restart a configured desktop app such as Claude Desktop, Cursor or VS Code, and ask it to build an app. For other harnesses, run: hex agents --help\n'
