@@ -945,6 +945,72 @@
       const alsoAdmit = checkbox(
         "Also give this person or directory group site access",
       );
+      const status = element("p", "", "field-hint");
+      status.setAttribute("role", "status");
+      const originalAdmission = new Set(policy.admission.principals || []);
+      const originalRows = new Set(extraRows);
+      const selected = new Set(forAdmission ? originalAdmission : []);
+      const members = element("ul", undefined, "permission-members");
+      members.setAttribute("aria-label", "Selected people and groups");
+      const empty = element(
+        "p",
+        "No people or groups selected yet.",
+        "field-hint",
+      );
+      const focusSearch = () => {
+        target.querySelector("input[type=search]").focus({
+          preventScroll: true,
+        });
+      };
+      const renderSelected = () => {
+        members.replaceChildren();
+        empty.hidden = selected.size > 0;
+        for (const principal of selected) {
+          const row = element("li");
+          const description = element("div");
+          description.append(element("strong", nameOf(principal)));
+          const detail = labels.get(principal)?.detail;
+          if (detail) description.append(element("span", detail, "muted"));
+          const remove = button(
+            "Remove",
+            () => {
+              const index = [...selected].indexOf(principal);
+              selected.delete(principal);
+              if (
+                (forAdmission || !originalAdmission.has(principal)) &&
+                policy.admission.principals?.includes(principal)
+              ) {
+                stage("admission", {
+                  general: generalMode(policy),
+                  principal: policy.admission.principals.filter(
+                    (value) => value !== principal,
+                  ),
+                });
+              }
+              if (!forAdmission && !originalRows.has(principal)) {
+                extraRows.delete(principal);
+              }
+              dialogDirty = false;
+              render();
+              renderSelected();
+              status.textContent = `${nameOf(principal)} removed from the selection. Save changes to apply.`;
+              announce(status.textContent);
+              const nextRow =
+                members.children[Math.min(index, members.children.length - 1)];
+              (nextRow?.querySelector("button") || done).focus({
+                preventScroll: true,
+              });
+            },
+            "link-button",
+          );
+          remove.setAttribute(
+            "aria-label",
+            `Remove ${nameOf(principal)} from selection`,
+          );
+          row.append(description, remove);
+          members.append(row);
+        }
+      };
       target.append(
         element(
           "p",
@@ -970,13 +1036,15 @@
             });
           }
           if (!forAdmission) extraRows.add(entry.principal);
-          finishDialog();
+          selected.add(entry.principal);
+          dialogDirty = false;
           render();
-          announce(
-            forAdmission
-              ? "Site entry added to the draft. Save changes to apply."
-              : "Row added. Tick the permission groups they should receive, then save changes.",
-          );
+          renderSelected();
+          status.textContent = forAdmission
+            ? `${entry.name} added to site access in the draft. Add more or choose Done, then save changes to apply.`
+            : `${entry.name} added to the table. Add more or choose Done, then tick their permission groups and save changes.`;
+          announce(status.textContent);
+          focusSearch();
         }),
       );
       if (!forAdmission) target.append(alsoAdmit.wrapper);
@@ -987,6 +1055,21 @@
           "field-hint",
         ),
       );
+      target.append(
+        element(
+          "h3",
+          forAdmission
+            ? "Selected people and groups"
+            : "Selected in this dialog",
+        ),
+        members,
+        empty,
+      );
+      renderSelected();
+      const actions = element("div", undefined, "form-actions");
+      const done = button("Done", finishDialog, "button");
+      actions.append(done);
+      target.append(status, actions);
       target.querySelector("input[type=search]").focus();
     }
 

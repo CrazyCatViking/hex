@@ -138,6 +138,8 @@ try {
     await dialog.getByRole("option").filter({ hasText: expected }).waitFor();
     await picker.press("ArrowDown");
     await picker.press("Enter");
+    assert.equal(await dialog.isVisible(), true);
+    await dialog.getByRole("button", { name: "Done", exact: true }).click();
     await dialog.waitFor({ state: "hidden" });
   };
 
@@ -174,7 +176,12 @@ try {
             ? { people: [], groups: [] }
             : query === "single"
               ? { people: people.slice(0, 1), groups: [] }
-              : { people, groups },
+              : query === "existing"
+                ? {
+                    people: [{ id: "alex", name: "Alex Andersen" }],
+                    groups: [],
+                  }
+                : { people, groups },
       });
     };
     await pickerPage.route("**/api/hex/directory?*", routeDirectory);
@@ -309,7 +316,16 @@ try {
         ?.endsWith("-39"),
     );
     await input.press("Enter");
-    await pickerDialog.waitFor({ state: "hidden" });
+    assert.equal(
+      await pickerDialog.isVisible(),
+      true,
+      "adding a custom permission row keeps the dialog open",
+    );
+    assert.equal(await input.inputValue(), "");
+    assert.equal(
+      await input.evaluate((input) => input === document.activeElement),
+      true,
+    );
     assert.equal(
       await pickerPage
         .locator('[data-permission-row="user:picker-person-19"]')
@@ -321,6 +337,90 @@ try {
       await pickerPage.locator(".combobox-options:popover-open").count(),
       0,
     );
+    await input.fill("single");
+    await pickerDialog.getByRole("option").click();
+    assert.equal(await pickerDialog.isVisible(), true);
+    assert.equal(
+      await pickerPage
+        .locator('[data-permission-row="user:picker-person-0"]')
+        .count(),
+      1,
+      "a second person can be added without reopening the dialog",
+    );
+    await input.fill("single");
+    await pickerDialog.getByRole("option").click();
+    assert.equal(
+      await pickerPage
+        .locator('[data-permission-row="user:picker-person-0"]')
+        .count(),
+      1,
+      "selecting the same person twice must not duplicate their row",
+    );
+    const selected = pickerDialog.getByRole("list", {
+      name: "Selected people and groups",
+      exact: true,
+    });
+    assert.equal(await selected.getByRole("listitem").count(), 2);
+    assert.match(await selected.innerText(), /Test person 19/);
+    assert.match(await selected.innerText(), /Test person 0/);
+    const removePerson = pickerDialog.getByRole("button", {
+      name: "Remove Test person 0 from selection",
+      exact: true,
+    });
+    await removePerson.focus();
+    await removePerson.press("Enter");
+    assert.equal(await pickerDialog.isVisible(), true);
+    assert.equal(await selected.getByRole("listitem").count(), 1);
+    assert.equal(
+      await pickerPage
+        .locator('[data-permission-row="user:picker-person-0"]')
+        .count(),
+      0,
+      "removing a selection also removes its newly added permission row",
+    );
+    assert.equal(
+      await selected
+        .getByRole("button")
+        .evaluate((button) => button === document.activeElement),
+      true,
+      "removing a selection keeps keyboard focus in the selected list",
+    );
+    await pickerDialog
+      .getByLabel("Also give this person or directory group site access")
+      .check();
+    await input.fill("single");
+    await pickerDialog.getByRole("option").click();
+    assert.match(
+      await pickerPage.locator("[data-admission-entries]").innerText(),
+      /Test person 0/,
+    );
+    await removePerson.click();
+    assert.doesNotMatch(
+      await pickerPage.locator("[data-admission-entries]").innerText(),
+      /Test person 0/,
+      "removal also undoes site access added with the permission row",
+    );
+    await input.fill("existing");
+    await pickerDialog.getByRole("option").click();
+    await pickerDialog
+      .getByRole("button", {
+        name: "Remove Alex Andersen from selection",
+        exact: true,
+      })
+      .click();
+    assert.equal(
+      await pickerPage.locator('[data-permission-row="user:alex"]').count(),
+      1,
+    );
+    assert.match(
+      await pickerPage.locator("[data-admission-entries]").innerText(),
+      /Alex Andersen/,
+      "undoing a custom-row selection preserves pre-existing permissions and site access",
+    );
+    await pickerDialog
+      .getByRole("button", { name: "Done", exact: true })
+      .click();
+    await pickerDialog.waitFor({ state: "hidden" });
 
     // The same picker also serves owners and advanced direct recipients.
     await pickerPage
@@ -402,12 +502,123 @@ try {
       })
       .tap();
     const touchDialog = touchPage.locator("[data-permission-dialog]");
+    const touchSelected = touchDialog.getByRole("list", {
+      name: "Selected people and groups",
+      exact: true,
+    });
+    assert.match(await touchSelected.innerText(), /Alex Andersen/);
     await touchDialog.getByRole("option").first().tap();
-    await touchDialog.waitFor({ state: "hidden" });
+    assert.equal(
+      await touchDialog.isVisible(),
+      true,
+      "adding site access by touch keeps the dialog open",
+    );
     assert.match(
       await touchPage.locator("[data-admission-entries]").innerText(),
       /Directory group 0/,
     );
+    const touchInput = touchDialog.getByRole("combobox");
+    await touchInput.fill("single");
+    await touchDialog.getByRole("option").tap();
+    assert.equal(await touchDialog.isVisible(), true);
+    assert.match(
+      await touchPage.locator("[data-admission-entries]").innerText(),
+      /Test person 0/,
+    );
+    await touchInput.fill("single");
+    await touchDialog.getByRole("option").tap();
+    assert.equal(
+      await touchPage
+        .getByRole("button", {
+          name: "Remove Test person 0 from site access",
+          exact: true,
+        })
+        .count(),
+      1,
+      "selecting the same person twice must not duplicate site access",
+    );
+    assert.equal(await touchSelected.getByRole("listitem").count(), 3);
+    assert.match(await touchSelected.innerText(), /Directory group 0/);
+    assert.match(await touchSelected.innerText(), /Test person 0/);
+    await touchDialog
+      .getByRole("button", {
+        name: "Remove Test person 0 from selection",
+        exact: true,
+      })
+      .tap();
+    assert.equal(await touchDialog.isVisible(), true);
+    assert.equal(await touchSelected.getByRole("listitem").count(), 2);
+    assert.doesNotMatch(
+      await touchPage.locator("[data-admission-entries]").innerText(),
+      /Test person 0/,
+    );
+    await touchInput.fill("single");
+    await touchDialog.getByRole("option").tap();
+    assert.equal(await touchSelected.getByRole("listitem").count(), 3);
+    await touchSelected
+      .getByRole("listitem")
+      .filter({ hasText: groups[0].name })
+      .getByRole("button", {
+        name: `Remove ${groups[0].name} from selection`,
+        exact: true,
+      })
+      .tap();
+    assert.equal(await touchDialog.isVisible(), true);
+    assert.equal(await touchSelected.getByRole("listitem").count(), 2);
+    assert.doesNotMatch(
+      await touchPage.locator("[data-admission-entries]").innerText(),
+      /Directory group 0/,
+      "a directory group can also be removed without closing the dialog",
+    );
+    await touchDialog.getByRole("button", { name: "Done", exact: true }).tap();
+    await touchDialog.waitFor({ state: "hidden" });
+    assert.match(
+      await touchPage.locator("[data-admission-entries]").innerText(),
+      /Test person 0/,
+    );
+    await touchPage
+      .getByRole("button", {
+        name: "+ Add a person or directory group",
+        exact: true,
+      })
+      .tap();
+    assert.equal(await touchSelected.getByRole("listitem").count(), 2);
+    assert.match(await touchSelected.innerText(), /Test person 0/);
+    await touchDialog.getByRole("option").first().waitFor();
+    await touchInput.press("Escape");
+    await touchDialog
+      .getByRole("button", {
+        name: "Remove Alex Andersen from selection",
+        exact: true,
+      })
+      .tap();
+    assert.equal(await touchSelected.getByRole("listitem").count(), 1);
+    assert.doesNotMatch(
+      await touchPage.locator("[data-admission-entries]").innerText(),
+      /Alex Andersen/,
+      "existing site-access selections can be removed inside the dialog too",
+    );
+    await touchDialog
+      .getByRole("button", {
+        name: "Remove Test person 0 from selection",
+        exact: true,
+      })
+      .tap();
+    assert.equal(await touchSelected.getByRole("listitem").count(), 0);
+    assert.equal(
+      await touchDialog
+        .getByText("No people or groups selected yet.", { exact: true })
+        .isVisible(),
+      true,
+    );
+    assert.equal(
+      await touchDialog
+        .getByRole("button", { name: "Done", exact: true })
+        .evaluate((button) => button === document.activeElement),
+      true,
+    );
+    await touchDialog.getByRole("button", { name: "Done", exact: true }).tap();
+    await touchDialog.waitFor({ state: "hidden" });
     await touchPage.close();
     assert.deepEqual(
       await policy(),
