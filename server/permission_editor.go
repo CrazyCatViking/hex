@@ -24,6 +24,8 @@ func permissionEditorChange(base SiteAccess, form url.Values) (SiteAccess, error
 func applyPermissionEditorChange(base SiteAccess, form url.Values) (SiteAccess, error) {
 	local := CloneSiteAccess(base)
 	switch form.Get("editor_action") {
+	case "workspace-sharing":
+		return editWorkspaceSharing(local, form)
 	case "matrix":
 		return editPermissionMatrix(base, form.Get("entry"))
 	case "membership":

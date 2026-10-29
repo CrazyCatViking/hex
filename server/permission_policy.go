@@ -13,6 +13,8 @@ import (
 // Subjects selects callers, not records. Owners is explicit: site management
 // authority alone never bypasses a version 2 application's data permissions.
 type Subjects struct {
+	// Workspace matches only authenticated, server-brokered cross-site calls.
+	Workspace  bool     `json:"workspace,omitempty"`
 	SignedIn   bool     `json:"signedIn,omitempty"`
 	Owners     bool     `json:"owners,omitempty"`
 	Principals []string `json:"principals,omitempty"`
@@ -91,6 +93,9 @@ func validatePermissionPolicy(access SiteAccess) error {
 		if !validCollectionName(name) {
 			return fmt.Errorf("invalid application role %q", name)
 		}
+	}
+	if access.Admission.Workspace {
+		return errors.New("workspace API sharing cannot grant site admission")
 	}
 	if len(access.Admission.Roles) > 0 {
 		return errors.New("admission cannot reference application permission groups; use signedIn, owners, or explicit people/directory principals. For an existing site, run 'hex access show <site>' and copy its migrated admission and page rules into hex.json before publishing")
@@ -219,7 +224,7 @@ func validatePermissionGrant(grant PermissionGrant, roles map[string]Application
 		return errors.New("record conditions, scopes and writable fields are only available for collections and actions")
 	}
 	if grant.Scope != nil {
-		if !validCollectionName(grant.Scope.Kind) || !validConditionField(grant.Scope.Field) || len(grant.Subjects.Roles) == 0 || grant.Subjects.SignedIn || grant.Subjects.Owners || len(grant.Subjects.Principals) > 0 {
+		if !validCollectionName(grant.Scope.Kind) || !validConditionField(grant.Scope.Field) || len(grant.Subjects.Roles) == 0 || grant.Subjects.Workspace || grant.Subjects.SignedIn || grant.Subjects.Owners || len(grant.Subjects.Principals) > 0 {
 			return errors.New("a scoped grant needs only application-role subjects, a scope kind and a record field")
 		}
 	}

@@ -25,7 +25,7 @@ func editPermissionMatrix(base SiteAccess, entry string) (SiteAccess, error) {
 	local := CloneSiteAccess(base)
 	for _, edit := range edits {
 		switch edit.Action {
-		case "role", "grant", "remove-grant", "membership", "owner-membership", "owners", "admission", "remove-principal", "delete-group":
+		case "workspace-sharing", "role", "grant", "remove-grant", "membership", "owner-membership", "owners", "admission", "remove-principal", "delete-group":
 		default:
 			return base, errors.New("unsupported permission-table edit; reload and try again")
 		}
@@ -147,7 +147,7 @@ func deletePermissionGroup(local SiteAccess, role string) (SiteAccess, error) {
 			continue
 		}
 		grant.Subjects.Roles = slices.DeleteFunc(grant.Subjects.Roles, func(value string) bool { return value == role })
-		if !grant.Subjects.SignedIn && !grant.Subjects.Owners && len(grant.Subjects.Roles) == 0 && len(grant.Subjects.Principals) == 0 {
+		if !grant.Subjects.Workspace && !grant.Subjects.SignedIn && !grant.Subjects.Owners && len(grant.Subjects.Roles) == 0 && len(grant.Subjects.Principals) == 0 {
 			delete(local.Grants, id)
 		} else {
 			local.Grants[id] = grant

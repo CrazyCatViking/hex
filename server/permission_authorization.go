@@ -31,6 +31,9 @@ func (a siteAuthorization) applicationAdmitted() bool {
 }
 
 func (a siteAuthorization) subjectsMatch(subjects Subjects) bool {
+	if subjects.Workspace && a.apiOnly && a.identity != nil && a.role != roleNone {
+		return true
+	}
 	human := a.identity == nil || (a.identity.Provider != "automation" && a.identity.Provider != "site")
 	if subjects.Owners && a.role == roleOwner || subjects.SignedIn && a.role != roleNone && human || a.identity.matchesAny(subjects.Principals) {
 		return true

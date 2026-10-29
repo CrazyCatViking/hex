@@ -13,6 +13,11 @@ import (
 )
 
 func TestDurableEventsFanoutRecoveryRevocationAndReplay(t *testing.T) {
+	t.Run("selected site", func(t *testing.T) { testDurableEvents(t, false) })
+	t.Run("workspace public", func(t *testing.T) { testDurableEvents(t, true) })
+}
+
+func testDurableEvents(t *testing.T, public bool) {
 	ctx := context.Background()
 	database, access, automations := durableTestStores(t)
 	config := hex.Config{Database: database, Access: access, Automations: automations, Actions: &hex.ActionRegistry{}, Identity: easyauth.Resolver{}}
@@ -35,6 +40,9 @@ func TestDurableEventsFanoutRecoveryRevocationAndReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	producer.Grants["subscribe"] = hex.PermissionGrant{Kind: "event", Resource: "approved", Operations: []string{"subscribe"}, Subjects: hex.Subjects{Principals: []string{principal.ID}}}
+	if public {
+		producer.Grants["subscribe"] = hex.PermissionGrant{Kind: "event", Resource: "approved", Operations: []string{"subscribe"}, Subjects: hex.Subjects{Workspace: true}}
+	}
 	if err := access.PutSiteAccess(ctx, "producer", producer); err != nil {
 		t.Fatal(err)
 	}

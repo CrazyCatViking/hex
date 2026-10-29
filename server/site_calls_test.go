@@ -72,3 +72,43 @@ func TestSiteCallsAuthorizationIdempotencyAndIsolation(t *testing.T) {
 	requestAs(t, server, headers, "POST", "/api/sites/source/site-api/call", body, 403)
 	requestAs(t, server, headers, "GET", fmt.Sprintf("/api/sites/source/db/identities/%s", identity.ID), nil, 400)
 }
+
+func TestWorkspacePublicActionNeedsNoSourceGrant(t *testing.T) {
+	ctx := context.Background()
+	database, policies, _ := durableTestStores(t)
+	registry := &hex.ActionRegistry{}
+	if err := registry.Register("target", hex.Action{Definition: hex.ActionDefinition{Name: "lookup", Description: "Look up a shared value", Version: 1, Exported: true, ReadOnly: true, InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false}`), OutputSchema: json.RawMessage(`{"type":"object"}`)}, Handler: func(context.Context, hex.ActionContext, json.RawMessage) (any, error) {
+		return map[string]string{"value": "shared"}, nil
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"source", "another"} {
+		if err := policies.PutSiteAccess(ctx, name, hex.SiteAccess{Version: 2, Admission: hex.Subjects{SignedIn: true}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	target := hex.SiteAccess{Version: 2, Owners: []string{"user:owner"}, Admission: hex.Subjects{Owners: true}, Grants: map[string]hex.PermissionGrant{
+		"connection": {Kind: "action-consumer", Resource: "lookup", Operations: []string{"run"}, Subjects: hex.Subjects{Workspace: true}},
+		"action":     {Kind: "action", Resource: "lookup", Operations: []string{"run"}, Subjects: hex.Subjects{Workspace: true}},
+	}}
+	if err := policies.PutSiteAccess(ctx, "target", target); err != nil {
+		t.Fatal(err)
+	}
+	server := hex.New(hex.Config{Identity: easyauth.Resolver{}, Database: database, Access: policies, Actions: registry})
+	headers := principalHeaders("alice")
+	body := []byte(`{"target":"target","action":"lookup","version":1,"input":{}}`)
+	for _, source := range []string{"source", "another"} {
+		requestAs(t, server, headers, "POST", "/api/sites/"+source+"/site-api/call", body, 200)
+		response := requestAs(t, server, headers, "GET", "/api/sites/"+source+"/site-api/actions/target", nil, 200)
+		if !strings.Contains(response.Body.String(), "lookup") {
+			t.Fatal("public API not discoverable")
+		}
+	}
+	requestAs(t, server, headers, "POST", "/api/sites/unclaimed/site-api/call", body, 403)
+	requestAs(t, server, headers, "POST", "/api/sites/target/actions/lookup", []byte(`{}`), 403)
+	delete(target.Grants, "connection")
+	if err := policies.PutSiteAccess(ctx, "target", target); err != nil {
+		t.Fatal(err)
+	}
+	requestAs(t, server, headers, "POST", "/api/sites/source/site-api/call", body, 403)
+}

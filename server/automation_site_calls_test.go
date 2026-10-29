@@ -12,6 +12,11 @@ import (
 )
 
 func TestAutomationSiteCallsUseSiteAuthorityAndDryRun(t *testing.T) {
+	t.Run("selected site", func(t *testing.T) { testAutomationSiteCalls(t, false) })
+	t.Run("workspace public", func(t *testing.T) { testAutomationSiteCalls(t, true) })
+}
+
+func testAutomationSiteCalls(t *testing.T, public bool) {
 	ctx := context.Background()
 	policies := memory.NewAccessStore()
 	database := memory.NewDatabase()
@@ -27,6 +32,9 @@ func TestAutomationSiteCallsUseSiteAuthorityAndDryRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := hex.SiteAccess{Version: 2, Owners: []string{"user:owner"}, Admission: hex.Subjects{SignedIn: true, Owners: true}, Grants: map[string]hex.PermissionGrant{"out": {Kind: "site-action", Resource: "target.submit", Operations: []string{"run"}, Subjects: hex.Subjects{Principals: []string{"automation:action-contract"}}}}}
+	if public {
+		source.Grants = nil
+	}
 	if err := policies.PutSiteAccess(ctx, "demo", source); err != nil {
 		t.Fatal(err)
 	}
@@ -40,6 +48,12 @@ func TestAutomationSiteCallsUseSiteAuthorityAndDryRun(t *testing.T) {
 		"consumer": {Kind: "action-consumer", Resource: "submit", Operations: []string{"run"}, Subjects: hex.Subjects{Principals: []string{principal.ID}}},
 		"action":   {Kind: "action", Resource: "submit", Operations: []string{"run"}, Subjects: hex.Subjects{Principals: []string{principal.ID}}},
 	}}
+	if public {
+		for id, grant := range target.Grants {
+			grant.Subjects = hex.Subjects{Workspace: true}
+			target.Grants[id] = grant
+		}
+	}
 	if err := policies.PutSiteAccess(ctx, "target", target); err != nil {
 		t.Fatal(err)
 	}

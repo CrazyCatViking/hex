@@ -87,7 +87,14 @@ func (s *Server) prepareSiteCall(ctx context.Context, source string, sourceAuth 
 	if !siteNamePattern.MatchString(request.Target) || !namePattern.MatchString(request.Action) || request.Version < 1 {
 		return nil, ActionContext{}, &ActionError{Message: "target, action and positive version are required"}
 	}
-	if !sourceAuth.permits("site-action", request.Target+"."+request.Action, "run") {
+	if sourceAuth.identity == nil || !sourceAuth.applicationAdmitted() {
+		return nil, ActionContext{}, ErrForbidden
+	}
+	_, sourceExists, err := s.sitePolicy(ctx, source)
+	if err != nil {
+		return nil, ActionContext{}, err
+	}
+	if !sourceExists {
 		return nil, ActionContext{}, ErrForbidden
 	}
 	principal, err := s.sitePrincipal(ctx, source)
@@ -99,6 +106,9 @@ func (s *Server) prepareSiteCall(ctx context.Context, source string, sourceAuth 
 		return nil, ActionContext{}, err
 	}
 	if !exists {
+		return nil, ActionContext{}, ErrForbidden
+	}
+	if !workspaceShared(targetAccess, "action-consumer", request.Action, "run") && !sourceAuth.permits("site-action", request.Target+"."+request.Action, "run") {
 		return nil, ActionContext{}, ErrForbidden
 	}
 	connection := siteAuthorization{identity: principal, access: targetAccess, role: roleViewer, apiOnly: true}
@@ -291,7 +301,12 @@ func (s *Server) siteInvocationHTTP(w http.ResponseWriter, r *http.Request) {
 		writeSiteCallError(w, ErrForbidden)
 		return
 	}
-	if !authorization.permits("site-action", invocation.Target+"."+invocation.Action, "run") {
+	access, _, err := s.sitePolicy(r.Context(), invocation.Target)
+	if err != nil {
+		writeServerError(w, err)
+		return
+	}
+	if !workspaceShared(access, "action-consumer", invocation.Action, "run") && !authorization.permits("site-action", invocation.Target+"."+invocation.Action, "run") {
 		writeSiteCallError(w, ErrForbidden)
 		return
 	}

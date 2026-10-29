@@ -93,6 +93,13 @@ func (s *Server) readEventTopic(ctx context.Context, site, name string, version 
 }
 
 func (s *Server) eventSubscriberAllowed(ctx context.Context, subscription EventSubscription) error {
+	_, exists, err := s.sitePolicy(ctx, subscription.Site)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return ErrForbidden
+	}
 	principal, err := s.sitePrincipal(ctx, subscription.Site)
 	if err != nil {
 		return err

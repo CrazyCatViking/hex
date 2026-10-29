@@ -10,6 +10,7 @@ export * from "./integrations.js";
 
 export interface Capabilities {
   siteAPI?: boolean;
+  workspaceAPISharing?: boolean;
   durableEvents?: boolean;
   analytics?: boolean;
   /** Third-party integrations are configured. */
@@ -58,6 +59,8 @@ export type Grant = "all" | "own" | "conditional" | "none";
 
 export interface PermissionSubjects {
   signedIn?: boolean;
+  /** Authenticated cross-site API callers in this workspace, including automations. */
+  workspace?: boolean;
   owners?: boolean;
   principals?: string[];
   roles?: string[];
