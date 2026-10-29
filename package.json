@@ -5,8 +5,8 @@
     "packages/client"
   ],
   "scripts": {
-    "format": "prettier --write \"packages/**/*.{ts,js,mjs,json}\" \"internal/cli/assets/*.yaml\" \"scripts/**/*.mjs\" \"server/portal/*.{html,css}\" server/portal/portal.js server/portal/manage.js server/portal/permissions.js server/portal/permission-matrix.js package.json",
-    "format:check": "prettier --check \"packages/**/*.{ts,js,mjs,json}\" \"internal/cli/assets/*.yaml\" \"scripts/**/*.mjs\" \"server/portal/*.{html,css}\" server/portal/portal.js server/portal/manage.js server/portal/permissions.js server/portal/permission-matrix.js package.json",
+    "format": "prettier --write \"packages/**/*.{ts,js,mjs,json}\" \"internal/cli/assets/*.yaml\" \"scripts/**/*.mjs\" \"server/portal/*.{html,css}\" server/portal/portal.js server/portal/manage.js server/portal/integrations.js server/portal/permissions.js server/portal/permission-matrix.js package.json",
+    "format:check": "prettier --check \"packages/**/*.{ts,js,mjs,json}\" \"internal/cli/assets/*.yaml\" \"scripts/**/*.mjs\" \"server/portal/*.{html,css}\" server/portal/portal.js server/portal/manage.js server/portal/integrations.js server/portal/permissions.js server/portal/permission-matrix.js package.json",
     "dev": "go run ./cmd/hex dev --package ./examples/custom-server --data-dir .hex-data",
     "build": "npm run build --workspaces --if-present && npm run build:portal",
     "build:portal": "node scripts/sync-portal-assets.mjs",
@@ -16,6 +16,7 @@
     "test:e2e": "npm run build && node scripts/e2e.mjs",
     "test:browser": "npm run build && node scripts/e2e.mjs --browser",
     "test:permission-portal": "node scripts/test-permission-portal.mjs",
+    "test:integration-portal": "node scripts/test-integration-portal.mjs",
     "test:local": "npm run build && node scripts/test-external-server.mjs",
     "test:analytics": "npm run build && node scripts/test-external-server.mjs --analytics-browser",
     "test:services": "npm run build && node scripts/test-services.mjs"

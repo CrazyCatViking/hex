@@ -1,0 +1,369 @@
+{{define "integration-catalog"}}
+<section class="page-heading integration-page-heading">
+  <div>
+    <p class="eyebrow">Connect your ideas to your tools</p>
+    <h1>Integrations</h1>
+    <p class="lead">Explore what your sites, automations and agents can do.</p>
+  </div>
+  <span class="integration-total"
+    >{{len .Catalog.Integrations}} integrations on this platform</span
+  >
+</section>
+<div id="integration-catalog">
+  <div class="integration-toolbar" data-integration-controls hidden>
+    <div
+      class="integration-filters"
+      role="group"
+      aria-label="Filter integrations"
+    >
+      <button type="button" data-integration-filter="all" aria-pressed="true">
+        All integrations <span>{{len .Catalog.Integrations}}</span>
+      </button>
+      <button
+        type="button"
+        data-integration-filter="access"
+        aria-pressed="false"
+      >
+        Granted to you
+      </button>
+      <button
+        type="button"
+        data-integration-filter="automation"
+        aria-pressed="false"
+      >
+        For automations
+      </button>
+      <button
+        type="button"
+        data-integration-filter="login"
+        aria-pressed="false"
+      >
+        Linked login
+      </button>
+    </div>
+    <div
+      class="integration-view-switch"
+      role="group"
+      aria-label="Catalog layout"
+    >
+      <button
+        type="button"
+        data-integration-layout="grid"
+        aria-label="Grid view"
+        aria-pressed="true"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="3" y="3" width="7" height="7" rx="1" />
+          <rect x="14" y="3" width="7" height="7" rx="1" />
+          <rect x="3" y="14" width="7" height="7" rx="1" />
+          <rect x="14" y="14" width="7" height="7" rx="1" />
+        </svg>
+      </button>
+      <button
+        type="button"
+        data-integration-layout="list"
+        aria-label="List view"
+        aria-pressed="false"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M9 5h12M9 12h12M9 19h12M3 5h1M3 12h1M3 19h1" />
+        </svg>
+      </button>
+    </div>
+  </div>
+  <div class="integration-caption">
+    <p data-integration-count role="status" aria-live="polite">
+      Showing {{len .Catalog.Integrations}} integrations
+    </p>
+    <span
+      >Select an integration to explore its features
+      <span aria-hidden="true">↗</span></span
+    >
+  </div>
+  <div class="integration-grid" data-integration-grid>
+    {{range .Catalog.Integrations}}
+    <article
+      class="integration-card"
+      data-integration-card="{{.Name}}"
+      data-granted="{{.GrantedCount}}"
+      data-automation="{{not .Connector}}"
+      data-login="{{if .Connector}}true{{else}}false{{end}}"
+    >
+      <div class="integration-card-heading">
+        {{template "integration-mark" .}}
+        <div>
+          <h2>
+            <a
+              class="integration-card-link"
+              href="/integrations/{{.Name}}"
+              data-integration-open="{{.Name}}"
+              >{{.Title}}</a
+            >
+          </h2>
+          <span class="integration-key">{{.Name}}</span>
+        </div>
+      </div>
+      <p class="integration-card-description">{{.Description}}</p>
+      <dl class="integration-facts">
+        <div>
+          <dt>Sites</dt>
+          <dd>
+            {{if .RequiresApproval}}<span
+              class="integration-status integration-tone-warn"
+              >Approval required</span
+            >{{else}}All sites{{end}}
+          </dd>
+        </div>
+        <div>
+          <dt>Automations</dt>
+          <dd>
+            {{if .Connector}}<span class="muted">Not supported</span
+            >{{else}}Supported{{end}}
+          </dd>
+        </div>
+        <div>
+          <dt>Agents</dt>
+          <dd>Supported{{if .Connector}} · as you{{end}}</dd>
+        </div>
+        <div>
+          <dt>Your access</dt>
+          <dd>{{template "integration-status" .Access}}</dd>
+        </div>
+        <div>
+          <dt>Linked login</dt>
+          <dd>
+            {{if .Connector}}{{template "integration-status" .Login}}{{else}}Not
+            required{{end}}
+          </dd>
+        </div>
+      </dl>
+      <div class="integration-card-bottom">
+        <span
+          >{{len .Endpoints}} {{if eq (len .Endpoints)
+          1}}feature{{else}}features{{end}}</span
+        ><span aria-hidden="true">View details ↗</span>
+      </div>
+    </article>
+    {{else}}
+    <p class="muted">No integrations are registered.</p>
+    {{end}}
+  </div>
+  <div class="integration-empty" data-integration-empty hidden>
+    <h2>No matching integrations</h2>
+    <p>Try another filter to explore this platform’s integrations.</p>
+    <button
+      class="button button-secondary"
+      type="button"
+      data-integration-reset
+    >
+      Show all integrations
+    </button>
+  </div>
+</div>
+<div class="integration-access-note">
+  <span aria-hidden="true">i</span>
+  <p>
+    <strong>Personal access and site access are different.</strong> “All sites”
+    means no platform approval is required. Endpoint permissions and each site’s
+    access policy still apply. {{if .Manage}}Manage site approvals from
+    <a href="/manage">Your sites</a>.{{else}}Site owners manage site approvals
+    from their site’s Integrations tab.{{end}}
+  </p>
+</div>
+<dialog
+  id="integration-dialog"
+  class="dialog integration-dialog"
+  aria-labelledby="integration-dialog-title"
+>
+  <div class="integration-detail-topline">
+    <h2 id="integration-dialog-title" class="eyebrow">Integration details</h2>
+    <button
+      class="integration-close"
+      type="button"
+      data-integration-close
+      aria-label="Close integration details"
+    >
+      ✕
+    </button>
+  </div>
+  <div
+    class="integration-dialog-state"
+    data-integration-loading
+    role="status"
+    hidden
+  >
+    Loading integration details…
+  </div>
+  <div class="integration-dialog-state" data-integration-error hidden>
+    <p role="alert" data-integration-error-message></p>
+    <button
+      class="button button-secondary"
+      type="button"
+      data-integration-retry
+    >
+      Try again
+    </button>
+    <a data-integration-page>Open full details page</a>
+  </div>
+  <div data-integration-dialog-content></div>
+</dialog>
+{{end}} {{define "integration-mark"}}<span
+  class="integration-mark"
+  aria-hidden="true"
+  >{{.Initials}}</span
+>{{end}} {{define "integration-status"}}<span
+  class="integration-status integration-tone-{{.Tone}}"
+  >{{.Label}}</span
+>{{end}} {{define "integration-detail-page"}}
+<!doctype html>
+<html lang="en">
+  <head>
+    {{template "head" (printf "%s · %s" .Integration.Title .Platform)}}
+    <link rel="stylesheet" href="/api/hex/integrations.css" />
+  </head>
+  <body hx-headers='{"X-Hex-Request":"1"}'>
+    {{template "header" .Chrome}}
+    <main id="main" class="page">
+      <h1 class="visually-hidden">{{.Integration.Title}} integration</h1>
+      <p><a href="/integrations">← All integrations</a></p>
+      <div class="integration-detail-page">
+        {{template "integration-detail" .}}
+      </div>
+    </main>
+    {{template "footer" .Chrome}}
+  </body>
+</html>
+{{end}} {{define "integration-detail"}}
+<div data-integration-detail="{{.Integration.Name}}">
+  {{with .Integration}}
+  <div class="integration-detail-header">
+    <div class="integration-detail-identity">
+      {{template "integration-mark" .}}
+      <div>
+        <h2 data-integration-title>{{.Title}}</h2>
+        <code class="integration-key">{{.Name}}</code>
+      </div>
+    </div>
+    <p class="integration-detail-description">{{.Description}}</p>
+    <div class="integration-detail-summary">
+      <div>
+        <h3>Site availability</h3>
+        <strong
+          >{{if .RequiresApproval}}Restricted · approval
+          required{{else}}Available to all sites{{end}}</strong
+        >
+        <p>
+          {{if .RequiresApproval}}Each site needs platform-admin approval.
+          Approval does not grant endpoint permissions.{{else}}No platform-admin
+          approval needed. The site’s own integration grants still apply.{{end}}
+        </p>
+      </div>
+      <div>
+        <h3>Automations</h3>
+        <strong>{{if .Connector}}Not supported{{else}}Supported{{end}}</strong>
+        <p>
+          {{if .Connector}}Requires a person’s linked account; unattended
+          automations cannot use this integration.{{else}}Runs as the site.
+          Needs site-principal permissions and any required approval.{{end}}
+        </p>
+      </div>
+      <div>
+        <h3>Agent invocation</h3>
+        <strong>Supported{{if .Connector}} · as you{{end}}</strong>
+        <p>
+          Agents can invoke permitted endpoints{{if .Connector}}, using your
+          linked account{{end}}. They do not bypass caller permissions, site
+          approval or access policies.
+        </p>
+      </div>
+    </div>
+    {{if .AuditUnavailable}}
+    <p class="banner banner-error">
+      This integration is unavailable because its required audit store is not
+      configured. Contact a platform administrator.
+    </p>
+    {{end}}
+    <div class="integration-detail-context">
+      <p>
+        <strong>Linked login · {{.Login.Label}}</strong><br />{{if
+        .Connector}}{{with .Connection}}{{if .Connected}}Your {{.Title}} account
+        is connected{{with .Account}} as {{.}}{{end}}. Its own permissions apply
+        to every call.{{else}}A linked {{.Title}} login is required. Your
+        endpoint grants are shown below.{{end}}{{else}}Connected accounts are
+        not configured on this platform. Contact a platform
+        administrator.{{end}}{{else}}No linked login needed. Calls use a
+        platform-managed credential.{{end}}
+      </p>
+      {{if and .Connection (not .Connection.Connected) .ConnectURL}}<a
+        class="button button-secondary button-small"
+        href="{{.ConnectURL}}"
+        >Link {{.Connector}} login</a
+      >{{end}}
+    </div>
+  </div>
+  {{end}}
+  <div class="integration-detail-body">
+    <div class="integration-features-heading">
+      <h3>Features &amp; your access</h3>
+      <span
+        >{{.Integration.GrantedCount}} of {{len .Endpoints}} permissions
+        granted</span
+      >
+    </div>
+    <p class="integration-features-caption">
+      These are your personal platform permissions, not a site-specific access
+      check. Expand a feature for its permission and contract.
+    </p>
+    {{range .Endpoints}}
+    <details class="integration-endpoint">
+      <summary>
+        <div class="integration-endpoint-identity">
+          <div class="integration-endpoint-name">
+            <strong>{{.Name}}</strong
+            ><span
+              class="integration-effect {{if .Write}}integration-effect-write{{end}}"
+              >{{if .Write}}Write{{else}}Read{{end}}</span
+            >
+          </div>
+          <p>{{.Description}}</p>
+        </div>
+        <div class="integration-endpoint-status">
+          {{template "integration-status" .Status}}<small
+            >{{if not .Allowed}}Not granted{{else if
+            $.Integration.RequiresApproval}}Site approval also required{{else if
+            $.Integration.Connector}}Uses your linked account{{else}}Subject to
+            site policy{{end}}</small
+          >
+        </div>
+      </summary>
+      <div class="integration-endpoint-contract">
+        <p>{{.Reason}}</p>
+        <p><strong>Endpoint</strong><br /><code>{{.QualifiedName}}</code></p>
+        <p>
+          <strong>Required permission</strong><br /><code>{{.Permission}}</code>
+        </p>
+        <div class="integration-contract-grid">
+          <div>
+            <h4>Input schema</h4>
+            <pre>{{.Input}}</pre>
+          </div>
+          <div>
+            <h4>Output schema</h4>
+            <pre>{{.Output}}</pre>
+          </div>
+        </div>
+      </div>
+    </details>
+    {{else}}
+    <p class="muted">No features are registered for this integration.</p>
+    {{end}}
+    <p class="integration-detail-footnote">
+      {{if .Integration.Audit}}Calls to this integration are audited.
+      {{end}}Write features change data in the connected system. {{if
+      .Manage}}Manage approval for a particular site from its Integrations tab
+      in <a href="/manage">Your sites</a>.{{else}}Ask the site owner about its
+      approval and access policy.{{end}}
+    </p>
+  </div>
+</div>
+{{end}}

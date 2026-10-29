@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Hex · Integrations prototype</title>
+    <link rel="stylesheet" href="./portal.css" />
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="./prototype.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <div class="review-bar">
+      <span
+        ><strong>DESIGN PREVIEW</strong> · Integrations · Fictional data</span
+      >
+      <button id="review-notes" type="button">About this prototype ↗</button>
+    </div>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="#" data-preview-nav>
+          <svg class="brand-mark" viewBox="0 0 32 36" aria-hidden="true">
+            <path d="M16 1 31 9.5v17L16 35 1 26.5v-17z" />
+            <path
+              class="brand-mark-inner"
+              d="M16 10 23.5 14.25v8.5L16 27l-7.5-4.25v-8.5z"
+            />
+          </svg>
+          <span>Hex</span>
+        </a>
+        <nav class="primary-nav" aria-label="Main">
+          <a href="#" data-preview-nav>Home</a>
+          <a href="#" data-preview-nav>Your sites</a>
+          <a href="#" aria-current="page" id="catalog-nav">Integrations</a>
+          <a href="#" data-preview-nav>Build &amp; publish</a>
+        </nav>
+        <div class="preview-account">
+          <span class="avatar tone-0" aria-hidden="true">JD</span
+          ><span class="account-name">Jamie</span>
+        </div>
+      </div>
+    </header>
+    <main id="main" class="page" tabindex="-1">
+      <section class="page-heading">
+        <div>
+          <p class="eyebrow">Connect your ideas to your tools</p>
+          <h1>Integrations</h1>
+          <p class="lead">
+            Explore what your sites, automations and agents can do.
+          </p>
+        </div>
+        <span class="catalog-total">6 integrations on this platform</span>
+      </section>
+      <div class="catalog-toolbar">
+        <div
+          class="catalog-filters"
+          role="group"
+          aria-label="Filter integrations"
+        >
+          <button type="button" data-filter="all" aria-pressed="true">
+            All integrations <span>6</span>
+          </button>
+          <button type="button" data-filter="access" aria-pressed="false">
+            Granted to you
+          </button>
+          <button type="button" data-filter="automation" aria-pressed="false">
+            For automations
+          </button>
+          <button type="button" data-filter="login" aria-pressed="false">
+            Linked login
+          </button>
+        </div>
+        <div class="view-switch" role="group" aria-label="Catalog layout">
+          <button
+            type="button"
+            data-layout="grid"
+            aria-label="Grid view"
+            aria-pressed="true"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="3" y="3" width="7" height="7" rx="1" />
+              <rect x="14" y="3" width="7" height="7" rx="1" />
+              <rect x="3" y="14" width="7" height="7" rx="1" />
+              <rect x="14" y="14" width="7" height="7" rx="1" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            data-layout="list"
+            aria-label="List view"
+            aria-pressed="false"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M9 5h12M9 12h12M9 19h12M3 5h1M3 12h1M3 19h1" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="catalog-caption">
+        <p id="result-count" role="status" aria-live="polite"></p>
+        <span
+          >Select an integration to explore its features
+          <span aria-hidden="true">↗</span></span
+        >
+      </div>
+      <div id="catalog" class="integration-grid"></div>
+      <div class="access-note">
+        <span class="note-icon" aria-hidden="true">i</span>
+        <p>
+          <strong>Personal access and site access are different.</strong> “All
+          sites” means no platform approval is required. Endpoint permissions
+          and each site’s access policy still apply. Manage site approvals from
+          <strong>Your sites</strong>.
+        </p>
+      </div>
+    </main>
+    <footer class="footer">
+      <span>Hex · Built by your team, for your team.</span>
+      <label class="preview-state"
+        >Preview state
+        <select id="preview-state">
+          <option value="normal">Sample catalog</option>
+          <option value="loading">Loading</option>
+          <option value="empty">Empty</option>
+          <option value="error">Error</option>
+        </select></label
+      >
+    </footer>
+    <dialog
+      id="detail-dialog"
+      class="dialog integration-dialog"
+      aria-labelledby="detail-title"
+    >
+      <div class="detail-topline">
+        <span class="eyebrow">Integration details</span
+        ><button
+          class="close-button"
+          type="button"
+          data-close
+          aria-label="Close details"
+        >
+          ✕
+        </button>
+      </div>
+      <div id="detail-content"></div>
+    </dialog>
+    <dialog
+      id="notes-dialog"
+      class="dialog notes-dialog"
+      aria-labelledby="notes-title"
+    >
+      <div class="detail-topline">
+        <span class="eyebrow">Design preview</span
+        ><button
+          class="close-button"
+          type="button"
+          data-close
+          aria-label="Close notes"
+        >
+          ✕
+        </button>
+      </div>
+      <div class="notes-content">
+        <h2 id="notes-title">A catalog, not a configuration page.</h2>
+        <p>
+          Scan integrations first. Open one only when you need the specifics.
+        </p>
+        <ul>
+          <li>
+            Every card shows site availability, automation support, agent
+            support, personal access and linked-login state.
+          </li>
+          <li>
+            The detail view separates endpoint grants from site approval and
+            linked-login requirements. Expand a feature to inspect its sample
+            contract.
+          </li>
+          <li>
+            Agents act with the caller’s permissions. Connected-account
+            integrations can be used by agents acting as you, but not by
+            unattended automations.
+          </li>
+          <li>
+            All integrations, endpoint grants and contracts here are fictional
+            examples. No live API calls, permission changes or real account
+            linking take place.
+          </li>
+        </ul>
+        <p>
+          The production portal and its site-management pages are unchanged.
+        </p>
+      </div>
+    </dialog>
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    <noscript
+      ><p class="page">
+        Enable JavaScript to explore this interactive prototype.
+      </p></noscript
+    >
+  </body>
+</html>
