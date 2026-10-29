@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -40,6 +41,11 @@ type portalIntegrationCard struct {
 	CanApprove       bool
 	CanRemove        bool
 	Admin            bool
+	Initials         string
+	GrantedCount     int
+	Access           portalIntegrationStatus
+	Login            portalIntegrationStatus
+	ConnectURL       string
 }
 
 type portalIntegrationApproval struct {
@@ -68,6 +74,8 @@ func (s *Server) registerPortalIntegrationRoutes() {
 		return
 	}
 	s.mux.HandleFunc("GET /integrations", s.integrationsPage)
+	s.mux.HandleFunc("GET /integrations/{integration}", s.integrationDetailPage)
+	s.mux.HandleFunc("GET /api/hex/manage/integrations/{integration}", s.integrationDetailFragment)
 	s.mux.HandleFunc("GET /api/hex/manage/sites/{site}/integrations", s.manageSiteIntegrations)
 	if !s.integrationApprovalsEnabled() {
 		return
@@ -138,52 +146,74 @@ func (s *Server) siteIntegrationPortalView(ctx context.Context, identity *Identi
 		caller.authorization = &authorization
 	}
 	for _, registered := range s.config.Integrations.all() {
-		integration := registered.integration
-		card := portalIntegrationCard{
-			Name: integration.Name, Title: integration.Title, Description: integration.Description,
-			RequiresApproval: integration.RequiresApproval, Audit: integration.Audit,
-			AuditUnavailable: integration.Audit && s.config.IntegrationAudit == nil, Admin: view.Admin,
-		}
-		approved := !integration.RequiresApproval
-		if site != "" && integration.RequiresApproval && view.ApprovalsEnabled {
-			card.ApprovalURL = integrationApprovalPortalURL(site, integration.Name)
-			approval, err := s.config.IntegrationStore.GetIntegrationApproval(ctx, site, integration.Name)
-			if err != nil && !errors.Is(err, ErrNotFound) {
-				return view, err
-			}
-			if err == nil {
-				row := integrationApprovalPortalRow(approval, integration.Title)
-				card.Approval = &row
-			}
-			approved = err == nil && approval.Status == ApprovalApproved
-			card.CanRequest = !approved && (!view.Admin || errors.Is(err, ErrNotFound))
-			card.CanApprove = view.Admin && !approved && err == nil
-			card.CanRemove = err == nil && (view.Admin || approval.Status == ApprovalRequested)
-		}
-		if integration.Connector != "" {
-			connector, _ := s.config.Integrations.connector(integration.Connector)
-			card.Connector = connector.Title
-			if site != "" && s.connectionsEnabled() {
-				status, err := s.connectionStatus(ctx, identity, connector)
-				if err != nil {
-					return view, err
-				}
-				card.Connection = &status
-			}
-		}
-		for _, endpoint := range registered.sortedEndpoints() {
-			allowed := s.granted(caller, endpoint.permission())
-			if site != "" {
-				allowed = approved && s.integrationAccess(caller, endpoint) == nil && !card.AuditUnavailable
-				if integration.Connector != "" {
-					allowed = allowed && card.Connection != nil && card.Connection.Connected
-				}
-			}
-			card.Endpoints = append(card.Endpoints, endpointInfo(endpoint, allowed))
+		card, err := s.integrationPortalCard(ctx, caller, registered)
+		if err != nil {
+			return view, err
 		}
 		view.Integrations = append(view.Integrations, card)
 	}
 	return view, nil
+}
+
+func (s *Server) integrationPortalCard(ctx context.Context, caller integrationCaller, registered *registeredIntegration) (portalIntegrationCard, error) {
+	integration := registered.integration
+	card := portalIntegrationCard{
+		Name: integration.Name, Title: integration.Title, Description: integration.Description,
+		RequiresApproval: integration.RequiresApproval, Audit: integration.Audit,
+		AuditUnavailable: integration.Audit && s.config.IntegrationAudit == nil, Admin: s.isAdmin(caller.identity),
+		Initials: initials(integration.Title),
+	}
+	approved := !integration.RequiresApproval
+	if caller.site != "" && integration.RequiresApproval && s.integrationApprovalsEnabled() {
+		card.ApprovalURL = integrationApprovalPortalURL(caller.site, integration.Name)
+		approval, err := s.config.IntegrationStore.GetIntegrationApproval(ctx, caller.site, integration.Name)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return card, err
+		}
+		if err == nil {
+			row := integrationApprovalPortalRow(approval, integration.Title)
+			card.Approval = &row
+		}
+		approved = err == nil && approval.Status == ApprovalApproved
+		card.CanRequest = !approved && (!card.Admin || errors.Is(err, ErrNotFound))
+		card.CanApprove = card.Admin && !approved && err == nil
+		card.CanRemove = err == nil && (card.Admin || approval.Status == ApprovalRequested)
+	}
+	if integration.Connector != "" {
+		connector, _ := s.config.Integrations.connector(integration.Connector)
+		card.Connector = connector.Title
+		if s.connectionsEnabled() {
+			status, err := s.connectionStatus(ctx, caller.identity, connector)
+			if err != nil {
+				return card, err
+			}
+			card.Connection = &status
+			if status.ConnectURL != "" {
+				origin, err := s.platformOrigin()
+				if err != nil {
+					return card, err
+				}
+				returnURL := origin.JoinPath("integrations").String() + "#" + integration.Name
+				card.ConnectURL = status.ConnectURL + "?return=" + url.QueryEscape(returnURL)
+			}
+		}
+	}
+	for _, endpoint := range registered.sortedEndpoints() {
+		allowed := s.granted(caller, endpoint.permission())
+		if allowed {
+			card.GrantedCount++
+		}
+		if caller.site != "" {
+			allowed = approved && s.integrationAccess(caller, endpoint) == nil && !card.AuditUnavailable
+			if integration.Connector != "" {
+				allowed = allowed && card.Connection != nil && card.Connection.Connected
+			}
+		}
+		card.Endpoints = append(card.Endpoints, endpointInfo(endpoint, allowed))
+	}
+	card.Access = card.personalAccess()
+	card.Login = card.loginStatus()
+	return card, nil
 }
 
 func integrationApprovalPortalURL(site, integration string) string {

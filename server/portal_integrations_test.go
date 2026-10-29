@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	hex "github.com/crazycatviking/hex/server"
 	"github.com/crazycatviking/hex/server/providers/easyauth"
@@ -107,7 +108,7 @@ func TestPortalIntegrationApprovalWorkflowWithoutSitesStore(t *testing.T) {
 		t.Fatalf("request was not persisted: %+v %v", approval, err)
 	}
 	page = requestAs(t, server, admin, "GET", "/integrations", nil, 200).Body.String()
-	for _, expected := range []string{"Integration approval review", "Awaiting approval", `hx-post="` + portalLedgerApproval + `/approve?view=catalog"`, "Not granted"} {
+	for _, expected := range []string{"Integration approval review", "Awaiting approval", `hx-post="` + portalLedgerApproval + `/approve?view=catalog"`, "No permission"} {
 		if !containsIntegrationMarkup(page, expected) {
 			t.Fatalf("admin catalog lacks %q: %s", expected, page)
 		}
@@ -149,9 +150,20 @@ func TestPortalIntegrationCatalogUsesRegisteredMetadata(t *testing.T) {
 	server, store := setupPortalIntegrations(t, true)
 	owner := integrationFormHeaders("owner", false)
 	page := requestAs(t, server, owner, "GET", "/integrations", nil, 200)
-	for _, expected := range []string{"Team ledger", "Registered financial operations.", "Change a balance.", "finance.write", "Team chat", "Archive account", "Site approval required", "No site approval required", "Not granted", "Granted"} {
+	for _, expected := range []string{"Team ledger", "Registered financial operations.", "Team chat", "Approval required", "All sites", "No permission", "All features granted", "1 of 2 features", `href="/integrations/ledger"`, `data-integration-card="archive"`, "Linked login"} {
 		if !containsIntegrationMarkup(page.Body.String(), expected) {
 			t.Fatalf("registered metadata %q was not discovered: %s", expected, page.Body.String())
+		}
+	}
+	for _, unwanted := range []string{`id="integration-site"`, "Change a balance.", "finance.write", "Input schema"} {
+		if strings.Contains(page.Body.String(), unwanted) {
+			t.Fatalf("catalog eagerly renders site lookup or endpoint details: %q", unwanted)
+		}
+	}
+	detail := requestAs(t, server, owner, "GET", "/integrations/ledger", nil, 200).Body.String()
+	for _, expected := range []string{"Change a balance.", "finance.write", "ledger.adjust", "Restricted", "Permission needed", "Granted to you", "Site approval also required", "Input schema", "Output schema"} {
+		if !containsIntegrationMarkup(detail, expected) {
+			t.Fatalf("detail page lacks registered metadata %q: %s", expected, detail)
 		}
 	}
 	if strings.Contains(page.Body.String(), "Integration approval review") || strings.Contains(page.Body.String(), `hx-post=`) {
@@ -169,6 +181,163 @@ func TestPortalIntegrationCatalogUsesRegisteredMetadata(t *testing.T) {
 	review := requestAs(t, server, admin, "GET", "/api/hex/manage/integration-approvals", nil, 200).Body.String()
 	if strings.Contains(review, "/integrations/removed/") || !strings.Contains(review, "There are no integration approvals to review.") {
 		t.Fatalf("review contains unavailable integration controls: %s", review)
+	}
+}
+
+func integrationCardMarkup(t *testing.T, page, name string) string {
+	t.Helper()
+	_, rest, found := strings.Cut(page, `data-integration-card="`+name+`"`)
+	if !found {
+		t.Fatalf("integration card %q not found", name)
+	}
+	markup, _, found := strings.Cut(rest, "</article>")
+	if !found {
+		t.Fatalf("integration card %q has no closing tag", name)
+	}
+	return markup
+}
+
+func TestPortalIntegrationCatalogConnectionStates(t *testing.T) {
+	for _, state := range []string{"unconfigured", "not connected", "connected", "expired"} {
+		t.Run(state, func(t *testing.T) {
+			server, store := setupPortalIntegrations(t, true, func(config *hex.Config) {
+				config.IntegrationGrants = append(config.IntegrationGrants, hex.IntegrationGrant{Principal: "user:owner", Permissions: []string{"archive.pages"}})
+				if state == "unconfigured" {
+					return
+				}
+				sealer, err := hex.NewKeySealer(make([]byte, 32))
+				if err != nil {
+					t.Fatal(err)
+				}
+				config.CredentialSealer = sealer
+			})
+			if state == "connected" || state == "expired" {
+				lastUsed := time.Now()
+				if state == "expired" {
+					lastUsed = lastUsed.Add(-91 * 24 * time.Hour)
+				}
+				if err := store.PutCredential(context.Background(), hex.CredentialRecord{Owner: "owner", Connector: "archive-account", Account: "Owner’s archive", Sealed: []byte("never rendered"), ConnectedAt: lastUsed, LastUsedAt: lastUsed}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			owner := integrationFormHeaders("owner", false)
+			page := requestAs(t, server, owner, "GET", "/integrations", nil, 200).Body.String()
+			card := integrationCardMarkup(t, page, "archive")
+			expectedAccess, expectedLogin := "Link login to use", "Not connected"
+			if state == "unconfigured" {
+				expectedAccess, expectedLogin = "Login unavailable", "Unavailable"
+			} else if state == "connected" {
+				expectedAccess, expectedLogin = "All features granted", "Connected"
+			}
+			for _, expected := range []string{expectedAccess, expectedLogin, "Not supported", "Supported · as you", `data-granted="1"`} {
+				if !containsIntegrationMarkup(card, expected) {
+					t.Fatalf("connection state lacks %q: %s", expected, card)
+				}
+			}
+			detail := requestAs(t, server, owner, "GET", "/api/hex/manage/integrations/archive", nil, 200)
+			if detail.Header().Get("X-Hex-Portal") != "1" || detail.Header().Get("Cache-Control") != "no-store" || strings.Contains(detail.Body.String(), "<!doctype html>") {
+				t.Fatal("detail fragment must be identifiable, private and not a full page")
+			}
+			if strings.Contains(detail.Body.String(), "never rendered") {
+				t.Fatal("catalog leaked credential bytes")
+			}
+			if state == "not connected" || state == "expired" {
+				for _, expected := range []string{"Link login", "/api/hex/connections/archive-account/start?return=http", "%23archive", "archive.pages"} {
+					if !containsIntegrationMarkup(detail.Body.String(), expected) {
+						t.Fatalf("connection details lack %q: %s", expected, detail.Body.String())
+					}
+				}
+			} else if state == "connected" && !containsIntegrationMarkup(detail.Body.String(), "Owner’s archive") {
+				t.Fatal("connected account was not shown")
+			}
+			if state == "connected" {
+				other := requestAs(t, server, integrationFormHeaders("viewer", false), "GET", "/api/hex/manage/integrations/archive", nil, 200).Body.String()
+				if strings.Contains(other, "Owner’s archive") || !containsIntegrationMarkup(other, "Not connected") || !containsIntegrationMarkup(other, "0 of 1 permissions granted") {
+					t.Fatal("catalog reused another viewer's connection or permissions")
+				}
+			}
+		})
+	}
+}
+
+type failingCatalogConnections struct {
+	*memory.IntegrationStore
+}
+
+func (store failingCatalogConnections) GetCredential(context.Context, string, string) (hex.CredentialRecord, error) {
+	return hex.CredentialRecord{}, errors.New("connection store unavailable")
+}
+
+func TestPortalIntegrationCatalogDoesNotHideConnectionStoreFailures(t *testing.T) {
+	server, _ := setupPortalIntegrations(t, true, func(config *hex.Config) {
+		sealer, err := hex.NewKeySealer(make([]byte, 32))
+		if err != nil {
+			t.Fatal(err)
+		}
+		config.CredentialSealer = sealer
+		config.IntegrationStore = failingCatalogConnections{config.IntegrationStore.(*memory.IntegrationStore)}
+	})
+	for _, path := range []string{"/integrations", "/integrations/archive", "/api/hex/manage/integrations/archive"} {
+		requestAs(t, server, integrationFormHeaders("owner", false), "GET", path, nil, http.StatusInternalServerError)
+	}
+}
+
+func TestPortalIntegrationDetailsDoNotElevateAdminsOrSiteApprovals(t *testing.T) {
+	server, store := setupPortalIntegrations(t, true)
+	if err := store.PutIntegrationApproval(context.Background(), hex.IntegrationApproval{Site: "demo", Integration: "ledger", Status: hex.ApprovalApproved}); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/integrations/ledger", "/api/hex/manage/integrations/ledger"} {
+		admin := requestAs(t, server, integrationFormHeaders("admin", true), "GET", path, nil, 200).Body.String()
+		if !containsIntegrationMarkup(admin, "0 of 2 permissions granted") || strings.Count(admin, ">Permission needed<") != 2 {
+			t.Fatalf("admin or site approval incorrectly granted endpoint access: %s", admin)
+		}
+		requestAs(t, server, nil, "GET", path, nil, 401)
+		request := httptest.NewRequest("GET", path, nil)
+		request.Host = "demo.example.com"
+		request.Header = integrationFormHeaders("owner", false)
+		response := httptest.NewRecorder()
+		server.ServeHTTP(response, request)
+		expectedStatus := http.StatusNotFound
+		if strings.HasPrefix(path, "/api/") {
+			expectedStatus = http.StatusForbidden
+		}
+		if response.Code != expectedStatus {
+			t.Fatalf("details served on a site host: %d", response.Code)
+		}
+	}
+	for _, path := range []string{"/integrations/missing", "/api/hex/manage/integrations/missing"} {
+		requestAs(t, server, integrationFormHeaders("owner", false), "GET", path, nil, 404)
+	}
+}
+
+func TestPortalIntegrationCatalogEscapesMetadataAndReportsAuditUnavailable(t *testing.T) {
+	server, _ := setupPortalIntegrations(t, true, func(config *hex.Config) {
+		if err := config.Integrations.Register(hex.Integration{
+			Name: "audit", Title: `<img src=x onerror=alert(1)>`, Description: `<script>alert(2)</script>`, Audit: true,
+			Endpoints: []hex.IntegrationEndpoint{{Name: "read", Description: `<script>alert(3)</script>`, InputSchema: json.RawMessage(`{"type":"object","description":"<script>alert(4)</script>"}`), OutputSchema: objectSchema, Handler: func(context.Context, hex.IntegrationCall, json.RawMessage) (any, error) {
+				t.Fatal("discovery invoked an endpoint")
+				return nil, nil
+			}}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		config.IntegrationGrants = append(config.IntegrationGrants, hex.IntegrationGrant{Principal: "user:owner", Permissions: []string{"audit.read"}})
+	})
+	owner := integrationFormHeaders("owner", false)
+	page := requestAs(t, server, owner, "GET", "/integrations", nil, 200).Body.String()
+	card := integrationCardMarkup(t, page, "audit")
+	if !containsIntegrationMarkup(card, "Unavailable") || !strings.Contains(page, "&lt;img") {
+		t.Fatalf("unavailable audit integration was not safely summarized: %s", card)
+	}
+	detail := requestAs(t, server, owner, "GET", "/api/hex/manage/integrations/audit", nil, 200).Body.String()
+	for _, markup := range []string{page, detail} {
+		if strings.Contains(markup, "<img src=x") || strings.Contains(markup, "<script>alert(") {
+			t.Fatal("untrusted catalog metadata was not escaped")
+		}
+	}
+	if !containsIntegrationMarkup(detail, "required audit store is not configured") || !containsIntegrationMarkup(detail, "1 of 1 permissions granted") || !containsIntegrationMarkup(detail, "Unavailable") {
+		t.Fatalf("audit availability was conflated with endpoint permissions: %s", detail)
 	}
 }
 

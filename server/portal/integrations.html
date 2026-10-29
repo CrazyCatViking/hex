@@ -3,10 +3,13 @@
 <html lang="en">
   <head>
     {{template "head" (printf "%s · Integrations" .Platform)}}
+    <link rel="stylesheet" href="/api/hex/integrations.css" />
+    <script src="/api/hex/integrations.js" defer></script>
   </head>
   <body hx-headers='{"X-Hex-Request":"1"}'>
     {{template "header" .Chrome}}
     <main id="main" class="page">
+      {{if .Catalog.Site}}
       <section class="page-heading">
         <div>
           <p class="eyebrow">Platform integrations</p>
@@ -18,30 +21,14 @@
           </p>
         </div>
       </section>
-      <section class="panel" aria-labelledby="integration-site-heading">
-        <h2 id="integration-site-heading">Your site's integrations</h2>
-        <form method="get" action="/integrations">
-          <label for="integration-site">Site name</label>
-          <input
-            id="integration-site"
-            name="site"
-            value="{{.Catalog.Site}}"
-            required
-          />
-          <button class="button button-secondary" type="submit">
-            View site
-          </button>
-        </form>
-        <p class="muted">
-          Site owners can request approval. Platform admins can approve or
-          revoke it.
-        </p>
-        {{if .Catalog.Site}}<a href="/integrations"
-          >Back to the integration catalog</a
-        >{{end}}
-      </section>
-      {{template "site-integrations" .Catalog}} {{with .Approvals}}{{template
-      "integration-approvals" .}}{{end}}
+      <p><a href="/integrations">Back to the integration catalog</a></p>
+      {{template "site-integrations" .Catalog}} {{else}} {{template
+      "integration-catalog" .}} {{with .Approvals}}
+      <details class="integration-approval-review">
+        <summary>Review site approvals</summary>
+        {{template "integration-approvals" .}}
+      </details>
+      {{end}} {{end}}
     </main>
     {{template "footer" .Chrome}}
   </body>
