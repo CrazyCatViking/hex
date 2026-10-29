@@ -167,7 +167,7 @@ func validPermissionResource(kind, resource string) bool {
 		return true
 	}
 	switch kind {
-	case "collection", "channel", "action", "action-consumer", "event":
+	case "collection", "channel", "action", "action-consumer", "event", "workflow":
 		return validCollectionName(resource)
 	case "integration", "site-action":
 		integration, endpoint, ok := strings.Cut(resource, ".")
@@ -187,6 +187,7 @@ func validatePermissionGrant(grant PermissionGrant, roles map[string]Application
 		"path": {"read"}, "action": {"run"},
 		"integration": {"read", "write"},
 		"site-action": {"run"}, "action-consumer": {"run"}, "event": {"publish", "subscribe"},
+		"workflow": {"run"},
 	}
 	allowed, ok := operations[grant.Kind]
 	if !ok || !validPermissionResource(grant.Kind, grant.Resource) || len(grant.Operations) == 0 || len(grant.Operations) > 4 {

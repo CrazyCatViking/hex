@@ -14,11 +14,12 @@ import (
 )
 
 // Automation configures when a site's JavaScript module runs. All workflow
-// logic lives in Script; definitions contain scheduling metadata only.
+// logic lives in Script; definitions contain scheduling and input contracts.
 // Automations act as their site, never as the person deploying or triggering
 // them. Integrations require site grants and approvals; connected accounts are
 // unavailable. Within their site, automations act as owners.
 type Automation struct {
+	Input       json.RawMessage   `json:"inputSchema,omitempty"`
 	Name        string            `json:"name"`
 	Description string            `json:"description,omitempty"`
 	Schedule    string            `json:"schedule,omitempty"`
@@ -48,23 +49,27 @@ type ScheduledAutomation struct {
 
 // AutomationRun records one script's result and bounded operation history.
 type AutomationRun struct {
-	Event      *DurableEvent         `json:"event,omitempty"`
-	ID         string                `json:"id"`
-	Site       string                `json:"site"`
-	Automation string                `json:"automation"`
-	Trigger    string                `json:"trigger"`
-	DryRun     bool                  `json:"dryRun,omitempty"`
-	Status     string                `json:"status"`
-	StartedAt  time.Time             `json:"startedAt"`
-	FinishedAt time.Time             `json:"finishedAt,omitzero"`
-	Error      string                `json:"error,omitempty"`
-	StartedBy  *Person               `json:"startedBy,omitempty"`
-	Revision   string                `json:"revision,omitempty"`
-	SourceHash string                `json:"sourceHash,omitempty"`
-	Output     json.RawMessage       `json:"output,omitempty"`
-	Truncated  bool                  `json:"truncated,omitempty"`
-	Logs       []AutomationLog       `json:"logs,omitempty"`
-	Operations []AutomationOperation `json:"operations,omitempty"`
+	WorkflowID    string                `json:"workflowId,omitempty"`
+	WorkflowLease string                `json:"-"`
+	Input         json.RawMessage       `json:"input,omitempty"`
+	WakeAt        time.Time             `json:"wakeAt,omitzero"`
+	Event         *DurableEvent         `json:"event,omitempty"`
+	ID            string                `json:"id"`
+	Site          string                `json:"site"`
+	Automation    string                `json:"automation"`
+	Trigger       string                `json:"trigger"`
+	DryRun        bool                  `json:"dryRun,omitempty"`
+	Status        string                `json:"status"`
+	StartedAt     time.Time             `json:"startedAt"`
+	FinishedAt    time.Time             `json:"finishedAt,omitzero"`
+	Error         string                `json:"error,omitempty"`
+	StartedBy     *Person               `json:"startedBy,omitempty"`
+	Revision      string                `json:"revision,omitempty"`
+	SourceHash    string                `json:"sourceHash,omitempty"`
+	Output        json.RawMessage       `json:"output,omitempty"`
+	Truncated     bool                  `json:"truncated,omitempty"`
+	Logs          []AutomationLog       `json:"logs,omitempty"`
+	Operations    []AutomationOperation `json:"operations,omitempty"`
 }
 
 type AutomationLog struct {
@@ -163,6 +168,11 @@ func validateAutomationContext(ctx context.Context, automation Automation) error
 		return fmt.Errorf("invalid automation name %q; use letters, digits, - and _", automation.Name)
 	}
 	label := "automation " + automation.Name
+	if len(automation.Input) > 0 {
+		if _, err := compileActionSchema(automation.Input); err != nil {
+			return fmt.Errorf("%s input: %w", label, err)
+		}
+	}
 	if utf8.RuneCountInString(automation.Description) > maxActionDescriptionSize {
 		return fmt.Errorf("%s: the description is longer than %d characters", label, maxActionDescriptionSize)
 	}
@@ -258,6 +268,8 @@ func SameAutomationSchedule(a, b Automation) bool {
 }
 
 type automationRunner struct {
+	checkpoint       string
+	checkpointCalls  int
 	server           *Server
 	site             string
 	automation       Automation
@@ -282,7 +294,9 @@ func (s *Server) runAutomation(ctx context.Context, site string, automation Auto
 		run.SourceHash = fmt.Sprintf("%x", digest)
 	}
 	output, err := runner.executeScript(ctx)
-	if err != nil {
+	if !run.WakeAt.IsZero() {
+		run.Status = "waiting"
+	} else if err != nil {
 		run.Status = RunFailed
 		run.Error = err.Error()
 	} else {

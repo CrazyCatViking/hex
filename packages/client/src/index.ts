@@ -96,7 +96,8 @@ export interface PermissionPolicy {
         | "integration"
         | "site-action"
         | "action-consumer"
-        | "event";
+        | "event"
+        | "workflow";
       resource: string;
       except?: string[];
       operations: string[];
@@ -303,6 +304,29 @@ export function createHexClient(options: ClientOptions) {
   }
 
   return {
+    workflows: {
+      start(name: string, input: unknown, options: { idempotencyKey: string }) {
+        return requestJSON<{ id: string; status: string }>(
+          `${root}/workflows`,
+          jsonBody("POST", { ...options, name, input }),
+        );
+      },
+      get(id: string) {
+        return requestJSON(`${root}/workflows/${validateName(id)}`);
+      },
+      retry(id: string) {
+        return requestJSON(
+          `${root}/workflows/${validateName(id)}/retry`,
+          jsonBody("POST", {}),
+        );
+      },
+      cancel(id: string) {
+        return requestJSON(
+          `${root}/workflows/${validateName(id)}/cancel`,
+          jsonBody("POST", {}),
+        );
+      },
+    },
     events: {
       define(
         name: string,

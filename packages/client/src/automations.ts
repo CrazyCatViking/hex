@@ -70,6 +70,21 @@ export interface AutomationDocument<T = Record<string, JSONValue>> {
  */
 export interface AutomationContext {
   readonly site: string;
+  readonly input: JSONValue;
+  readonly workflowId: string;
+  readonly workflow: {
+    start(
+      name: string,
+      input: JSONValue,
+      options: { idempotencyKey: string },
+    ): Promise<{ id: string }>;
+    wait<T = JSONValue>(id: string): Promise<T>;
+    sleep(name: string, milliseconds: number): Promise<void>;
+    step<T extends JSONValue>(
+      name: string,
+      callback: () => T | Promise<T>,
+    ): Promise<T>;
+  };
   readonly automation: string;
   readonly run: Readonly<{
     id: string;

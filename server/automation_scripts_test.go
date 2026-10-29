@@ -142,7 +142,7 @@ func TestAutomationScriptActionsAndLimits(t *testing.T) {
 func TestAutomationScriptMetadataAndRevision(t *testing.T) {
 	server, _, _, _ := setupAutomations(t, demoGrant)
 	definition := hex.Automation{Name: "metadata", Script: &hex.AutomationScript{Source: `export default hex => {
-	  if ("steps" in hex || "input" in hex || "item" in hex || "index" in hex) throw new Error("legacy workflow state");
+	  if ("steps" in hex || hex.input !== null || "item" in hex || "index" in hex) throw new Error("unexpected workflow state");
 	  const prior = [2,3];
 	  return prior.map((item,index) => ({value:item*2,index,prior,trigger:hex.run.trigger}));
 	};`}}

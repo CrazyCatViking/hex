@@ -30,6 +30,18 @@
     events: {
       publish: async (name, data, options) => request("event", { ...options, name, data }),
     },
+    workflow: {
+      start: async (name, input = {}, options = {}) => request("workflow-start", { ...options, name, input }),
+      wait: async (id) => request("workflow-wait", { id }),
+      sleep: async (name, milliseconds) => request("workflow-sleep", { name, milliseconds }),
+      step: async (name, callback) => {
+        const step = request("step-begin", { name });
+        if (step.done) return step.output;
+        const output = (await callback()) ?? null;
+        request("step-complete", { name, output });
+        return output;
+      },
+    },
     ai: {
       complete: async (requestInput) => request("ai", requestInput),
     },

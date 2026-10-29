@@ -30,8 +30,14 @@ export default async function run(hex) {
   await hex.call("post-message");
   // @ts-expect-error All workflow state lives in JavaScript, not declared steps.
   void hex.steps;
-  // @ts-expect-error Metadata does not configure script inputs.
+  // Workflow input is supplied by the durable job.
   void hex.input;
+  await hex.workflow.step("count", async () => count);
+  await hex.workflow.start("child", { count }, { idempotencyKey: "child-1" });
+  // @ts-expect-error Workflow keys are required for durable enqueueing.
+  await hex.workflow.start("child", { count }, {});
+  // @ts-expect-error Browsers cannot choose site execution authority.
+  await hex.sites.call("inventory", "reserve", {}, { version: 1, as: "user" });
   return { count };
 }
 

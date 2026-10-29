@@ -14,6 +14,7 @@ func (s *Server) RunBackground(ctx context.Context) {
 	var tasks sync.WaitGroup
 	if s.eventsEnabled() {
 		tasks.Go(func() { s.runEventDispatcher(ctx) })
+		tasks.Go(func() { s.runWorkflowDispatcher(ctx) })
 	}
 	if s.automationsEnabled() {
 		tasks.Go(func() { s.runAutomationScheduler(ctx) })

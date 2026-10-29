@@ -74,6 +74,8 @@ func (r *automationRunner) executeScript(ctx context.Context) (json.RawMessage, 
 		return nil, err
 	}
 	metadata := map[string]any{
+		"input":      r.run.Input,
+		"workflowId": r.run.WorkflowID,
 		"event":      r.run.Event,
 		"site":       r.site,
 		"automation": r.automation.Name,
@@ -107,6 +109,22 @@ func decodeScriptInput(input json.RawMessage, value any) error {
 }
 
 func (r *automationRunner) scriptInvoke(ctx context.Context, kind string, input json.RawMessage) (output any, err error) {
+	if !r.run.WakeAt.IsZero() {
+		return nil, errWorkflowSuspended
+	}
+	if r.run.WorkflowID != "" {
+		document, err := r.server.config.Database.Get(ctx, systemSite, "workflows", r.run.WorkflowID)
+		if err != nil {
+			return nil, err
+		}
+		var workflow Workflow
+		if err := json.Unmarshal(document.Data, &workflow); err != nil {
+			return nil, err
+		}
+		if workflow.Lease != r.run.WorkflowLease || workflow.Status != "running" || workflow.LeaseUntil.Before(time.Now()) {
+			return nil, ErrForbidden
+		}
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -155,6 +173,8 @@ func (r *automationRunner) scriptInvoke(ctx context.Context, kind string, input 
 		r.run.Operations = append(r.run.Operations, operation)
 	}()
 	switch kind {
+	case "workflow-start", "workflow-wait", "workflow-sleep", "step-begin", "step-complete":
+		return r.workflowOperation(ctx, kind, input)
 	case "event":
 		var request struct {
 			Name           string          `json:"name"`
@@ -180,6 +200,10 @@ func (r *automationRunner) scriptInvoke(ctx context.Context, kind string, input 
 			return nil, err
 		}
 		operation.Target = request.Target + "." + request.Action
+		if request.IdempotencyKey == "" && r.checkpoint != "" {
+			r.checkpointCalls++
+			request.IdempotencyKey = internalKey(r.run.WorkflowID, r.checkpoint, fmt.Sprint(r.checkpointCalls))
+		}
 		authorization, err := r.server.automationAuthorization(ctx, r.site, r.automation.Name)
 		if err != nil {
 			return nil, automationError(err)

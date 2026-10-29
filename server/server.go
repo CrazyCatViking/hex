@@ -225,6 +225,7 @@ func (s *Server) registerRoutes() {
 	s.registerAIRoutes()
 	s.registerAutomationRoutes()
 	s.registerEventRoutes()
+	s.registerWorkflowRoutes()
 	s.registerManageRoutes()
 	s.registerAdminAccessRoutes()
 	s.registerPortalConnectionRoutes()
