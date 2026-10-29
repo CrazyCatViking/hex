@@ -79,10 +79,10 @@ export async function verifyAnalyticsPortal(port) {
     const appIcon = await page.request.get(`${base}/api/hex/sites/demo/icon`);
     assert.equal(appIcon.status(), 200);
     assert.match(await appIcon.text(), /demo-app-icon/);
-    await page.waitForFunction(() =>
-      [...document.querySelectorAll("img[data-site-icon]")].some(
-        (image) => image.complete && image.naturalWidth > 0,
-      ),
+    assert.equal(
+      await page.locator("img[data-site-icon]").count(),
+      0,
+      "Admin reports do not fetch app assets without app access",
     );
     await page.getByRole("link", { name: "Sites", exact: true }).click();
     await page.locator('input[name="q"]').fill("does-not-exist");
@@ -91,18 +91,18 @@ export async function verifyAnalyticsPortal(port) {
         response.url().includes("/admin/sites?") &&
         response.request().headers()["hx-request"] === "true",
     );
-    await page.getByRole("button", { name: "Apply", exact: true }).click();
+    await page.getByRole("button", { name: "Search", exact: true }).click();
     assert.equal((await filtered).status(), 200);
-    await page.getByText("No sites match these filters.").waitFor();
+    await page.getByText("No sites match your search.").waitFor();
     await page.locator('input[name="q"]').fill("demo");
     const refiltered = page.waitForResponse(
       (response) =>
         response.url().includes("/admin/sites?") &&
         response.request().headers()["hx-request"] === "true",
     );
-    await page.getByRole("button", { name: "Apply", exact: true }).click();
+    await page.getByRole("button", { name: "Search", exact: true }).click();
     await refiltered;
-    await page.locator('a[href^="/admin/sites/demo?"]').first().click();
+    await page.locator('a[href="/admin/sites/demo"]').first().click();
     assert.equal(
       (await page.locator(".analytics-header .eyebrow").textContent()).trim(),
       "Site analytics",

@@ -107,21 +107,22 @@ func TestSiteAccessLifecycle(t *testing.T) {
 	// Viewers and owners use the namespace; outsiders and anonymous callers do not.
 	requestAs(t, server, member, "GET", "/api/sites/demo/db/tasks/a", nil, 200)
 	requestAs(t, server, owner, "GET", "/api/sites/demo/db/tasks/a", nil, 200)
-	requestAs(t, server, admin, "GET", "/api/sites/demo/db/tasks/a", nil, 200)
+	requestAs(t, server, admin, "GET", "/api/sites/demo/db/tasks/a", nil, 403)
 	requestAs(t, server, outsider, "GET", "/api/sites/demo/db/tasks/a", nil, 403)
 	requestAs(t, server, outsider, "PUT", "/api/sites/demo/files/report.txt", []byte("data"), 403)
 	requestAs(t, server, nil, "GET", "/api/sites/demo/db/tasks/a", nil, 401)
 
-	// Only owners and admins manage the policy; a takeover attempt fails.
+	// Only owners manage the policy without explicit elevation.
 	requestAs(t, server, member, "GET", "/api/hex/sites/demo/access", nil, 403)
 	takeover := []byte(`{"owners":["user:outsider-id"],"viewers":["group:unrelated"]}`)
 	requestAs(t, server, outsider, "PUT", "/api/hex/sites/demo/access", takeover, 403)
 	requestAs(t, server, owner, "GET", "/api/hex/sites/demo/access", nil, 200)
 
-	// An owner cannot lock themselves out; admins may hand the policy over.
+	// An owner cannot lock themselves out; admins have no implicit ownership.
 	lockout := []byte(`{"owners":["user:someone-else"],"viewers":["group:sales"]}`)
 	requestAs(t, server, owner, "PUT", "/api/hex/sites/demo/access", lockout, 400)
-	putPolicy(t, server, admin, "demo", `{"owners":["user:owner-id","group:ops"],"viewers":["group:sales","group:ops"]}`)
+	requestAs(t, server, admin, "PUT", "/api/hex/sites/demo/access", []byte(`{"owners":["user:admin-id"]}`), 403)
+	putPolicy(t, server, owner, "demo", `{"owners":["user:owner-id","group:ops"],"viewers":["group:sales","group:ops"]}`)
 
 	// Omitting owners keeps the current ones.
 	putPolicy(t, server, owner, "demo", `{"viewers":["group:sales"]}`)

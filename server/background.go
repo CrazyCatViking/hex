@@ -21,5 +21,8 @@ func (s *Server) RunBackground(ctx context.Context) {
 	if s.config.IntegrationAudit != nil {
 		tasks.Go(func() { s.cleanUpIntegrationAudit(ctx) })
 	}
+	if s.config.Analytics != nil && s.config.Sites != nil {
+		tasks.Go(func() { s.importAnalyticsHistory(ctx) })
+	}
 	tasks.Wait()
 }

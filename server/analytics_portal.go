@@ -31,10 +31,11 @@ type adminSiteRow struct {
 	Published bool
 	CreatedAt time.Time
 	TrafficTotals
-	LastVisit string
-	ViewsText string
-	ViewsBar  string
-	DetailURL string
+	LastVisit       string
+	ViewsText       string
+	ViewsBar        string
+	DetailURL       string
+	ownerPrincipals []string
 }
 
 type adminUserRow struct {
@@ -88,48 +89,53 @@ type AnalyticsView struct {
 type adminView struct {
 	Chrome
 	AnalyticsView
-	Section      string
-	Title        string
-	RowsHeading  string
-	Adoption     []metricCard
-	TopSites     []rankedRow
-	TopPeople    []rankedRow
-	Activity     []activityItem
-	MoreActivity []activityItem
-	Status       collectionStatus
-	SiteRow      *adminSiteRow
-	UserRow      *adminUserRow
-	SectionLinks map[string]string
-	AISpend      bool
-	Audit        bool
-	QueryText    string
-	Sort         string
-	SortChoices  []choice
-	FilterUser   string
-	Counts       adminInventoryCounts
-	Sites        []adminSiteRow
-	Users        []adminUserRow
-	Previous     string
-	Next         string
-	Page         int
-	Pages        int
-	TotalRows    int
-	Collector    *TrafficCollectorStatus
-	Failures     uint64
-	Global       bool
-	SiteDetail   bool
-	UserDetail   bool
-	FilterURL    string
+	Section               string
+	Title                 string
+	RowsHeading           string
+	Adoption              []metricCard
+	TopSites              []rankedRow
+	TopPeople             []rankedRow
+	Activity              []activityItem
+	MoreActivity          []activityItem
+	Status                collectionStatus
+	SiteRow               *adminSiteRow
+	UserRow               *adminUserRow
+	SectionLinks          map[string]string
+	AISpend               bool
+	Audit                 bool
+	QueryText             string
+	Sort                  string
+	SortChoices           []choice
+	FilterUser            string
+	Counts                adminInventoryCounts
+	Sites                 []adminSiteRow
+	Users                 []adminUserRow
+	Previous              string
+	Next                  string
+	Page                  int
+	Pages                 int
+	TotalRows             int
+	Collector             *TrafficCollectorStatus
+	Failures              uint64
+	Global                bool
+	SiteDetail            bool
+	UserDetail            bool
+	FilterURL             string
+	ImportPending         bool
+	ComparisonUnavailable bool
 }
 
 func (s *Server) registerAnalyticsRoutes() {
-	if s.config.Analytics == nil || s.config.Identity == nil {
+	if s.config.Identity == nil || s.config.Analytics == nil && !s.manageEnabled() {
 		return
 	}
 	s.mux.HandleFunc("GET /admin", s.adminPage)
 	s.mux.HandleFunc("GET /admin/sites", s.adminPage)
 	s.mux.HandleFunc("GET /admin/sites/{site}", s.adminPage)
 	s.mux.HandleFunc("GET /admin/users", s.adminPage)
+	if s.config.Analytics == nil {
+		return
+	}
 	s.mux.HandleFunc("GET /api/hex/admin/analytics", s.adminAnalytics)
 	s.mux.HandleFunc("GET /api/hex/admin/analytics.csv", s.adminAnalyticsCSV)
 	s.mux.HandleFunc("GET /api/hex/manage/sites/{site}/analytics", s.siteAnalytics)
@@ -217,15 +223,6 @@ func (s *Server) adminInventory(ctx context.Context) ([]adminSiteRow, adminInven
 	if err != nil {
 		return nil, counts, err
 	}
-	var principals []string
-	for _, access := range policies {
-		principals = append(principals, access.Owners...)
-	}
-	slices.Sort(principals)
-	ownerLabels := make(map[string]principalLabel)
-	for _, label := range s.describePrincipals(ctx, slices.Compact(principals)) {
-		ownerLabels[label.Principal] = label
-	}
 	creators := make(map[string]bool)
 	now := time.Now()
 	for _, site := range sites {
@@ -246,13 +243,13 @@ func (s *Server) adminInventory(ctx context.Context) ([]adminSiteRow, adminInven
 		row.Access, row.AccessTone = audience(access, exists)
 		var owners []string
 		for _, principal := range access.Owners {
-			owner := ownerLabels[principal]
-			owners = append(owners, owner.Name)
-			if owner.Kind == "user" {
-				_, id, _ := strings.Cut(owner.Principal, ":")
+			owners = append(owners, principal)
+			kind, id, _ := splitPrincipal(principal)
+			if kind == "user" {
 				row.OwnerIDs = append(row.OwnerIDs, id)
 			}
 		}
+		row.ownerPrincipals = access.Owners
 		row.Owners = strings.Join(owners, ", ")
 		counts.Sites++
 		if metadata != nil && metadata.Kind == KindArtifact {
@@ -263,17 +260,6 @@ func (s *Server) adminInventory(ctx context.Context) ([]adminSiteRow, adminInven
 		rows = append(rows, row)
 	}
 	counts.Creators = len(creators)
-	// Import server-recorded metadata/history once. Older sites without a
-	// verified creator remain unknown; deleted history cannot be reconstructed.
-	s.analyticsBootstrap.Lock()
-	defer s.analyticsBootstrap.Unlock()
-	if !s.analyticsBootstrapped {
-		failures := s.analyticsFailures.Load()
-		for _, row := range rows {
-			s.recordPublication(ctx, row.Name)
-		}
-		s.analyticsBootstrapped = failures == s.analyticsFailures.Load()
-	}
 	return rows, counts, nil
 }
 
@@ -298,7 +284,7 @@ func analyticsLastVisit(at time.Time) string {
 	return relativeTime(at, time.Now())
 }
 
-func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
+func (s *Server) adminReportPage(w http.ResponseWriter, r *http.Request) {
 	identity, ok := s.adminCaller(w, r)
 	if !ok {
 		return
@@ -312,23 +298,56 @@ func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	sites, counts, err := s.adminInventory(r.Context())
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	var sites []adminSiteRow
+	var counts adminInventoryCounts
+	if query.Site != "" {
+		sites, counts, err = s.adminDetailInventory(ctx, query.Site)
+	} else {
+		sites, counts, err = s.adminInventory(ctx)
+	}
 	if err != nil {
-		writeServerError(w, err)
+		s.adminReportError(w, r, err)
 		return
 	}
-	report, err := s.config.Analytics.QueryAnalytics(r.Context(), query)
+	section := "overview"
+	if r.URL.Path == "/admin/users" {
+		section = "users"
+	}
+	if query.Site != "" {
+		section = "site"
+	}
+	if query.User != "" {
+		section = "user"
+		// Visited-site pages have a fixed page-view ordering in storage. Do not
+		// re-filter or re-sort a partial page using legacy directory controls.
+		values.Del("q")
+		values.Del("sort")
+	}
+	page, _ := adminPageNumber(values)
+	request := AdminAnalyticsQuery{AnalyticsQuery: query, Section: section, Search: strings.TrimSpace(values.Get("q")), Sort: values.Get("sort"), Page: page, Limit: managePageSize}
+	var result AdminAnalyticsResult
+	if reader, ok := s.config.Analytics.(AdminAnalyticsReader); ok {
+		result, err = reader.QueryAdminAnalytics(ctx, request)
+	} else {
+		var legacy AnalyticsReport
+		legacy, err = s.config.Analytics.QueryAnalytics(ctx, query)
+		result = BoundAdminAnalytics(legacy, request)
+	}
 	if err != nil {
-		writeServerError(w, err)
+		s.adminReportError(w, r, err)
 		return
 	}
+	report := result.AnalyticsReport
 	now := time.Now()
 	view := adminView{
 		Chrome: s.chromeFor(identity, "admin"), AnalyticsView: newAnalyticsView(report, now), Counts: counts,
 		Section: "overview", Title: "Platform overview", QueryText: strings.TrimSpace(values.Get("q")), Sort: values.Get("sort"),
 		FilterUser: query.User, Failures: s.analyticsFailures.Load(), Global: query.Site == "" && query.User == "",
 		SiteDetail: query.Site != "", UserDetail: query.User != "",
-		FilterURL: r.URL.Path,
+		FilterURL:     r.URL.Path,
+		ImportPending: s.analyticsImportPending.Load(),
 	}
 	if s.config.TrafficCollector != nil {
 		status := s.config.TrafficCollector.Status()
@@ -344,6 +363,20 @@ func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
 		view.Section, view.Title = "users", "People"
 	}
 	view.Sites, view.Users = buildAdminRows(sites, report, values)
+	if section == "users" {
+		ids := make(map[string]bool)
+		for _, person := range report.People {
+			ids[person.ID] = true
+		}
+		view.Users = slices.DeleteFunc(view.Users, func(row adminUserRow) bool { return !ids[row.ID] })
+	}
+	if section == "user" {
+		ids := make(map[string]bool)
+		for _, row := range report.Sites {
+			ids[row.Key] = true
+		}
+		view.Sites = slices.DeleteFunc(view.Sites, func(row adminSiteRow) bool { return !ids[row.Name] })
+	}
 	if query.Site != "" {
 		view.Title = query.Site
 		for index := range view.Sites {
@@ -364,27 +397,39 @@ func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	previous, comparable := s.previousReport(r.Context(), query)
+	previous, comparable := AnalyticsReport{}, false
+	if section != "users" {
+		previous, comparable = s.previousReport(ctx, query)
+		view.ComparisonUnavailable = !comparable
+	}
 	s.describeAdminReport(&view, report, previous, comparable, values, now)
-	if view.Section == "sites" || view.Section == "users" && query.User == "" {
-		total := len(view.Sites)
-		if view.Section == "users" {
-			total = len(view.Users)
-		}
-		start, end, err := paginateAdmin(&view, values, r.URL.Path, total)
+	if section == "users" || section == "user" {
+		values.Set("page", strconv.Itoa(max(1, result.Page)))
+		_, _, err := paginateAdmin(&view, values, r.URL.Path, result.Total)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
+			writeError(w, 400, err.Error())
 			return
 		}
-		if view.Section == "sites" {
-			view.RowsHeading = plural(total, "site")
-			view.Sites = view.Sites[start:end]
+		if section == "users" {
+			view.RowsHeading = peopleCount(result.Total)
 		} else {
-			view.RowsHeading = peopleCount(total)
-			view.Users = view.Users[start:end]
+			view.RowsHeading = plural(result.Total, "visited site")
 		}
 	}
+	s.labelAdminOwners(ctx, view.Sites)
+	for index := range view.Sites {
+		view.Sites[index].IconURL = ""
+	}
 	s.writePortalPage(w, "admin", view)
+}
+
+var errAdminPage = errors.New("page must be a positive integer no greater than 1000000")
+
+func (s *Server) adminReportError(w http.ResponseWriter, r *http.Request, err error) {
+	slog.Error("load admin report", "error", err)
+	s.writePortalPage(w, "admin-report-error", adminShellView{
+		Chrome: s.chromeFor(s.requestIdentity(r), "admin"), LoadURL: r.URL.RequestURI(),
+	})
 }
 
 // describeAdminReport adds the headline numbers, top lists, activity feed
@@ -578,12 +623,14 @@ func buildAdminRows(sites []adminSiteRow, report AnalyticsReport, values url.Val
 	sort := values.Get("sort")
 	slices.SortFunc(filteredSites, func(a, b adminSiteRow) int {
 		if sort == "name" {
-			return strings.Compare(strings.ToLower(a.Title), strings.ToLower(b.Title))
+			if order := strings.Compare(strings.ToLower(a.Title), strings.ToLower(b.Title)); order != 0 {
+				return order
+			}
 		}
-		if sort == "recent" {
+		if sort == "recent" && !a.Timestamp.Equal(b.Timestamp) {
 			return b.Timestamp.Compare(a.Timestamp)
 		}
-		if a.PageViews != b.PageViews {
+		if sort != "name" && sort != "recent" && a.PageViews != b.PageViews {
 			return compareDescending(a.PageViews, b.PageViews)
 		}
 		return strings.Compare(a.Name, b.Name)
@@ -591,12 +638,14 @@ func buildAdminRows(sites []adminSiteRow, report AnalyticsReport, values url.Val
 	decorateAdminRows(filteredSites, users, report.Query)
 	slices.SortFunc(users, func(a, b adminUserRow) int {
 		if sort == "name" {
-			return strings.Compare(strings.ToLower(a.Label), strings.ToLower(b.Label))
+			if order := strings.Compare(strings.ToLower(a.Label), strings.ToLower(b.Label)); order != 0 {
+				return order
+			}
 		}
-		if sort == "recent" {
+		if sort == "recent" && !a.LastSeen.Equal(b.LastSeen) {
 			return b.LastSeen.Compare(a.LastSeen)
 		}
-		if a.PageViews != b.PageViews {
+		if sort != "name" && sort != "recent" && a.PageViews != b.PageViews {
 			return compareDescending(a.PageViews, b.PageViews)
 		}
 		return strings.Compare(a.ID, b.ID)
@@ -721,11 +770,9 @@ func (s *Server) adminAnalyticsCSV(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if _, _, err := s.adminInventory(r.Context()); err != nil {
-		writeServerError(w, err)
-		return
-	}
-	report, err := s.analyticsSummary(r.Context(), query)
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	report, err := s.analyticsSummary(ctx, query)
 	if err != nil {
 		writeServerError(w, err)
 		return

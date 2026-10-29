@@ -46,13 +46,13 @@ func (d *Database) Close() {
 func (d *Database) Migrate(ctx context.Context) error {
 	return d.migrate(ctx, d.migrateDocuments, d.migratePeople, d.migrateAnalytics,
 		d.migrateSitePolicies, d.migrateIntegrations, d.migrateAutomations,
-		d.migrateAIUsage, d.migrateIntegrationAudit)
+		d.migrateAIUsage, d.migrateIntegrationAudit, d.migrateAdminAccess)
 }
 
 // MigratePlatform prepares the durable platform stores, independently of app documents.
 func (d *Database) MigratePlatform(ctx context.Context) error {
 	return d.migrate(ctx, d.migratePeople, d.migrateSitePolicies, d.migrateIntegrations,
-		d.migrateAutomations, d.migrateAIUsage, d.migrateIntegrationAudit)
+		d.migrateAutomations, d.migrateAIUsage, d.migrateIntegrationAudit, d.migrateAdminAccess)
 }
 
 // All public migration entry points share this database-wide lock. PostgreSQL's
@@ -147,7 +147,7 @@ func (d *Database) MigrateAnalytics(ctx context.Context) error {
 	return d.migrate(ctx, d.migrateAnalytics)
 }
 func (d *Database) MigrateAccess(ctx context.Context) error {
-	return d.migrate(ctx, d.migrateSitePolicies)
+	return d.migrate(ctx, d.migrateSitePolicies, d.migrateAdminAccess)
 }
 func (d *Database) MigrateIntegrations(ctx context.Context) error {
 	return d.migrate(ctx, d.migrateIntegrations)

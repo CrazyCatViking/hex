@@ -37,6 +37,8 @@ type Chrome struct {
 	Connections  bool
 	Integrations bool
 	LogoutURL    string
+	AdminAI      bool
+	AdminAudit   bool
 	// AdminLink is where the Admin navigation leads platform admins: the
 	// analytics overview, or the AI page when only AI is enabled.
 	AdminLink string
@@ -156,7 +158,11 @@ func (s *Server) chromeFor(identity *Identity, active string) Chrome {
 		Analytics: s.config.Analytics != nil, Connections: s.connectionsEnabled() && identity != nil,
 		Integrations: s.portalIntegrationsEnabled() && identity != nil, LogoutURL: s.config.LogoutURL,
 	}
+	view.AdminAI = s.aiAccountingEnabled()
+	view.AdminAudit = s.integrationAuditEnabled()
 	switch {
+	case s.manageEnabled():
+		view.AdminLink = "/admin/sites"
 	case s.config.Analytics != nil && s.config.Identity != nil:
 		view.AdminLink = "/admin"
 	case s.aiAccountingEnabled() && s.config.Identity != nil:
@@ -331,7 +337,7 @@ func (s *Server) personalSites(ctx context.Context, identity *Identity, all bool
 		siteURL, _ := s.siteURL(name)
 		card := s.cardForSite(name, siteURL, metadata, now)
 		card.Access, card.AccessTone = audience(access, exists)
-		card.Owned = owned || s.isAdmin(identity)
+		card.Owned = owned
 
 		if owned || all {
 			mine = append(mine, card)

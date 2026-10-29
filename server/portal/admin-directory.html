@@ -1,0 +1,153 @@
+{{define "admin-sections"}}
+<nav class="tabs" aria-label="Admin sections">
+  {{if .Analytics}}<a href="/admin">Overview</a>{{end}}<a href="/admin/sites"
+    >Sites</a
+  >{{if .Analytics}}<a href="/admin/users">People</a>{{end}}{{if .AdminAI}}<a
+    href="/admin/ai"
+    >AI spend</a
+  >{{end}}{{if .AdminAudit}}<a href="/admin/integration-audit"
+    >Integration audit</a
+  >{{end}}
+</nav>
+{{end}} {{define "admin-directory"}}
+<!doctype html>
+<html lang="en">
+  <head>
+    {{template "head" (printf "%s · Admin sites" .Platform)}}
+  </head>
+  <body hx-headers='{"X-Hex-Request":"1"}'>
+    {{template "header" .Chrome}}
+    <main id="main" class="page">
+      <header class="page-heading">
+        <div>
+          <p class="eyebrow">Platform admin</p>
+          <h1>Sites</h1>
+          <p class="lead">
+            Find every published app and shared file. Management and app access
+            still require site permissions or an explicit temporary grant.
+          </p>
+        </div>
+      </header>
+      {{template "admin-sections" .Chrome}}
+      <form
+        class="toolbar"
+        action="/admin/sites"
+        method="get"
+        role="search"
+        hx-get="/admin/sites"
+        hx-target="#main"
+        hx-select="#main"
+        hx-swap="outerHTML settle:0ms"
+        hx-push-url="true"
+        hx-trigger="submit, input changed delay:300ms, change"
+        hx-sync="this:replace"
+      >
+        <label class="field field-grow"
+          ><span class="field-label">Search sites</span
+          ><input
+            type="search"
+            name="q"
+            value="{{.Query}}"
+            placeholder="Title, site name, creator or owner ID"
+            autocomplete="off" /></label
+        ><label class="field"
+          ><span class="field-label">Sort</span
+          ><select name="sort">
+            {{range .SortChoices}}
+            <option value="{{.Value}}" {{.Attr}}>{{.Label}}</option>
+            {{end}}
+          </select></label
+        ><button class="button button-secondary" type="submit">Search</button>
+      </form>
+      <p class="muted">
+        Inventory does not wait for analytics. Page views and other activity are
+        available in each site's analytics report.
+      </p>
+      <ul class="site-list">
+        {{range .Sites}}
+        <li class="site-row">
+          {{template "site-icon" .}}
+          <div class="site-row-main">
+            <a class="site-title" href="/manage/{{.Name}}">{{.Title}}</a
+            ><span class="muted"
+              >{{.Name}} · {{.Kind}}{{if .Updated}} · updated
+              {{.Updated}}{{end}}</span
+            >{{if .Owners}}<span class="muted">Owners: {{.Owners}}</span>{{end}}
+          </div>
+          {{template "access-badge" .}}
+          <div class="row-actions">
+            <a class="button button-small" href="/manage/{{.Name}}">Manage</a
+            >{{if $.Analytics}}<a
+              class="button button-secondary button-small"
+              href="/admin/sites/{{.Name}}"
+              >Analytics</a
+            >{{end}}
+          </div>
+        </li>
+        {{else}}
+        <li class="empty-state">No sites match your search.</li>
+        {{end}}
+      </ul>
+      {{template "pagination" .Pagination}}
+    </main>
+    {{template "footer" .Chrome}}
+  </body>
+</html>
+{{end}} {{define "admin-shell"}} <!doctype html>
+<html lang="en">
+  <head>
+    {{template "head" (printf "%s · Admin" .Platform)}}
+  </head>
+  <body hx-headers='{"X-Hex-Request":"1"}'>
+    {{template "header" .Chrome}}
+    <main id="main" class="page">
+      <div
+        id="admin-content"
+        hx-get="{{.LoadURL}}"
+        hx-trigger="load"
+        hx-select="#admin-content"
+        hx-swap="outerHTML settle:0ms"
+      >
+        <header class="page-heading">
+          <div>
+            <p class="eyebrow">Platform admin</p>
+            <h1>{{.Title}}</h1>
+          </div>
+        </header>
+        {{template "admin-sections" .Chrome}}
+        <section class="panel" aria-live="polite">
+          <p>
+            Loading analytics… App discovery is available now in
+            <a href="/admin/sites">Sites</a>.
+          </p>
+          <noscript><a href="{{.LoadURL}}">Load this report</a></noscript>
+        </section>
+      </div>
+    </main>
+    {{template "footer" .Chrome}}
+  </body>
+</html>
+{{end}} {{define "admin-report-error"}}
+<!doctype html>
+<html lang="en">
+  <head>
+    {{template "head" (printf "%s · Admin" .Platform)}}
+  </head>
+  <body hx-headers='{"X-Hex-Request":"1"}'>
+    {{template "header" .Chrome}}
+    <main id="main" class="page">
+      <div id="admin-content">
+        <p class="banner banner-error" role="alert">
+          Analytics are temporarily unavailable. No missing values have been
+          reported as zero.
+        </p>
+        <p>
+          <a href="{{.LoadURL}}">Try again</a> ·
+          <a href="/admin/sites">Find and manage sites</a>
+        </p>
+      </div>
+    </main>
+    {{template "footer" .Chrome}}
+  </body>
+</html>
+{{end}}

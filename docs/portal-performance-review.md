@@ -6,7 +6,8 @@ The approved direction is now implemented in this checkout (not deployed):
 bounded pin-first Home, `/library` with unified search/scopes/grid/list/paging,
 and paginated **Your sites** using the existing components. Manage, Analytics
 and Copy link remain on manageable cards independently of traffic availability.
-The current per-app management page and platform-admin roles remain intact.
+The current per-app management page remains intact. Platform-admin access now
+requires explicit, audited temporary elevation rather than implicit ownership.
 
 Underlying changes include a five-second descriptive inventory cache with
 coalesced, eight-worker refreshes; fresh batched policies on PostgreSQL/memory;
@@ -53,12 +54,53 @@ another quick input/change event; those existing suites caught and verified this
 timing regression. The global format check still reports the pre-existing,
 unchanged `server/portal/start.html`; changed assets pass targeted formatting.
 
+### Admin performance and explicit access
+
+The follow-up admin implementation is also present locally, not deployed:
+
+- `/admin/sites` is a 12-row searchable inventory independent of analytics,
+  without app-asset probes. Reports render asynchronously with bounded deadlines
+  and explicit unavailable/retry states. Owner labels load only for the page.
+- Historical publication bootstrap runs in `RunBackground`, with four workers,
+  cancellation and per-site retries, never inside inventory requests.
+- PostgreSQL section queries return five overview leaders, 25 people/visited-site
+  rows or one site's summary, and at most 50 recent events. Previous-period
+  comparisons use summary-only reads. Custom analytics providers retain their
+  legacy full-report fallback until they implement `AdminAnalyticsReader`.
+- Platform administration no longer makes callers site owners. Private normal
+  discovery and app APIs follow actual policy. Separate management/app-read/
+  app-write grants require a reason and expire after one hour by default (four
+  hours maximum). Grants and revocations are durable and owner-auditable in
+  PostgreSQL; expiry/revocation is enforced on fresh server-side reads.
+
+A warm synthetic admin inventory benchmark (20 iterations, no simulated remote
+latency) measured 16,156 HTML bytes at 100 apps and 16,157 at 500 apps, about
+2.0 ms and 8.1 ms respectively. Each request performed one fresh policy batch,
+zero storage scans/metadata reads, zero report calls and zero history imports.
+These are local handler measurements, not production latency claims:
+
+```sh
+go test ./server -run '^$' -bench BenchmarkAdminDirectoryAudit -benchtime=20x -count=1 -benchmem
+```
+
+Regression coverage includes private-site nondiscovery, restricted management
+entry, independent scopes, publication/policy management under explicit grants,
+read-only mutation denial, cached-icon/static authorization after revocation,
+existing WebSocket revocation, unsupported/unavailable providers, expiry,
+concurrent renewal and audit retention. Live PostgreSQL tests use independent
+pools for grant/revoke visibility and compare SQL report paging with memory.
+Browser tests cover the actual directory/elevation/revocation flow, separate
+reports, mobile layouts and non-JavaScript reporting.
+
 **Remaining boundaries:** cold descriptive discovery still enumerates storage;
 warm filtering/policy projection is O(number of published sites). Legacy CLI
 list APIs retain their current complete-array contracts. Query-shaped persistent
-directory indexes, fully query-shaped admin/AI reports, and secondary data/file
+directory indexes, query-shaped custom-provider/AI reports, and secondary data/file
 inventories remain follow-up work rather than being claimed as solved here.
-No production deployment or change to admin role semantics was performed.
+No release, push or production deployment was performed. Adoption requires a new
+Go module release and rebuilding/deploying consuming servers on every replica;
+old replicas retain their previous admin bypass. No app republish or browser SDK
+update is required.
 
 ## Initial conclusion
 

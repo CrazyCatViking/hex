@@ -3,10 +3,10 @@
 Hex separates three decisions:
 
 1. **Site admission** (`admission`): who may enter the site's API namespace.
-2. **Site management** (`owners` and platform administrators): who may publish and change permissions.
+2. **Site management** (`owners` or explicit temporary admin management grants): who may publish and change permissions.
 3. **Application authorization** (`roles`, `bindings`, `grants`): which operations callers may perform.
 
-Version 2 policies deny application access unless a grant permits it. Owners and platform administrators do **not** implicitly bypass application rules. They can still change the policy, so this is not a security boundary against policy administrators.
+Version 2 policies deny application access unless a grant permits it. Owners and platform administrators do **not** implicitly bypass application rules. Platform administration alone grants neither ownership nor private-site admission. Administrators can explicitly self-elevate for a limited duration, with a required reason and owner-visible audit; management and app/data privileges are separate. See [temporary administrator access](portal.md#temporary-administrator-access). Policy administrators can deliberately change sharing, so this is not a security boundary against an administrator who chooses to elevate.
 
 Admission accepts `signedIn`, `owners`, and explicit people/directory principals. It never references application permission groups: assigning, making a group default, or deleting a group does not change site entry. Page grants still govern separately protected paths.
 
@@ -228,7 +228,7 @@ Management endpoints require ownership: `GET/PUT/DELETE /api/hex/sites/{site}/ac
 
 Policies reside in the access store, never served app files. `AccessStore.UpdateSiteAccess` must serialize authorization and all mutations across replicas. PostgreSQL uses transaction-scoped advisory and row locks; memory uses a mutex. Each request reads the current policy without a replica-local cache. Already authorized requests and established WebSockets are not retroactively revoked.
 
-Static assets, app APIs, discovery, portal data browsing, actions and automation data operations apply these rules. App hostnames are restricted to their own namespace; management APIs stay on the platform host. Only owners publish/unpublish. `HEX_PUBLISHER_GROUPS` limits new name claims. `HEX_ADMIN_GROUPS` supplies platform policy administrators; configure recovery administrators.
+Static assets, app APIs, discovery, portal data browsing, actions and automation data operations apply these rules. App hostnames are restricted to their own namespace; management APIs stay on the platform host. Owners and explicitly management-elevated admins can publish/unpublish. `HEX_PUBLISHER_GROUPS` limits new name claims. `HEX_ADMIN_GROUPS` supplies platform administrators who may deliberately self-elevate; configure recovery administrators.
 
 The gateway must authenticate requests and strip spoofed identity headers. Never expose the Easy Auth resolver directly to untrusted clients. Store outages and invalid policies fail closed. Strong protection against policy-editing owners needs platform governance, not an application role.
 
@@ -236,6 +236,6 @@ The gateway must authenticate requests and strip spoofed identity headers. Never
 
 Enable `HEX_IDENTITY_PROVIDER=easyauth` behind Easy Auth. Emit assigned group claims (`groupMembershipClaims: ApplicationGroup`) or identity-provider app roles. Group/role membership changes take effect after claims are refreshed; removing a directory membership does not instantly invalidate an existing session. Use exact stable IDs, not email addresses.
 
-`hex dev` supplies identity `local-dev` and local administrator authority. That authority manages policy but does not imply v2 data grants. Policies in the in-memory store reset on restart. Custom persistent stores must preserve the baseline and enforce atomic updates; custom document stores must participate in the guarded mutation protocol for every writer.
+`hex dev` supplies identity `local-dev` and local administrator authority. A first publication explicitly claims ownership; administrator authority alone no longer manages other sites' policies or implies v2 data grants. Policies in the in-memory store reset on restart. Custom persistent stores must preserve the baseline and enforce atomic updates; custom document stores must participate in the guarded mutation protocol for every writer.
 
 See [the legacy mapping reference](access-control-legacy.md) for historical semantics only, and [publishing](publishing.md) for upload behavior.

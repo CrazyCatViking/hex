@@ -229,10 +229,12 @@ func TestPortalIntegrationDiscoveryWithoutApprovalStore(t *testing.T) {
 
 func TestPortalIntegrationAdminRequestIsImmediatelyApproved(t *testing.T) {
 	server, store := setupPortalIntegrations(t, true)
-	admin := principalHeaders("admin", "admin-group")
+	// Administration alone cannot request an integration as a site owner.
+	formRequest(t, server, principalHeaders("admin", "admin-group"), "POST", portalLedgerApproval+"/request", nil, http.StatusForbidden)
+	admin := principalHeaders("owner", "admin-group")
 	formRequest(t, server, admin, "POST", portalLedgerApproval+"/request", url.Values{"reason": {"Admin setup"}}, http.StatusOK)
 	approval, err := store.GetIntegrationApproval(context.Background(), "demo", "ledger")
-	if err != nil || approval.Status != hex.ApprovalApproved || approval.RequestedBy == nil || approval.RequestedBy.ID != "admin" || approval.DecidedBy == nil || approval.DecidedBy.ID != "admin" {
+	if err != nil || approval.Status != hex.ApprovalApproved || approval.RequestedBy == nil || approval.RequestedBy.ID != "owner" || approval.DecidedBy == nil || approval.DecidedBy.ID != "owner" {
 		t.Fatalf("admin request was not immediately approved: %+v %v", approval, err)
 	}
 	page := requestAs(t, server, admin, "GET", "/integrations?site=demo", nil, 200).Body.String()

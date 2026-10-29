@@ -344,10 +344,13 @@ func (s *Server) loadSiteAI(ctx context.Context, site string, identity *Identity
 // manageSiteAIBudget saves a site's limit, whether AI is on for it and the
 // restricted models enabled for it.
 func (s *Server) manageSiteAIBudget(w http.ResponseWriter, r *http.Request) {
-	identity, site, _, _, ok := s.manageCaller(w, r)
+	// Budget/model allocation is a platform governance operation. It does not
+	// grant the administrator permission to open or manage the site's content.
+	identity, ok := s.accessCaller(w, r)
 	if !ok {
 		return
 	}
+	site := r.PathValue("site")
 	if !s.isAdmin(identity) {
 		writeError(w, http.StatusForbidden, "only platform admins change AI budgets")
 		return

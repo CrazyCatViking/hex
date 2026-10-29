@@ -22,6 +22,11 @@ import (
 // section. A non-zero status describes a client error; zero means err is a
 // server failure.
 func (s *Server) publishSiteAccess(ctx context.Context, identity *Identity, site string, published SiteAccess, replace bool) (SiteAccess, []string, int, error) {
+	var err error
+	ctx, err = s.managementContext(ctx, identity, site)
+	if err != nil {
+		return SiteAccess{}, nil, 0, err
+	}
 	if err := ValidatePublishedAccess(published); err != nil {
 		return SiteAccess{}, nil, http.StatusBadRequest, err
 	}
@@ -33,11 +38,11 @@ func (s *Server) publishSiteAccess(ctx context.Context, identity *Identity, site
 
 	var saved SiteAccess
 	status := 0
-	err := s.config.Access.UpdateSiteAccess(ctx, site, func(existing SiteAccess, exists bool) (*SiteAccess, error) {
+	err = s.config.Access.UpdateSiteAccess(ctx, site, func(existing SiteAccess, exists bool) (*SiteAccess, error) {
 		if exists {
 			existing = MigrateSiteAccess(existing)
 		}
-		if err := s.mayChangeAccess(identity, existing, exists); err != nil {
+		if err := s.mayChangeAccess(ctx, identity, site, existing, exists); err != nil {
 			status = http.StatusForbidden
 			return nil, err
 		}
@@ -62,7 +67,7 @@ func (s *Server) publishSiteAccess(ctx context.Context, identity *Identity, site
 			return nil, fmt.Errorf("%s has no recorded local permission baseline; reconcile explicitly with 'hex access reconcile %s --file <policy.json>' to preserve the live policy, or use --replace-access to replace it. Publishing without access leaves permissions unchanged", site, site)
 		}
 		next.Published = nil
-		if err := s.keepsCallerOwner(identity, next); err != nil {
+		if err := s.keepsCallerOwner(ctx, identity, site, next); err != nil {
 			status = http.StatusBadRequest
 			return nil, err
 		}

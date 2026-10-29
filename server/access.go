@@ -351,7 +351,12 @@ func (s *Server) getSiteAccess(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
-	if s.siteRole(identity, access, true) != roleOwner {
+	allowed, err := s.canManageSite(r.Context(), identity, site, access, true)
+	if err != nil {
+		writeServerError(w, err)
+		return
+	}
+	if !allowed {
 		writeError(w, http.StatusForbidden, "only site owners can read the access policy")
 		return
 	}
@@ -394,6 +399,11 @@ func (s *Server) putSiteAccess(w http.ResponseWriter, r *http.Request) {
 // A non-zero status describes a client error; zero means err is a server
 // failure.
 func (s *Server) replaceSiteAccess(ctx context.Context, identity *Identity, site string, requested SiteAccess) (SiteAccess, int, error) {
+	var err error
+	ctx, err = s.managementContext(ctx, identity, site)
+	if err != nil {
+		return SiteAccess{}, 0, err
+	}
 	if err := s.validateSiteAccess(requested); err != nil {
 		return SiteAccess{}, http.StatusBadRequest, err
 	}
@@ -408,16 +418,16 @@ func (s *Server) replaceSiteAccess(ctx context.Context, identity *Identity, site
 
 	var saved SiteAccess
 	status := 0
-	err := s.config.Access.UpdateSiteAccess(ctx, site, func(existing SiteAccess, exists bool) (*SiteAccess, error) {
+	err = s.config.Access.UpdateSiteAccess(ctx, site, func(existing SiteAccess, exists bool) (*SiteAccess, error) {
 		if exists {
 			existing = MigrateSiteAccess(existing)
 		}
-		if err := s.mayChangeAccess(identity, existing, exists); err != nil {
+		if err := s.mayChangeAccess(ctx, identity, site, existing, exists); err != nil {
 			status = http.StatusForbidden
 			return nil, err
 		}
 		saved = s.withOwners(identity, requested, existing, exists)
-		if err := s.keepsCallerOwner(identity, saved); err != nil {
+		if err := s.keepsCallerOwner(ctx, identity, site, saved); err != nil {
 			status = http.StatusBadRequest
 			return nil, err
 		}
@@ -433,8 +443,8 @@ func (s *Server) replaceSiteAccess(ctx context.Context, identity *Identity, site
 
 // mayChangeAccess lets owners change an existing policy and anyone allowed
 // to create sites claim an unowned name.
-func (s *Server) mayChangeAccess(identity *Identity, existing SiteAccess, exists bool) error {
-	if exists && s.siteRole(identity, existing, true) != roleOwner {
+func (s *Server) mayChangeAccess(ctx context.Context, identity *Identity, site string, existing SiteAccess, exists bool) error {
+	if exists && s.siteRole(identity, existing, true) != roleOwner && !temporaryManagement(ctx, site) {
 		return errors.New("only site owners can change the access policy")
 	}
 	if !exists && !s.canCreateSites(identity) {
@@ -458,7 +468,10 @@ func (s *Server) withOwners(identity *Identity, requested, existing SiteAccess, 
 	return requested
 }
 
-func (s *Server) keepsCallerOwner(identity *Identity, access SiteAccess) error {
+func (s *Server) keepsCallerOwner(ctx context.Context, identity *Identity, site string, access SiteAccess) error {
+	if temporaryManagement(ctx, site) && len(access.Owners) > 0 {
+		return nil
+	}
 	if s.siteRole(identity, access, true) != roleOwner {
 		return errors.New("owners must keep you able to manage this policy; include your user or one of your groups")
 	}
@@ -473,12 +486,17 @@ func (s *Server) deleteSiteAccess(w http.ResponseWriter, r *http.Request) {
 
 	site := r.PathValue("site")
 	status := 0
-	err := s.config.Access.UpdateSiteAccess(r.Context(), site, func(access SiteAccess, exists bool) (*SiteAccess, error) {
+	ctx, err := s.managementContext(r.Context(), identity, site)
+	if err != nil {
+		writeServerError(w, err)
+		return
+	}
+	err = s.config.Access.UpdateSiteAccess(ctx, site, func(access SiteAccess, exists bool) (*SiteAccess, error) {
 		if !exists {
 			status = http.StatusNotFound
 			return nil, ErrNotFound
 		}
-		if s.siteRole(identity, access, true) != roleOwner {
+		if s.siteRole(identity, access, true) != roleOwner && !temporaryManagement(ctx, site) {
 			status = http.StatusForbidden
 			return nil, errors.New("only site owners can remove the access policy")
 		}

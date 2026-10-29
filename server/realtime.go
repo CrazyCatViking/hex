@@ -17,6 +17,18 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	canSend := access.write == grantAll
+	check := func(write bool) bool {
+		// A long-lived connection must not retain expired/revoked admin access.
+		if !s.adminHuman(requestAuthorization(r).identity) {
+			return true
+		}
+		authorization, err := s.authorizeSite(r.Context(), requestAuthorization(r).identity, r.PathValue("site"))
+		if err != nil || !authorization.applicationAdmitted() {
+			return false
+		}
+		current := authorization.channel(r.PathValue("channel"))
+		return current.read == grantAll && (!write || current.write == grantAll)
+	}
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
@@ -43,15 +55,15 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		defer cancel()
-		s.receiveMessages(ctx, connection, room, canSend)
+		s.receiveMessages(ctx, connection, room, canSend, check)
 	}()
 
-	streamMessages(ctx, connection, subscription)
+	streamMessages(ctx, connection, subscription, check)
 }
 
 // receiveMessages publishes the client's messages. Subscribers who may only
 // read the channel are disconnected when they try to send.
-func (s *Server) receiveMessages(ctx context.Context, connection *websocket.Conn, room string, canSend bool) {
+func (s *Server) receiveMessages(ctx context.Context, connection *websocket.Conn, room string, canSend bool, check func(bool) bool) {
 	for {
 		messageType, data, err := connection.Read(ctx)
 		if err != nil {
@@ -59,7 +71,7 @@ func (s *Server) receiveMessages(ctx context.Context, connection *websocket.Conn
 			return
 		}
 
-		if !canSend {
+		if !canSend || !check(true) {
 			closeWebSocket(connection, websocket.StatusPolicyViolation, "sending to this channel is restricted")
 			return
 		}
@@ -76,7 +88,7 @@ func (s *Server) receiveMessages(ctx context.Context, connection *websocket.Conn
 	}
 }
 
-func streamMessages(ctx context.Context, connection *websocket.Conn, subscription Subscription) {
+func streamMessages(ctx context.Context, connection *websocket.Conn, subscription Subscription, check func(bool) bool) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
@@ -90,6 +102,10 @@ func streamMessages(ctx context.Context, connection *websocket.Conn, subscriptio
 				closeWebSocket(connection, websocket.StatusTryAgainLater, "subscriber too slow")
 				return
 			}
+			if !check(false) {
+				closeWebSocket(connection, websocket.StatusPolicyViolation, "channel access expired or was revoked")
+				return
+			}
 
 			writeContext, cancel := context.WithTimeout(ctx, 10*time.Second)
 			err := connection.Write(writeContext, websocket.MessageText, data)
@@ -100,6 +116,10 @@ func streamMessages(ctx context.Context, connection *websocket.Conn, subscriptio
 			}
 
 		case <-ticker.C:
+			if !check(false) {
+				closeWebSocket(connection, websocket.StatusPolicyViolation, "channel access expired or was revoked")
+				return
+			}
 			pingContext, cancel := context.WithTimeout(ctx, 10*time.Second)
 			err := connection.Ping(pingContext)
 			cancel()

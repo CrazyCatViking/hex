@@ -448,7 +448,7 @@ func (s *Server) isSiteOwner(ctx context.Context, identity *Identity, site strin
 	if err != nil {
 		return false, err
 	}
-	return s.siteRole(identity, access, exists) == roleOwner, nil
+	return s.canManageSite(ctx, identity, site, access, exists)
 }
 
 // requestIntegrationApproval records a site owner's request. Admins who
@@ -565,16 +565,18 @@ func (s *Server) deleteIntegrationApproval(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) removeSiteIntegrationApproval(ctx context.Context, identity *Identity, site string, integration *registeredIntegration) error {
-	owner, err := s.isSiteOwner(ctx, identity, site)
-	if err != nil {
-		return err
-	}
-	if !owner {
-		return &IntegrationError{Status: http.StatusForbidden, Message: "only the site's owners can withdraw requests"}
-	}
+	// Approval review is platform governance, not access to the app itself.
+	var err error
 	if s.isAdmin(identity) {
 		err = s.config.IntegrationStore.DeleteIntegrationApproval(ctx, site, integration.integration.Name)
 	} else {
+		owner, ownerErr := s.isSiteOwner(ctx, identity, site)
+		if ownerErr != nil {
+			return ownerErr
+		}
+		if !owner {
+			return &IntegrationError{Status: http.StatusForbidden, Message: "only the site's owners can withdraw requests"}
+		}
 		err = s.config.IntegrationStore.WithdrawIntegrationApproval(ctx, site, integration.integration.Name)
 	}
 	if errors.Is(err, ErrForbidden) {

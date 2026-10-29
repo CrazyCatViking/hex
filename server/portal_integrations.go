@@ -271,10 +271,7 @@ func (s *Server) manageIntegrationApprovalMutation(w http.ResponseWriter, r *htt
 	if !ok {
 		return
 	}
-	_, site, _, _, ok := s.manageCaller(w, r)
-	if !ok {
-		return
-	}
+	site := r.PathValue("site")
 	scope := r.URL.Query().Get("view")
 	if scope != "" && scope != "catalog" {
 		writeError(w, http.StatusBadRequest, "invalid integration view")
@@ -283,6 +280,11 @@ func (s *Server) manageIntegrationApprovalMutation(w http.ResponseWriter, r *htt
 	if scope == "catalog" && !s.isAdmin(identity) {
 		writeError(w, http.StatusForbidden, "only platform admins review approvals")
 		return
+	}
+	if scope != "catalog" || operation == "request" {
+		if _, _, _, _, ok := s.manageCaller(w, r); !ok {
+			return
+		}
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
 	if err := r.ParseForm(); err != nil {

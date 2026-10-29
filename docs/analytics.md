@@ -3,8 +3,10 @@
 Hex includes an admin dashboard at `/admin`, site and people inventories at
 `/admin/sites` and `/admin/users`, and an **Analytics** tab on each site's
 management page. Admin pages require the configured platform-admin identity on
-the platform host. Site owners/publishers can see their site's traffic and named
-page visitors. Platform admins can view cross-site and per-user reports.
+the platform host. Site owners and administrators with explicit temporary
+management access can see their site's traffic and named page visitors through
+management. Platform admins retain cross-site and per-user analytics governance;
+this does not admit them to the app or its data.
 
 ## Pages
 
@@ -36,7 +38,11 @@ The pages are written for everyone who looks after a site, not only developers:
   actor and timestamp. These records survive taking down the site. Successful
   publications import existing metadata and all available publication history
   idempotently; deletion recovers that history before removing site records.
-  The dashboard also imports existing sites, including read-only directories.
+  `Server.RunBackground` imports existing sites, including read-only directories,
+  using at most four workers and a five-second deadline per site. Failed sites
+  retry after a minute without reimporting successful sites in that process.
+  Page requests never perform this bootstrap or wait on its mutex. Reports show
+  a historical-import-pending notice until the host's background import finishes.
   Previously deleted sites/history cannot be recovered.
 - Traffic: requests, page views, unique authenticated visitors, visits, HTTP
   errors, bytes transferred, mean request duration and last visited. Date filters
@@ -51,8 +57,9 @@ with traffic, daily trends and a site-scoped visitor breakdown.
 
 ## Browsing and publisher reports
 
-Browsing cards and **Your sites** show all recorded page views, including a zero
-count for sites with no page loads yet. Catalogue and management lists can sort
+Ordinary browsing does not wait for traffic counts. Explicit popularity/activity
+requests show all recorded page views, including a zero count for sites with no
+page loads yet. Catalogue and management lists can sort
 by **Most popular (page views)**, **Most visitors**, **Recently visited**, latest
 publication or name, and filter by **Has page views** / **No page views yet**.
 Counts and popularity use traffic since collection began, rather than an implicit
@@ -60,15 +67,15 @@ rolling window. Only aggregates for sites the viewer can already browse are
 loaded; visitor identities are not exposed on public cards.
 
 The site's **Analytics** tab has an all-time summary and a date-filtered **Who
-visited** table. Owners (the people allowed to publish the site) and platform
-admins can see names/emails, page views, visits and the last page visit, search
+visited** table. Owners and admins with a temporary management grant can see
+names/emails, page views, visits and the last page visit, search
 visitors, change ordering and page through results. The table lists only users
 with actual page views on that site in the selected period, excluding API/asset-only
 activity. Names come from remembered authenticated identities; unknown names fall
 back to the verified identity ID. Anonymous views are counted separately without
 inventing visitor identities. General viewers/editors cannot access visitor reports.
 
-Both management pages and their HTMX fragments enforce the same owner/admin
+Both management pages and their HTMX fragments enforce the same owner/temporary-management
 permission checks, and ignore query parameters attempting to select another site
 or user. Publisher reports contain no cross-site totals or platform sign-in history.
 
@@ -89,6 +96,30 @@ headline/daily totals and pagination counts/labels consistent during collection.
 Lifetime card/site totals use maintained in-memory aggregates in the memory
 provider and a bounded PostgreSQL cache, refreshed within one minute. The cache
 contains only site totals, never visitor labels, and retains at most 1,024 sites.
+
+### Admin inventory and bounded reports
+
+`/admin/sites` remains available without analytics, listing 12 published sites
+per page with server-side search and sorting. It does not load a traffic report,
+import history or fetch protected app icons. The legacy `/manage?all=1` entry
+redirects admins here. Private-site management still requires explicit access.
+
+Overview, people and individual-site pages render a shell first, then load their
+report separately (with a normal report link for non-JavaScript browsers).
+Interactive reports have a two-second request deadline, an explicit unavailable
+state with retry, and a separate unavailable notice if only the previous-period
+comparison failed. A single-site report reads that site's metadata/policy only.
+
+`AdminAnalyticsReader.QueryAdminAnalytics` returns only a section's rows:
+PostgreSQL limits overview leaders to five sites/five people, recent events to
+50, and people/visited-site pages to 25. People search/order/count/pagination run
+in SQL before records are returned. Summaries and comparisons do not fetch full
+people/event inventories. The memory provider bounds its output using
+`BoundAdminAnalytics`; custom providers retain the full `QueryAnalytics` fallback
+unless they implement the new optional interface, so they should implement it
+for equivalent storage-side scalability. All providers must honor cancellation.
+Cold descriptive discovery and fresh policy projection are still linear in the
+number of sites, rather than an indexed persistent directory.
 
 ## Storage and configuration
 

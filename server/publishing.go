@@ -277,8 +277,9 @@ func (s *Server) removePublishedSite(ctx context.Context, site string, identity 
 }
 
 // publishCaller validates the site name and authorizes the caller to
-// publish it. Owners may always publish; with claim set, a caller allowed to
-// create sites also claims an unowned name and becomes its owner.
+// publish it. Owners and explicitly management-elevated administrators may
+// publish. With claim set, other callers allowed to create sites claim an
+// unowned name. Elevation alone never creates permanent ownership.
 func (s *Server) publishCaller(w http.ResponseWriter, r *http.Request, claim bool, initialAccess *SiteAccess) (string, *Identity, bool) {
 	site := r.PathValue("site")
 	if !siteNamePattern.MatchString(site) {
@@ -307,8 +308,13 @@ func (s *Server) publishCaller(w http.ResponseWriter, r *http.Request, claim boo
 		writeServerError(w, err)
 		return "", nil, false
 	}
-	if exists {
-		if s.siteRole(identity, access, true) != roleOwner {
+	allowed, err := s.canManageSite(r.Context(), identity, site, access, exists)
+	if err != nil {
+		writeServerError(w, err)
+		return "", nil, false
+	}
+	if exists || allowed {
+		if !allowed {
 			writeError(w, http.StatusForbidden, "only the site's owners can publish it")
 			return "", nil, false
 		}
@@ -727,7 +733,12 @@ func (s *Server) siteHistory(w http.ResponseWriter, r *http.Request) {
 		writeServerError(w, err)
 		return
 	}
-	if s.siteRole(identity, access, exists) != roleOwner {
+	allowed, err := s.canManageSite(r.Context(), identity, site, access, exists)
+	if err != nil {
+		writeServerError(w, err)
+		return
+	}
+	if !allowed {
 		writeError(w, http.StatusForbidden, "only site owners can read the publication history")
 		return
 	}

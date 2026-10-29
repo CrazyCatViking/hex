@@ -1,0 +1,137 @@
+{{define "admin-access"}}
+<!doctype html>
+<html lang="en">
+  <head>
+    {{template "head" (printf "%s · Temporary access" .Platform)}}
+  </head>
+  <body hx-headers='{"X-Hex-Request":"1"}'>
+    {{template "header" .Chrome}}
+    <main id="main" class="page">
+      <nav class="breadcrumbs" aria-label="Breadcrumb">
+        <a href="/admin/sites">Admin sites</a><span>/</span
+        ><span>{{.Site}}</span>
+      </nav>
+      <header class="page-heading">
+        <div>
+          <p class="eyebrow">Site access</p>
+          <h1>{{.Site}}</h1>
+          <p class="lead">
+            Platform administration does not grant access to this app. Temporary
+            privileges are explicit, site-specific and audited.
+          </p>
+        </div>
+        {{if not .Locked}}<a
+          class="button button-secondary"
+          href="/manage/{{.Site}}"
+          >Back to management</a
+        >{{end}}
+      </header>
+      {{if .Locked}}
+      <p class="banner">
+        You do not currently have management access. No app data, files or
+        history are shown here.
+      </p>
+      {{end}} {{if not .Enabled}}
+      <p class="banner banner-error">
+        Temporary access is unavailable: configure an AdminAccessStore. Site
+        owners can still manage their own apps.
+      </p>
+      {{else}} {{if .Admin}}
+      <section class="panel">
+        <h2>Grant yourself temporary access</h2>
+        <p>
+          Management and app access are independent. Access expires on the
+          server without waiting for cleanup. New grants replace your previous
+          grant of the same scope.
+        </p>
+        <form
+          method="post"
+          action="/api/hex/admin/sites/{{.Site}}/access"
+          hx-post="/api/hex/admin/sites/{{.Site}}/access"
+          hx-swap="none"
+        >
+          <label class="field"
+            ><span class="field-label">Access needed</span
+            ><select name="scope" aria-label="Access needed">
+              <option value="management">
+                Manage this site (not app/data access)
+              </option>
+              <option value="app-read">
+                Read app pages and data (no writes)
+              </option>
+              <option value="app-write">
+                Read and change app data, run actions
+              </option>
+            </select></label
+          >
+          <label class="field"
+            ><span class="field-label">Duration</span
+            ><select name="minutes" aria-label="Duration">
+              <option value="15">15 minutes</option>
+              <option value="60" selected>1 hour</option>
+              <option value="240">4 hours</option>
+            </select></label
+          >
+          <label class="field"
+            ><span class="field-label">Reason</span
+            ><textarea
+              name="reason"
+              minlength="3"
+              maxlength="1000"
+              required
+            ></textarea>
+          </label>
+          <p class="muted">
+            Management can change sharing and published content. Those
+            deliberate changes are permanent; the temporary grant itself never
+            adds you as a permanent owner.
+          </p>
+          <button class="button" type="submit">Grant temporary access</button>
+        </form>
+      </section>
+      {{end}}
+      <section class="panel">
+        <h2>Access audit</h2>
+        <p class="muted">
+          Grant times, expiry and early revocations are retained for site
+          owners.
+        </p>
+        {{range .Grants}}
+        <article>
+          <h3>
+            {{.Actor.Name}} <span class="muted">{{.Actor.ID}}</span> ·
+            {{.Scope}}
+          </h3>
+          <p>{{.Reason}}</p>
+          <p class="muted">
+            Started {{.StartedAt.Format "2006-01-02T15:04:05Z07:00"}} · expires
+            {{.ExpiresAt.Format "2006-01-02T15:04:05Z07:00"}}{{if not
+            .RevokedAt.IsZero}} · ended {{.RevokedAt.Format
+            "2006-01-02T15:04:05Z07:00"}}{{with .RevokedBy}} by
+            {{.ID}}{{end}}{{end}}
+          </p>
+          {{if .RevokedAt.IsZero}}
+          <form
+            method="post"
+            action="/api/hex/admin/sites/{{.Site}}/access/{{.ID}}/revoke"
+            hx-post="/api/hex/admin/sites/{{.Site}}/access/{{.ID}}/revoke"
+            hx-swap="none"
+          >
+            <button class="button button-secondary button-small" type="submit">
+              End access
+            </button>
+          </form>
+          {{end}}
+        </article>
+        {{else}}
+        <p class="muted">No temporary access has been granted.</p>
+        {{end}} {{if .Next}}<a class="button button-secondary" href="{{.Next}}"
+          >Older grants</a
+        >{{end}}
+      </section>
+      {{end}}
+    </main>
+    {{template "footer" .Chrome}}
+  </body>
+</html>
+{{end}}

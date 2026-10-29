@@ -146,8 +146,18 @@
             >Download CSV</a
           >
         </div>
-
-        {{if and .Adoption (eq .Section "overview")}}
+        {{if .ImportPending}}
+        <p class="banner">
+          Historical publication analytics are still being imported. Current
+          traffic is available; historical publication counts may be incomplete
+          until background import finishes.
+        </p>
+        {{end}} {{if .ComparisonUnavailable}}
+        <p class="muted" role="status">
+          Previous-period comparison is unavailable. Current-period figures are
+          shown without a comparison.
+        </p>
+        {{end}} {{if and .Adoption (eq .Section "overview")}}
         <section aria-labelledby="adoption-heading">
           <h2 id="adoption-heading" class="section-label">Adoption today</h2>
           {{template "metric-cards" .Adoption}}
@@ -227,7 +237,7 @@
           <p class="muted">Nothing was created or updated in this period.</p>
           {{end}}
         </section>
-        {{end}} {{if .Global}}
+        {{end}} {{if and .Global (eq .Section "overview")}}
         <details class="collection-status">
           <summary>
             <span
@@ -451,8 +461,7 @@
 <section class="panel panel-flush" aria-labelledby="sites-heading">
   <div class="panel-heading">
     <h2 id="sites-heading">
-      {{if .UserDetail}}Sites they created, own or
-      used{{else}}{{.RowsHeading}}{{end}}
+      {{if .UserDetail}}Sites used in this period{{else}}{{.RowsHeading}}{{end}}
     </h2>
     {{if not .UserDetail}}
     <form

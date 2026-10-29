@@ -75,7 +75,8 @@ func TestPortalListsAndProtectsOwnedSites(t *testing.T) {
 	if csp := page.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "default-src 'self'") {
 		t.Fatalf("portal pages need the content security policy: %q", csp)
 	}
-	if body := requestAs(t, server, admin, "GET", "/manage?all=1", nil, 200).Body.String(); !strings.Contains(body, "beas-app") || !strings.Contains(body, "dashboard") {
+	requestAs(t, server, admin, "GET", "/manage?all=1", nil, 303)
+	if body := requestAs(t, server, admin, "GET", "/admin/sites", nil, 200).Body.String(); !strings.Contains(body, "beas-app") || !strings.Contains(body, "dashboard") {
 		t.Fatalf("admins can list every site: %s", body)
 	}
 	if body := requestAs(t, server, alex, "GET", "/manage?all=1", nil, 200).Body.String(); strings.Contains(body, "beas-app") {
@@ -95,7 +96,10 @@ func TestPortalListsAndProtectsOwnedSites(t *testing.T) {
 		t.Fatal("settings tab lacks unpublishing")
 	}
 	requestAs(t, server, bea, "GET", "/manage/dashboard", nil, 403)
-	requestAs(t, server, admin, "GET", "/manage/dashboard", nil, 200)
+	locked := requestAs(t, server, admin, "GET", "/manage/dashboard", nil, 200).Body.String()
+	if !strings.Contains(locked, "do not currently have management access") || strings.Contains(locked, "Who can open it") {
+		t.Fatal("admin bypassed the restricted entry screen")
+	}
 
 	// The portal only answers on the platform's own host.
 	r := httptest.NewRequest("GET", "/manage", nil)

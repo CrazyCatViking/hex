@@ -76,6 +76,13 @@ func startIntegrationPlatform(t *testing.T, calls *atomic.Int32) testPlatform {
 		config.Identity = hex.StaticIdentity{Identity: hex.Identity{ID: "local", Name: "Local"}}
 		config.AdminGroups = []string{"local"}
 		config.Access = memory.NewAccessStore()
+		// The fixture's local administrator is explicitly a site owner; platform
+		// administration no longer supplies ownership of arbitrary site names.
+		policy := hex.MigrateSiteAccess(hex.SiteAccess{Owners: []string{"user:local"}})
+		policy.Published = &hex.SiteAccess{Version: 2}
+		if err := config.Access.UpdateSiteAccess(context.Background(), "demo", func(hex.SiteAccess, bool) (*hex.SiteAccess, error) { return &policy, nil }); err != nil {
+			t.Fatal(err)
+		}
 		config.Database = memory.NewDatabase()
 		config.Integrations = registry
 		config.IntegrationStore = memory.NewIntegrationStore()

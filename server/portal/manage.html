@@ -85,12 +85,7 @@
           >
         </nav>
         {{if .Viewer.Admin}}
-        <a
-          class="link-button"
-          href="/manage?{{if not .All}}all=1&amp;{{end}}q={{.Query}}&amp;kind={{.Filter}}&amp;sort={{.Sort}}&amp;traffic={{.TrafficFilter}}"
-        >
-          {{if .All}}Show only yours{{else}}Show all sites (admin){{end}}
-        </a>
+        <a class="link-button" href="/admin/sites"> Find all sites in Admin </a>
         {{end}}
       </form>
 
@@ -215,6 +210,25 @@
           <a class="button" href="{{.URL}}">Open</a>
         </div>
       </section>
+      {{end}} {{if .TemporaryAccess}}
+      <aside class="banner" aria-label="Temporary admin access">
+        <strong>Temporary admin access is active.</strong>{{range
+        .TemporaryAccess}}
+        <p>
+          {{.Scope}} · expires {{.ExpiresAt.Format "15:04 MST"}} · {{.Reason}}
+        </p>
+        <form
+          hx-post="/api/hex/admin/sites/{{.Site}}/access/{{.ID}}/revoke"
+          hx-swap="none"
+        >
+          <button class="button button-secondary button-small" type="submit">
+            End access
+          </button>
+        </form>
+        {{end}}<a href="/manage/{{.Site.Name}}?tab=admin-access"
+          >Access details and audit</a
+        >
+      </aside>
       {{end}}
 
       <nav class="tabs" aria-label="Site sections">

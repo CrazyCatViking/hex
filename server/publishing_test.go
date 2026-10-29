@@ -179,7 +179,8 @@ func TestOnlyOwnersPublish(t *testing.T) {
 	requestAs(t, server, nil, "POST", "/api/hex/sites/demo/publish", body, 401)
 
 	publishSite(t, server, coOwner, "demo", map[string]string{"index.html": "v2"}, "")
-	publishSite(t, server, admin, "demo", map[string]string{"index.html": "v3"}, "")
+	requestAs(t, server, admin, "POST", "/api/hex/sites/demo/publish", body, 403)
+	requestAs(t, server, admin, "DELETE", "/api/hex/sites/demo", nil, 403)
 
 	// Uploads and completion never claim a name.
 	requestAs(t, server, other, "PUT", "/api/hex/sites/fresh/publish/files/index.html", []byte("x"), 403)

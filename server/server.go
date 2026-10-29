@@ -29,6 +29,9 @@ type Config struct {
 	Identity    IdentityResolver
 	Access      AccessStore
 	AdminGroups []string
+	// AdminAccess stores explicit, audited, expiring privileges. When omitted,
+	// an implementing Access store or Database is used automatically.
+	AdminAccess AdminAccessStore
 	// Actions exposes contract-validated operations implemented by app backends.
 	Actions *ActionRegistry
 	// Publisher enables publishing through the API. PublisherGroups limits
@@ -74,20 +77,25 @@ type Config struct {
 }
 
 type Server struct {
-	config                Config
-	mux                   *http.ServeMux
-	seen                  peopleSeen
-	analyticsFailures     atomic.Uint64
-	analyticsBootstrap    sync.Mutex
-	analyticsBootstrapped bool
-	integrationCache      responseCache
-	portalInventory       portalInventoryCache
-	portalIcons           portalIconCache
-	automationRuns        sync.WaitGroup
-	automationSlots       chan struct{}
+	config                 Config
+	mux                    *http.ServeMux
+	seen                   peopleSeen
+	analyticsFailures      atomic.Uint64
+	analyticsImportPending atomic.Bool
+	integrationCache       responseCache
+	portalInventory        portalInventoryCache
+	portalIcons            portalIconCache
+	automationRuns         sync.WaitGroup
+	automationSlots        chan struct{}
 }
 
 func New(config Config) *Server {
+	if config.AdminAccess == nil {
+		config.AdminAccess, _ = config.Access.(AdminAccessStore)
+		if config.AdminAccess == nil {
+			config.AdminAccess, _ = config.Database.(AdminAccessStore)
+		}
+	}
 	if config.SiteBaseURL == "" {
 		config.SiteBaseURL = "http://localhost:8080"
 	}
@@ -118,6 +126,7 @@ func New(config Config) *Server {
 		seen:            peopleSeen{entries: make(map[string]seenPerson)},
 		automationSlots: make(chan struct{}, maxConcurrentRuns),
 	}
+	server.analyticsImportPending.Store(config.Analytics != nil && config.Sites != nil)
 	server.registerRoutes()
 	server.warnAboutUnauditedIntegrations()
 
@@ -210,6 +219,7 @@ func (s *Server) registerRoutes() {
 	s.registerAIRoutes()
 	s.registerAutomationRoutes()
 	s.registerManageRoutes()
+	s.registerAdminAccessRoutes()
 	s.registerPortalConnectionRoutes()
 	s.registerAIPortalRoutes()
 	s.registerIntegrationAuditRoutes()

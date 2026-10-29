@@ -44,15 +44,12 @@ func (s *Server) canCreateSites(identity *Identity) bool {
 }
 
 // siteRole resolves the caller's role on a site. Sites without a policy are
-// open: everyone may view and edit, and only admins own them. A configured
+// open: everyone may view and edit, but nobody implicitly owns them. A configured
 // identity resolver requires a signed-in caller. Within a policy, empty viewers
 // means every signed-in user may view and empty editors means every viewer may edit.
 func (s *Server) siteRole(identity *Identity, access SiteAccess, exists bool) siteRole {
 	if s.config.Identity != nil && identity == nil {
 		return roleNone
-	}
-	if s.isAdmin(identity) {
-		return roleOwner
 	}
 	if exists && access.Version == 2 {
 		if identity.matchesAny(access.Owners) {
@@ -273,7 +270,12 @@ func (s *Server) authorizeSite(ctx context.Context, identity *Identity, site str
 	if err != nil {
 		return siteAuthorization{}, err
 	}
-	role := s.siteRole(identity, access, exists)
+	grants, err := s.activeAdminAccess(ctx, identity, site)
+	if err != nil {
+		return siteAuthorization{}, err
+	}
+	access = adminApplicationPolicy(access, identity, grants, site)
+	role := s.siteRole(identity, access, exists || access.Version == 2)
 	if !exists {
 		access = MigrateSiteAccess(access)
 	}
@@ -475,12 +477,23 @@ func (s *Server) permissions(w http.ResponseWriter, r *http.Request) {
 		writeServerError(w, err)
 		return
 	}
-	role := s.siteRole(identity, access, exists)
+	authorization, err := s.authorizeSite(r.Context(), identity, site)
+	if err != nil {
+		writeServerError(w, err)
+		return
+	}
+	role := authorization.role
+	access = authorization.access
 	if !exists {
 		access = MigrateSiteAccess(access)
 	}
 	if access.Version == 2 {
-		s.describePermissionPolicy(w, identity, access, role, exists)
+		manage, err := s.canManageSite(r.Context(), identity, site, access, exists)
+		if err != nil {
+			writeServerError(w, err)
+			return
+		}
+		s.describePermissionPolicy(w, identity, access, role, exists, manage)
 		return
 	}
 

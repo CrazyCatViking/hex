@@ -8,11 +8,11 @@ import (
 	"slices"
 )
 
-func (s *Server) describePermissionPolicy(w http.ResponseWriter, identity *Identity, access SiteAccess, role siteRole, exists bool) {
+func (s *Server) describePermissionPolicy(w http.ResponseWriter, identity *Identity, access SiteAccess, role siteRole, exists, manage bool) {
 	a := siteAuthorization{identity: identity, access: access, role: role}
 	document := permissionsDocument{
 		Version: 2, Role: roleNames[role], Roles: a.applicationRoles(), Admin: s.isAdmin(identity),
-		Publish: role == roleOwner || !exists && s.canCreateSites(identity), Paths: []pathPermission{},
+		Publish: manage || !exists && s.canCreateSites(identity), Paths: []pathPermission{},
 		Collections: map[string]dataPermission{}, Files: map[string]dataPermission{}, Channels: map[string]dataPermission{},
 	}
 	if role == roleNone {

@@ -15,7 +15,7 @@ import (
 )
 
 func TestConcurrentColdCapabilityMigrations(t *testing.T) {
-	platformTables := []string{"hex_people", "hex_site_policies", "hex_integration_approvals", "hex_integration_credentials", "hex_automations", "hex_automation_runs", "hex_ai_usage", "hex_ai_usage_lock", "hex_ai_reservations", "hex_ai_budgets", "hex_integration_audit"}
+	platformTables := []string{"hex_people", "hex_site_policies", "hex_admin_access", "hex_integration_approvals", "hex_integration_credentials", "hex_automations", "hex_automation_runs", "hex_ai_usage", "hex_ai_usage_lock", "hex_ai_reservations", "hex_ai_budgets", "hex_integration_audit"}
 	analyticsTables := []string{"hex_analytics_people", "hex_analytics_events", "hex_analytics_traffic", "hex_analytics_receipts", "hex_analytics_sessions"}
 	allTables := append(slices.Concat(platformTables, analyticsTables), "hex_documents")
 	cases := []struct {
@@ -26,7 +26,7 @@ func TestConcurrentColdCapabilityMigrations(t *testing.T) {
 		{"documents", (*Database).MigrateDocuments, []string{"hex_documents"}},
 		{"people", (*Database).MigratePeople, []string{"hex_people"}},
 		{"analytics", (*Database).MigrateAnalytics, analyticsTables},
-		{"access", (*Database).MigrateAccess, []string{"hex_site_policies"}},
+		{"access", (*Database).MigrateAccess, []string{"hex_site_policies", "hex_admin_access"}},
 		{"integrations", (*Database).MigrateIntegrations, []string{"hex_integration_approvals", "hex_integration_credentials"}},
 		{"automations", (*Database).MigrateAutomations, []string{"hex_automations", "hex_automation_runs"}},
 		{"AI usage", (*Database).MigrateAIUsage, []string{"hex_ai_usage", "hex_ai_usage_lock", "hex_ai_reservations", "hex_ai_budgets"}},

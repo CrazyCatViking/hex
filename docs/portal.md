@@ -14,10 +14,10 @@ People/group pickers in permission dialogs use an anchored, scrollable dropdown,
 | ----------------- | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Home              | `/`                                          | A greeting, unified search, four personal pins, and bounded recent/shared/owned/company previews. **View all** opens the appropriate complete listing. No traffic aggregate is needed to open Home.                                                                                      |
 | App library       | `/library`                                   | Search by name, purpose or person across all accessible discovery/personal listings, with pinned/recent/shared/owned/company scopes, app/file filtering, sorting, grid/list views and 12 results per page.                                                                               |
-| Your sites        | `/manage`                                    | The familiar ownership list and actions, with complete server-side search and 12 rows per page. Platform admins retain their existing all-sites switch. Traffic sorting/filtering is optional; it does not run on ordinary list requests.                                                |
+| Your sites        | `/manage`                                    | The familiar ownership list and actions, with complete server-side search and 12 rows per page. Admins find other apps in the separate admin inventory. Traffic sorting/filtering is optional; it does not run on ordinary list requests.                                                |
 | Site              | `/manage/<site>`                             | Tabs for **Overview** (who created and last published it, and its audience), **Sharing**, **Data**, **History** and **Settings** (taking the site down).                                                                                                                                 |
 | Build & publish   | `/start`                                     | The installer for the detected OS and three steps: install, share a file or folder, and build an app with a coding agent.                                                                                                                                                                |
-| Admin             | `/admin`, `/admin/sites`, `/admin/users`     | Platform-wide inventory, user activity, publishing history and nginx traffic, with date ranges and site/user drill-downs. Requires analytics and platform-admin access.                                                                                                                  |
+| Admin             | `/admin`, `/admin/sites`, `/admin/users`     | Platform-admin inventory with search and 12 rows per page, independent of analytics. Overview, people and site reports load separately when analytics is configured. **Manage** opens the site's existing management page or a restricted temporary-access entry. |
 | Integration audit | `/admin/integration-audit`                   | Every call of audited integrations, cached answers included: when, who, from which site, the endpoint, the input and the records it showed, filterable and downloadable as CSV. Requires an integration audit store and platform-admin access; see [Auditing](integrations.md#auditing). |
 | Integrations      | `/integrations`, `/integrations?site=<site>` | Registry-driven integration catalog, grants, connection and approval status. Owners request approval for a site; admins review, approve and revoke requests. Site management also exposes an Integrations tab.                                                                           |
 
@@ -56,18 +56,21 @@ or activity requests aggregate only matching accessible candidates, with a
 750 ms deadline and an explicit unavailable state on failure (not false zero
 counts). PostgreSQL never holds its traffic-cache mutex during database I/O.
 Management loads history, people and action summaries only on tabs that use
-them; the full per-app page, tabs, sharing editor and admin roles are unchanged.
+them; the full per-app page, tabs and sharing editor remain in place.
 Admin inventory also reuses the descriptive cache, batches policy reads and
-resolves owner labels once rather than once per site.
+resolves owner labels only for the visible page, with a short lookup deadline.
+It does not fetch app icons or wait for reports or historical imports.
 
 This removes repeated remote reads at the reported 100+ app scale, but filtering
 and authorization projection are still linear in inventory size. An indexed,
-query-shaped persistent directory and query-shaped admin reports remain a later
-step for much larger installations; UI pagination alone is not that index.
+query-shaped persistent directory remains a later step for much larger
+installations; UI pagination alone is not that index. PostgreSQL admin reports
+now use query-shaped bounded reads; see [platform analytics](analytics.md).
 
 NGINX forwards main-domain requests to Go and serves published app files directly from storage on subdomains. The existing hosting authentication protects the landing page, catalog, and installer downloads. Preserve the external `Host` header when configuring another reverse proxy.
 
-App cards, management pages and admin site lists show the app's published favicon.
+App cards and authorized management pages show the app's published favicon.
+Admin inventory and reports use fallback initials, without reading app assets.
 The portal discovers local `rel="icon"` / `rel="shortcut icon"` links in the root
 `index.html`, then Apple touch icons or conventional `favicon.svg`, `favicon.ico`,
 `favicon.png` and `apple-touch-icon.png` files. Relative links, a local `<base>` and
@@ -125,7 +128,7 @@ With npm dependencies and Playwright Chromium installed:
 ```sh
 go test -race ./server ./server/providers/memory ./server/providers/local
 HEX_TEST_POSTGRES_URL='<local test database>' go test -race ./server/providers/postgres
-HEX_PORTAL_BROWSER=1 go test ./server -run '^TestPortalBrowser$' -count=1 -v
+HEX_PORTAL_BROWSER=1 go test ./server -run '^Test(Portal|AdminAccess)Browser$' -count=1 -v
 npm run test:browser
 npm run test:analytics
 go test ./server -run '^$' -bench BenchmarkPortalInventoryAudit -benchtime=20x
@@ -139,7 +142,7 @@ dark layouts. Screenshots go to `/tmp/opencode/hex-portal-implementation`.
 
 ## Managing sites
 
-With an identity provider and access control, signed-in users get **Your sites** at `/manage` on the platform domain. It lists the apps and artifacts they own; platform admins can list every site. Each site's page shows:
+With an identity provider and access control, signed-in users get **Your sites** at `/manage` on the platform domain. It lists the apps and artifacts they actually own. Platform admins find every published site in `/admin/sites`, without acquiring ownership. Each authorized site's page shows:
 
 - who created it and who published it last, and its publication history;
 - sharing with separate **Site access** and a checkbox **permission-group table**: configure admitted-user defaults, add only people or directory groups needing custom assignments, create/edit groups, and configure their resource operations, record conditions and field restrictions through visual controls. Dialog edits are staged until **Save changes** applies the batch. Existing custom policies and owner permissions are preserved; JSON is a separate collapsed technical tool, not the primary editor. See [Managing permissions](access-control.md#managing-permissions-in-the-portal);
@@ -151,7 +154,48 @@ See [platform analytics](analytics.md) for durable storage, traffic collection,
 metric definitions and admin permissions. Catalogue statistics remain scoped to
 visible discoverable apps; admin inventory includes every published site.
 
-Only a site's owners and platform admins can open its page; every change goes through `/api/hex/manage/…` with the API's same-origin and `X-Hex-Request` checks. Pages are rendered by the server with HTMX under the same content security policy as the landing page.
+Only a site's owners or an administrator with an active, explicit management grant can open its full page. Other platform admins see a restricted entry screen without app data, files or publication history. Management changes retain the API's same-origin and `X-Hex-Request` checks. Pages are rendered by the server with HTMX under the same content security policy as the landing page.
+
+### Temporary administrator access
+
+Being a platform admin does not make a person a site owner or reveal private apps
+in normal Home/Library discovery. Admin inventory is a separate governance view.
+From **Manage**, admins can deliberately grant themselves one site-specific scope:
+
+- **Management**: publish, change sharing, inspect management/history and take
+  down the site. It does not admit the caller to the app or grant data/file access.
+- **App read**: admission, all page paths, collection reads, file reads and channel
+  reads. It adds no writes, action execution or integration authority.
+- **App write**: app-read privileges plus collection/file writes, channel sends,
+  action execution and site-level integration read/write grants. Independent
+  platform integration permissions, approvals and connected accounts still apply.
+
+Every grant requires a reason and lasts one hour by default, at most four hours.
+It is additive to existing permissions, separate from permanent sharing, and
+never changes the saved site policy or publication baseline. Deliberate sharing
+or publication changes made with management access remain permanent.
+Older published sites without a policy also support recovery grants; republishing
+without an explicit access-policy change does not claim permanent ownership.
+Granting the same scope again ends the previous grant of that scope atomically.
+Owners can inspect the paginated **Temporary access** audit and end grants early;
+admins can end their own grants. The full management page shows an active-access
+banner, expiry and an **End access** control.
+
+`Config.AdminAccess` implements `AdminAccessStore`; when omitted, Hex uses an
+implementing access store, then the app database. PostgreSQL implements it in the
+platform-owned `hex_admin_access` table, prepared by `MigrateAccess`,
+`MigratePlatform` or `Migrate`. Memory implements it for development only, losing
+grants and audit history on restart. Custom hosts without a suitable store fail
+closed for temporary access; existing owners retain normal management.
+Keep all replicas on the same durable access store and synchronize server clocks.
+Active grants are read fresh on each request, require continuing platform-admin
+membership, and enforce expiry/revocation without browser timers or cleanup jobs.
+Elevated WebSockets recheck before each send/delivery and on idle heartbeat.
+
+Adoption requires releasing the Hex Go module, updating consuming servers,
+running migrations and rebuilding/deploying **all replicas**. Old replicas retain
+the previous bypass until replaced. Apps need no republishing or browser SDK
+update. Platform sign-in, configuration and employee onboarding are unchanged.
 
 The portal reads no directory data from the identity provider. People are remembered from their own sign-ins (ID, name and email, refreshed at most hourly) and can be found by name or email once they have used the platform. Selecting a person always saves their stable identity ID; arbitrary email addresses are not authorization principals. Ask new people to sign in first, share with a configured group, or use their verified identity ID through the CLI. The sharing picker is an accessible combobox: it searches `/api/hex/directory` as you type, groups results into groups and people, and supports the arrow keys, Enter and Escape. Groups come from `HEX_GROUPS`, which should list the groups assigned to the app registration, the only ones sign-in tokens carry. The remembered people are stored in PostgreSQL (`hex_people`), or in memory for local development.
 

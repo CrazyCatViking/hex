@@ -40,19 +40,20 @@ type manageListView struct {
 
 type sitePageView struct {
 	Chrome
-	Site       siteCard
-	Tab        string
-	Tabs       []siteTab
-	Facts      siteFacts
-	People     []shareEntry
-	History    []historyEntry
-	Sharing    sharingView
-	Data       bool
-	Files      bool
-	Publishing bool
-	Actions    []actionSummary
-	Analytics  *AnalyticsView
-	AI         *siteAIView
+	Site            siteCard
+	Tab             string
+	Tabs            []siteTab
+	Facts           siteFacts
+	People          []shareEntry
+	History         []historyEntry
+	Sharing         sharingView
+	Data            bool
+	Files           bool
+	Publishing      bool
+	Actions         []actionSummary
+	Analytics       *AnalyticsView
+	AI              *siteAIView
+	TemporaryAccess []AdminAccessGrant
 }
 
 // actionSummary describes one of a site's actions on its overview.
@@ -131,7 +132,10 @@ func (s *Server) managePage(w http.ResponseWriter, r *http.Request) {
 
 	view := manageListView{Chrome: s.chromeFor(identity, "manage")}
 	query := r.URL.Query()
-	view.All = view.Viewer.Admin && query.Get("all") == "1"
+	if view.Viewer.Admin && query.Get("all") == "1" {
+		http.Redirect(w, r, "/admin/sites", http.StatusSeeOther)
+		return
+	}
 	view.Filter = query.Get("kind")
 	view.Query = strings.TrimSpace(query.Get("q"))
 	view.Sort = query.Get("sort")
@@ -224,12 +228,16 @@ func (s *Server) manageSitePage(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	if s.adminAccessPage(w, r) {
+		return
+	}
 	identity, site, access, exists, ok := s.manageCaller(w, r)
 	if !ok {
 		return
 	}
 
 	tabs := slices.Clone(siteTabs)
+	tabs = append(tabs, siteTab{"admin-access", "Temporary access"})
 	if s.automationsEnabled() {
 		tabs = slices.Insert(tabs, 3, siteTab{"automations", "Automations"})
 	}
@@ -249,6 +257,12 @@ func (s *Server) manageSitePage(w http.ResponseWriter, r *http.Request) {
 		Data:       s.config.Database != nil,
 		Files:      s.config.Files != nil,
 		Publishing: s.config.Publisher != nil,
+	}
+	var err error
+	view.TemporaryAccess, err = s.activeAdminAccess(r.Context(), identity, site)
+	if err != nil {
+		writeServerError(w, err)
+		return
 	}
 	if !slices.ContainsFunc(tabs, func(tab siteTab) bool { return tab.ID == view.Tab }) {
 		view.Tab = "overview"
@@ -364,7 +378,7 @@ func personName(person *Person) string {
 }
 
 // manageCaller authorizes a management request: the caller must own the
-// site or administer the platform.
+// site or hold an explicit, unexpired management grant.
 func (s *Server) manageCaller(w http.ResponseWriter, r *http.Request) (*Identity, string, SiteAccess, bool, bool) {
 	site := r.PathValue("site")
 	if !siteNamePattern.MatchString(site) {
@@ -382,7 +396,12 @@ func (s *Server) manageCaller(w http.ResponseWriter, r *http.Request) (*Identity
 		writeServerError(w, err)
 		return nil, "", SiteAccess{}, false, false
 	}
-	if s.siteRole(identity, access, exists) != roleOwner {
+	allowed, err := s.canManageSite(r.Context(), identity, site, access, exists)
+	if err != nil {
+		writeServerError(w, err)
+		return nil, "", SiteAccess{}, false, false
+	}
+	if !allowed {
 		writeError(w, http.StatusForbidden, "only the site's owners can manage it")
 		return nil, "", SiteAccess{}, false, false
 	}
@@ -438,7 +457,7 @@ type collectionsView struct {
 }
 
 func (s *Server) manageCollections(w http.ResponseWriter, r *http.Request) {
-	identity, site, access, exists, ok := s.manageCaller(w, r)
+	identity, site, _, _, ok := s.manageCaller(w, r)
 	if !ok {
 		return
 	}
@@ -450,7 +469,11 @@ func (s *Server) manageCollections(w http.ResponseWriter, r *http.Request) {
 			writeServerError(w, err)
 			return
 		}
-		a := siteAuthorization{identity: identity, access: access, role: s.siteRole(identity, access, exists)}
+		a, err := s.authorizeSite(r.Context(), identity, site)
+		if err != nil {
+			writeServerError(w, err)
+			return
+		}
 		for _, collection := range collections {
 			filter, allowed := a.readFilter(collection.Name)
 			if !allowed {
@@ -479,13 +502,17 @@ type documentRow struct {
 }
 
 func (s *Server) manageDocuments(w http.ResponseWriter, r *http.Request) {
-	identity, site, access, exists, ok := s.manageCaller(w, r)
+	identity, site, _, _, ok := s.manageCaller(w, r)
 	if !ok || !validateIdentifiers(w, r) {
 		return
 	}
 	collection := r.PathValue("collection")
 	after := r.URL.Query().Get("after")
-	a := siteAuthorization{identity: identity, access: access, role: s.siteRole(identity, access, exists)}
+	a, err := s.authorizeSite(r.Context(), identity, site)
+	if err != nil {
+		writeServerError(w, err)
+		return
+	}
 	documents, err := s.listAuthorizedDocuments(r.Context(), a, site, collection, ListOptions{After: after, Limit: managePageSize + 1})
 	if err != nil {
 		writePermissionError(w, err)
@@ -535,7 +562,7 @@ func preview(data json.RawMessage, limit int) string {
 }
 
 func (s *Server) manageDocument(w http.ResponseWriter, r *http.Request) {
-	identity, site, access, exists, ok := s.manageCaller(w, r)
+	identity, site, _, _, ok := s.manageCaller(w, r)
 	if !ok || !validateIdentifiers(w, r) {
 		return
 	}
@@ -544,7 +571,11 @@ func (s *Server) manageDocument(w http.ResponseWriter, r *http.Request) {
 		writeServerError(w, err)
 		return
 	}
-	a := siteAuthorization{identity: identity, access: access, role: s.siteRole(identity, access, exists)}
+	a, err := s.authorizeSite(r.Context(), identity, site)
+	if err != nil {
+		writeServerError(w, err)
+		return
+	}
 	if !a.canReadDocument(r.PathValue("collection"), document) {
 		writePermissionError(w, ErrNotFound)
 		return
@@ -560,13 +591,17 @@ func (s *Server) manageDocument(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) manageDeleteDocument(w http.ResponseWriter, r *http.Request) {
-	identity, site, access, exists, ok := s.manageCaller(w, r)
+	identity, site, _, _, ok := s.manageCaller(w, r)
 	if !ok || !validateIdentifiers(w, r) {
 		return
 	}
 	collection := r.PathValue("collection")
 	id := r.PathValue("id")
-	a := siteAuthorization{identity: identity, access: access, role: s.siteRole(identity, access, exists)}
+	a, err := s.authorizeSite(r.Context(), identity, site)
+	if err != nil {
+		writeServerError(w, err)
+		return
+	}
 	if _, err := s.mutateAuthorizedDocument(r.Context(), a, site, collection, id, nil, true); err != nil && !errors.Is(err, ErrNotFound) {
 		writePermissionError(w, err)
 		return
@@ -588,7 +623,7 @@ type fileRow struct {
 }
 
 func (s *Server) manageFiles(w http.ResponseWriter, r *http.Request) {
-	identity, site, access, exists, ok := s.manageCaller(w, r)
+	identity, site, _, _, ok := s.manageCaller(w, r)
 	if !ok {
 		return
 	}
@@ -600,7 +635,11 @@ func (s *Server) manageFiles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	view := filesView{Site: site}
-	a := siteAuthorization{identity: identity, access: access, role: s.siteRole(identity, access, exists)}
+	a, err := s.authorizeSite(r.Context(), identity, site)
+	if err != nil {
+		writeServerError(w, err)
+		return
+	}
 	for _, object := range objects {
 		key := strings.TrimPrefix(object.Key, prefix)
 		if !a.permits("file", key, "read") {
@@ -618,7 +657,7 @@ func (s *Server) manageFiles(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) manageDeleteFile(w http.ResponseWriter, r *http.Request) {
-	identity, site, access, exists, ok := s.manageCaller(w, r)
+	identity, site, _, _, ok := s.manageCaller(w, r)
 	if !ok {
 		return
 	}
@@ -627,7 +666,11 @@ func (s *Server) manageDeleteFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid file key")
 		return
 	}
-	a := siteAuthorization{identity: identity, access: access, role: s.siteRole(identity, access, exists)}
+	a, err := s.authorizeSite(r.Context(), identity, site)
+	if err != nil {
+		writeServerError(w, err)
+		return
+	}
 	if !a.permits("file", key, "delete") {
 		writePermissionError(w, ErrForbidden)
 		return

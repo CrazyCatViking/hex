@@ -22,8 +22,9 @@ type storedDocument struct {
 }
 
 type Database struct {
-	mu        sync.RWMutex
-	documents map[documentKey]storedDocument
+	mu          sync.RWMutex
+	documents   map[documentKey]storedDocument
+	adminAccess map[string]hex.AdminAccessGrant
 }
 
 func NewDatabase() *Database {

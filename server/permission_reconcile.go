@@ -23,12 +23,17 @@ func (s *Server) reconcileAccess(w http.ResponseWriter, r *http.Request) {
 	baseline.Published = nil
 	status := 0
 	var saved SiteAccess
-	err := s.config.Access.UpdateSiteAccess(r.Context(), r.PathValue("site"), func(current SiteAccess, exists bool) (*SiteAccess, error) {
+	ctx, err := s.managementContext(r.Context(), identity, r.PathValue("site"))
+	if err != nil {
+		writeServerError(w, err)
+		return
+	}
+	err = s.config.Access.UpdateSiteAccess(ctx, r.PathValue("site"), func(current SiteAccess, exists bool) (*SiteAccess, error) {
 		if !exists {
 			status = http.StatusNotFound
 			return nil, ErrNotFound
 		}
-		if err := s.mayChangeAccess(identity, current, true); err != nil {
+		if err := s.mayChangeAccess(ctx, identity, r.PathValue("site"), current, true); err != nil {
 			status = http.StatusForbidden
 			return nil, err
 		}

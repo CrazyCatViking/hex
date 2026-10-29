@@ -234,7 +234,7 @@ func TestAdminAIPage(t *testing.T) {
 			t.Fatalf("the admin AI page lacks %q: %s", expected, page)
 		}
 	}
-	if home := requestAs(t, server, admin, "GET", "/manage", nil, 200).Body.String(); !strings.Contains(home, `href="/admin/ai"`) {
+	if home := requestAs(t, server, admin, "GET", "/admin/sites", nil, 200).Body.String(); !strings.Contains(home, `href="/admin/ai"`) {
 		t.Fatal("admins have no link to the AI page")
 	}
 

@@ -62,8 +62,13 @@ func (s *Server) updatePortalPermissions(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	var saved SiteAccess
-	err = s.config.Access.UpdateSiteAccess(r.Context(), site, func(current SiteAccess, exists bool) (*SiteAccess, error) {
-		if err := s.mayChangeAccess(identity, current, exists); err != nil {
+	ctx, err := s.managementContext(r.Context(), identity, site)
+	if err != nil {
+		failed(err)
+		return
+	}
+	err = s.config.Access.UpdateSiteAccess(ctx, site, func(current SiteAccess, exists bool) (*SiteAccess, error) {
+		if err := s.mayChangeAccess(ctx, identity, site, current, exists); err != nil {
 			return nil, err
 		}
 		if matrixAssignsOwners(r.PostForm) && !sameMembers(base.Owners, current.Owners) {
@@ -85,7 +90,7 @@ func (s *Server) updatePortalPermissions(w http.ResponseWriter, r *http.Request,
 		if err := s.validateSiteAccess(merged); err != nil {
 			return nil, err
 		}
-		if err := s.keepsCallerOwner(identity, merged); err != nil {
+		if err := s.keepsCallerOwner(ctx, identity, site, merged); err != nil {
 			return nil, err
 		}
 		merged.Published = current.Published

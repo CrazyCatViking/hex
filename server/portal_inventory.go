@@ -155,16 +155,21 @@ func (s *Server) portalCards(ctx context.Context, identity *Identity, all bool) 
 	if err != nil {
 		return nil, err
 	}
+	grants, err := s.activeAdminAccess(ctx, identity, "")
+	if err != nil {
+		return nil, err
+	}
 	now := time.Now()
 	cards := make([]siteCard, 0, len(sites))
 	for _, site := range sites {
 		access, exists := policies[site.Name]
 		owned := exists && identity.matchesAny(access.Owners)
-		role := s.siteRole(identity, access, exists)
 		policy := access
 		if !exists {
 			policy = MigrateSiteAccess(access)
 		}
+		policy = adminApplicationPolicy(policy, identity, grants, site.Name)
+		role := s.siteRole(identity, policy, true)
 		authorization := siteAuthorization{identity: identity, access: policy, role: role}
 		admitted := authorization.applicationAdmitted()
 		personal := owned || admitted && exists && audienceIsShared(access)
@@ -173,7 +178,7 @@ func (s *Server) portalCards(ctx context.Context, identity *Identity, all bool) 
 			continue
 		}
 		card := s.cardForSite(site.Name, site.URL, site.Metadata, now)
-		card.Owned = s.manageEnabled() && role == roleOwner
+		card.Owned = s.manageEnabled() && (owned || hasAdminScope(grants, site.Name, adminManage))
 		card.PersonalOwner = owned
 		card.Shared = personal && !owned
 		card.Company = admitted && discoverable && (access.Version == 2 && access.Admission.SignedIn || access.Version != 2 && len(access.Viewers) == 0)

@@ -93,7 +93,7 @@ func TestAdminAnalyticsInventoryHistoryAndAuthorization(t *testing.T) {
 		t.Fatalf("bad daily CSV: %v %v", rows, err)
 	}
 	requestAs(t, server, alex, "GET", "/api/hex/admin/analytics.csv", nil, 403)
-	for _, path := range []string{"/admin", "/admin/sites", "/admin/users", "/admin/sites/hidden", "/admin/users?user=alex"} {
+	for _, path := range []string{"/admin?fragment=1", "/admin/users?fragment=1", "/admin/sites/hidden?fragment=1", "/admin/users?user=alex&fragment=1"} {
 		page := requestAs(t, server, admin, "GET", path, nil, 200)
 		if !strings.Contains(page.Body.String(), "Page views") {
 			t.Fatalf("analytics missing from %s: %s", path, page.Body.String())

@@ -150,6 +150,14 @@ func (a *Analytics) QueryAnalytics(ctx context.Context, query hex.AnalyticsQuery
 	return a.queryAnalytics(ctx, query, false)
 }
 
+func (a *Analytics) QueryAdminAnalytics(ctx context.Context, query hex.AdminAnalyticsQuery) (hex.AdminAnalyticsResult, error) {
+	report, err := a.QueryAnalytics(ctx, query.AnalyticsQuery)
+	if err != nil {
+		return hex.AdminAnalyticsResult{}, err
+	}
+	return hex.BoundAdminAnalytics(report, query), nil
+}
+
 func (a *Analytics) QueryAnalyticsSummary(ctx context.Context, query hex.AnalyticsQuery) (hex.AnalyticsReport, error) {
 	return a.queryAnalytics(ctx, query, true)
 }
