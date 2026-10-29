@@ -24,14 +24,14 @@ func (a siteAuthorization) applicationAdmitted() bool {
 	if a.role == roleNone {
 		return false
 	}
-	if a.access.Version != 2 || a.identity != nil && a.identity.Provider == "automation" {
+	if a.access.Version != 2 || a.apiOnly || a.identity != nil && (a.identity.Provider == "automation" || a.identity.Provider == "site") {
 		return true
 	}
 	return a.subjectsMatch(a.access.Admission)
 }
 
 func (a siteAuthorization) subjectsMatch(subjects Subjects) bool {
-	human := a.identity == nil || a.identity.Provider != "automation"
+	human := a.identity == nil || (a.identity.Provider != "automation" && a.identity.Provider != "site")
 	if subjects.Owners && a.role == roleOwner || subjects.SignedIn && a.role != roleNone && human || a.identity.matchesAny(subjects.Principals) {
 		return true
 	}
@@ -51,7 +51,7 @@ func (a siteAuthorization) subjectsMatch(subjects Subjects) bool {
 func (a siteAuthorization) applicationRoles() []string {
 	var roles []string
 	for name, role := range a.access.Roles {
-		if role.SignedIn && a.role != roleNone && (a.identity == nil || a.identity.Provider != "automation") {
+		if role.SignedIn && a.role != roleNone && (a.identity == nil || (a.identity.Provider != "automation" && a.identity.Provider != "site")) {
 			roles = appendUnique(roles, name)
 		}
 	}

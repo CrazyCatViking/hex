@@ -27,6 +27,8 @@ type Action struct {
 // separate agent identity. Its helpers apply the site's data rules when a
 // handler uses providers directly.
 type ActionContext struct {
+	SourceSite    string
+	InvocationID  string
 	Site          string
 	Identity      *Identity
 	Role          string
@@ -167,6 +169,9 @@ func (a *registeredAction) execute(ctx context.Context, caller ActionContext, in
 		return nil, err
 	}
 	output, err := marshalHostResult(ctx, result)
+	if err == nil && len(output) > MaxActionInputBytes {
+		err = errors.New("action output exceeds 1 MiB")
+	}
 	if err == nil {
 		err = validateActionJSON(a.output, output)
 	}
@@ -189,6 +194,9 @@ func (r *ActionRegistry) Register(site string, action Action) error {
 		return errors.New("invalid action site name")
 	}
 	definition := action.Definition
+	if definition.Exported && definition.Version < 1 {
+		return errors.New("exported actions require a positive version")
+	}
 	if !namePattern.MatchString(definition.Name) || strings.TrimSpace(definition.Description) == "" || action.Handler == nil {
 		return errors.New("an action requires a valid name, description and handler")
 	}

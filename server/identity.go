@@ -101,6 +101,8 @@ func (identity *Identity) matches(principal string) bool {
 		return matchesRole
 	case "automation":
 		return identity.Provider == "automation" && identity.ID == "automation:"+value
+	case "site":
+		return identity.Provider == "site" && identity.ID == "site:"+value
 	default:
 		return false
 	}
@@ -110,7 +112,7 @@ func (identity *Identity) matches(principal string) bool {
 // themselves contain colons; typed values keep everything after the first one.
 func splitPrincipal(principal string) (kind, value string, typed bool) {
 	kind, value, typed = strings.Cut(principal, ":")
-	if typed && (kind == "user" || kind == "group" || kind == "role" || kind == "automation") {
+	if typed && (kind == "user" || kind == "group" || kind == "role" || kind == "automation" || kind == "site") {
 		return kind, value, true
 	}
 	return "", principal, false

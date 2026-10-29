@@ -200,6 +200,12 @@ func (s *Server) registerRoutes() {
 		s.mux.HandleFunc("DELETE /api/sites/{site}/db/{collection}/{id}", s.siteScoped(s.deleteDocument))
 	}
 	if s.actionsEnabled() {
+		if _, ok := s.config.Database.(GuardedDatabase); ok {
+			s.mux.HandleFunc("POST /api/sites/{site}/site-api/call", s.siteScoped(s.siteCallHTTP))
+			s.mux.HandleFunc("GET /api/sites/{site}/site-api/identity", s.siteScoped(s.siteIdentityHTTP))
+			s.mux.HandleFunc("GET /api/sites/{site}/site-api/actions/{target}", s.siteScoped(s.siteActionsHTTP))
+			s.mux.HandleFunc("GET /api/sites/{site}/site-api/invocations/{id}", s.siteScoped(s.siteInvocationHTTP))
+		}
 		s.mux.HandleFunc("GET /api/sites/{site}/actions", s.siteScoped(s.listActions))
 		s.mux.HandleFunc("GET /api/sites/{site}/actions/{action}", s.siteScoped(s.describeAction))
 		s.mux.HandleFunc("POST /api/sites/{site}/actions/{action}", s.siteScoped(s.runAction))
@@ -384,6 +390,7 @@ func (s *Server) capabilityDescription() map[string]any {
 		"connections":       s.connectionsEnabled(),
 		"ai":                s.aiEnabled(),
 		"automations":       s.automationsEnabled(),
+		"siteAPI":           s.siteAPIEnabled(),
 		"maxUploadBytes":    s.config.MaxUploadBytes,
 	}
 }

@@ -1,4 +1,6 @@
 import { createAI } from "./ai.js";
+import type { SiteActionDefinition, SiteInvocation } from "./site-api.js";
+export * from "./site-api.js";
 import { HexError, jsonBody, responseError } from "./http.js";
 import { createIntegrations } from "./integrations.js";
 
@@ -7,6 +9,7 @@ export * from "./http.js";
 export * from "./integrations.js";
 
 export interface Capabilities {
+  siteAPI?: boolean;
   analytics?: boolean;
   /** Third-party integrations are configured. */
   integrations?: boolean;
@@ -84,7 +87,15 @@ export interface PermissionPolicy {
     string,
     {
       kind:
-        "collection" | "file" | "channel" | "path" | "action" | "integration";
+        | "collection"
+        | "file"
+        | "channel"
+        | "path"
+        | "action"
+        | "integration"
+        | "site-action"
+        | "action-consumer"
+        | "event";
       resource: string;
       except?: string[];
       operations: string[];
@@ -291,6 +302,42 @@ export function createHexClient(options: ClientOptions) {
   }
 
   return {
+    sites: {
+      identity() {
+        return requestJSON<Identity>(`${root}/site-api/identity`);
+      },
+      api(target: string, options: { version: number }) {
+        validateName(target);
+        return {
+          list() {
+            return requestJSON<SiteActionDefinition[]>(
+              `${root}/site-api/actions/${target}`,
+            );
+          },
+          call<T = unknown>(
+            action: string,
+            input: unknown = {},
+            callOptions: { idempotencyKey?: string } = {},
+          ) {
+            return requestJSON<T>(
+              `${root}/site-api/call`,
+              jsonBody("POST", {
+                target,
+                action: validateName(action),
+                version: options.version,
+                input,
+                ...callOptions,
+              }),
+            );
+          },
+        };
+      },
+      invocation(id: string) {
+        return requestJSON<SiteInvocation>(
+          `${root}/site-api/invocations/${validateName(id)}`,
+        );
+      },
+    },
     capabilities() {
       return requestJSON<Capabilities>("/api/hex/capabilities");
     },

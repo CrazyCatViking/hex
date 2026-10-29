@@ -143,7 +143,7 @@ type AccessUpdate func(current SiteAccess, exists bool) (*SiteAccess, error)
 
 var (
 	identityIDPattern = regexp.MustCompile(`^[!-~]{1,256}$`)
-	principalPattern  = regexp.MustCompile(`^(user|group|role|automation):[!-~]{1,256}$`)
+	principalPattern  = regexp.MustCompile(`^(user|group|role|automation|site):[!-~]{1,256}$`)
 	pathPrefixPattern = regexp.MustCompile(`^/[A-Za-z0-9._~/-]{0,255}$`)
 )
 

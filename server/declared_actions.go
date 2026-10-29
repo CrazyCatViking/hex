@@ -24,6 +24,10 @@ import (
 // input property named IDField, "id" by default, which the input schema must
 // require. Audience defaults to the site's editors, like registered actions.
 type DeclaredAction struct {
+	Version       int                        `json:"version,omitempty"`
+	Exported      bool                       `json:"exported,omitempty"`
+	Output        json.RawMessage            `json:"output,omitempty"`
+	Select        []string                   `json:"select,omitempty"`
 	Name          string                     `json:"name"`
 	Description   string                     `json:"description"`
 	Operation     string                     `json:"operation"`
@@ -81,6 +85,18 @@ func (s *Server) validateDeclaredActions(site string, actions []DeclaredAction) 
 // compileDeclaredAction validates a declared action and compiles its input
 // schema. The handler is attached separately because it needs the database.
 func compileDeclaredAction(action DeclaredAction) (*registeredAction, error) {
+	if action.Exported && action.Version < 1 {
+		return nil, errors.New("exported actions require a positive version")
+	}
+	readOnly := action.Operation == "get" || action.Operation == "list"
+	if readOnly && (action.Authorization == "action" || len(action.Select) == 0 || len(action.Select) > 64) {
+		return nil, errors.New("read actions require caller authorization and 1–64 selected output fields")
+	}
+	for _, field := range action.Select {
+		if !validCollectionName(field) {
+			return nil, errors.New("invalid selected output field")
+		}
+	}
 	if !namePattern.MatchString(action.Name) {
 		return nil, fmt.Errorf("invalid action name %q; use letters, digits, - and _", action.Name)
 	}
@@ -114,7 +130,7 @@ func compileDeclaredAction(action DeclaredAction) (*registeredAction, error) {
 		return nil, fmt.Errorf("%s needs a description of at most %d characters", label, maxActionDescriptionSize)
 	}
 	switch action.Operation {
-	case OperationCreate, OperationUpdate, OperationDelete:
+	case OperationCreate, OperationUpdate, OperationDelete, "get", "list":
 	default:
 		return nil, fmt.Errorf("%s: operation must be create, update or delete", label)
 	}
@@ -139,10 +155,14 @@ func compileDeclaredAction(action DeclaredAction) (*registeredAction, error) {
 	if err := json.Unmarshal(action.Input, &shape); err != nil || shape.Type != "object" {
 		return nil, fmt.Errorf(`%s: the input schema must have "type": "object"`, label)
 	}
-	if action.Operation != OperationCreate && !slices.Contains(shape.Required, action.idField()) {
+	if action.Operation != OperationCreate && action.Operation != "list" && !slices.Contains(shape.Required, action.idField()) {
 		return nil, fmt.Errorf("%s: the input schema must require %q, the ID of the document to %s", label, action.idField(), action.Operation)
 	}
-	output, err := compileActionSchema(declaredActionOutput)
+	outputSchema := declaredActionOutput
+	if readOnly {
+		outputSchema = action.Output
+	}
+	output, err := compileActionSchema(outputSchema)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +170,8 @@ func compileDeclaredAction(action DeclaredAction) (*registeredAction, error) {
 	return &registeredAction{
 		definition: ActionDefinition{
 			Name: action.Name, Description: description,
-			InputSchema: action.Input, OutputSchema: declaredActionOutput,
+			InputSchema: action.Input, OutputSchema: outputSchema,
+			Version: action.Version, Exported: action.Exported, ReadOnly: readOnly,
 		},
 		audience: cloneAudience(action.Audience),
 		input:    input,
@@ -221,6 +242,9 @@ func (s *Server) declaredActions(ctx context.Context, site string) ([]*registere
 // rule applies exactly as for the data API, including creator-only rules.
 func (s *Server) declaredHandler(action DeclaredAction) func(context.Context, ActionContext, json.RawMessage) (any, error) {
 	return func(ctx context.Context, caller ActionContext, input json.RawMessage) (any, error) {
+		if action.Operation == "get" || action.Operation == "list" {
+			return s.executeDeclaredRead(ctx, caller, action, input)
+		}
 		return s.executeDeclaredMutation(ctx, caller, action, input)
 	}
 }

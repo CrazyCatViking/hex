@@ -206,6 +206,7 @@ func (s *Server) pathComparisonKey(path string) string {
 
 // siteAuthorization is the resolved view of one caller on one site.
 type siteAuthorization struct {
+	apiOnly  bool
 	identity *Identity
 	access   SiteAccess
 	role     siteRole

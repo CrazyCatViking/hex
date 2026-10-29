@@ -167,9 +167,9 @@ func validPermissionResource(kind, resource string) bool {
 		return true
 	}
 	switch kind {
-	case "collection", "channel", "action":
+	case "collection", "channel", "action", "action-consumer", "event":
 		return validCollectionName(resource)
-	case "integration":
+	case "integration", "site-action":
 		integration, endpoint, ok := strings.Cut(resource, ".")
 		return ok && validCollectionName(integration) && (endpoint == "*" || validCollectionName(endpoint))
 	case "file":
@@ -186,6 +186,7 @@ func validatePermissionGrant(grant PermissionGrant, roles map[string]Application
 		"file":       {"read", "upload", "delete"}, "channel": {"read", "send"},
 		"path": {"read"}, "action": {"run"},
 		"integration": {"read", "write"},
+		"site-action": {"run"}, "action-consumer": {"run"}, "event": {"publish", "subscribe"},
 	}
 	allowed, ok := operations[grant.Kind]
 	if !ok || !validPermissionResource(grant.Kind, grant.Resource) || len(grant.Operations) == 0 || len(grant.Operations) > 4 {

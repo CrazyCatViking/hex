@@ -16,6 +16,9 @@ const maxActionSchemaBytes = 64 << 10
 // default to JSON Schema draft 2020-12 and must be self-contained: local $refs
 // and $defs are supported, but external resources are never fetched.
 type ActionDefinition struct {
+	Version      int             `json:"version,omitempty"`
+	Exported     bool            `json:"exported,omitempty"`
+	ReadOnly     bool            `json:"readOnly,omitempty"`
 	Name         string          `json:"name"`
 	Description  string          `json:"description"`
 	InputSchema  json.RawMessage `json:"inputSchema"`
