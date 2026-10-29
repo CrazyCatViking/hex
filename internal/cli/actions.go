@@ -30,7 +30,7 @@ func (a *App) actionsCommand() *cobra.Command {
 			return a.printJSON(data)
 		},
 	}
-	command.AddCommand(list, a.actionCommand(options, false), a.actionCommand(options, true))
+	command.AddCommand(list, a.actionCommand(options, false), a.actionCommand(options, true), a.siteActionCodegenCommand(options))
 	return command
 }
 

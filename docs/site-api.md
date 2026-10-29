@@ -51,6 +51,15 @@ The transport is `POST /api/sites/A/site-api/call` with
 `{target,action,version,input,idempotencyKey}`. Unknown request fields are rejected.
 Discovery is `GET /api/sites/A/site-api/actions/B`.
 
+## Typed consumers
+
+`hex actions codegen --site inventory --out src/inventory.ts` generates input
+and output types plus version-pinned wrappers from visible exported contracts.
+Use `typedSiteAPI(hex.sites)` from the generated module. Mutation methods require
+an idempotency key at compile time. `--catalog actions.json` supports offline
+generation from saved `hex actions list` JSON; `--check --out ...` detects drift
+in CI. Exclude generated files from formatters.
+
 ## Automations
 
 Scripts call `await hex.sites.call("inventory", "reserve-stock", input,
