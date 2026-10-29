@@ -1,0 +1,235 @@
+/* Review-only layouts. Shared styling and tokens come from the unchanged
+   server/portal/portal.css, copied by build.mjs. No new portal theme. */
+.prototype-review-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 20px;
+  padding: 8px 24px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+.prototype-review-bar > div {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.prototype-review-bar select {
+  width: auto;
+  min-height: 32px;
+  height: 32px;
+  padding-block: 4px;
+  font-size: 12px;
+}
+.prototype-account {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  padding: 4px 10px 4px 4px;
+  border-radius: 999px;
+  background: none;
+  font-weight: 600;
+  cursor: pointer;
+}
+.prototype-shell {
+  flex: 1;
+}
+.prototype-search-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.prototype-search-row .hero-search {
+  flex: 1;
+}
+#search-form {
+  margin: 24px 0 32px;
+}
+.prototype-title {
+  font: inherit;
+  font-weight: 700;
+  color: var(--text);
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+.prototype-title:hover {
+  text-decoration: underline;
+}
+.prototype-card {
+  min-height: 210px;
+}
+.prototype-card .site-card-meta {
+  padding-top: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.prototype-pin {
+  margin-left: auto;
+  flex: none;
+}
+.prototype-pin[aria-pressed="true"] {
+  color: var(--accent-strong);
+}
+.prototype-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+.prototype-recent-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.prototype-compact-row .site-row-main {
+  min-width: 0;
+}
+.prototype-compact-row {
+  flex-wrap: nowrap;
+}
+.prototype-explore {
+  margin-top: 32px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.prototype-explore h2 {
+  margin: 0 0 6px;
+  font-size: 22px;
+}
+.prototype-explore p {
+  margin: 0;
+}
+.prototype-controls {
+  justify-content: space-between;
+  align-items: flex-end;
+}
+.prototype-controls .segmented {
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+.prototype-controls .field {
+  min-width: 175px;
+}
+.prototype-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  color: var(--text-muted);
+}
+.prototype-summary p {
+  margin: 0;
+}
+.prototype-summary strong {
+  color: var(--text);
+}
+.prototype-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 24px;
+  color: var(--text-muted);
+}
+.prototype-pagination > div {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.prototype-preserved {
+  margin-bottom: 24px;
+  color: var(--text-muted);
+}
+.prototype-preserved strong {
+  color: var(--text);
+}
+.prototype-empty {
+  display: block;
+}
+.prototype-empty h2 {
+  margin-top: 0;
+}
+.prototype-empty .button {
+  margin-top: 16px;
+}
+.prototype-skeleton {
+  min-height: 180px;
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.prototype-scenario {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.prototype-scenario select {
+  width: auto;
+  height: 32px;
+  min-height: 32px;
+  padding-block: 4px;
+}
+.prototype-dialog h2 {
+  margin-top: 0;
+}
+.prototype-dialog p {
+  color: var(--text-muted);
+}
+.prototype-notes {
+  padding-left: 20px;
+  display: grid;
+  gap: 18px;
+}
+.prototype-notes strong {
+  display: block;
+}
+.prototype-notes span {
+  color: var(--text-muted);
+}
+.prototype-route {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 720px) {
+  .prototype-manage-row {
+    position: relative;
+  }
+  .prototype-manage-row .prototype-pin {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+  }
+  .prototype-manage-row .site-row-main {
+    padding-right: 24px;
+  }
+  .prototype-review-bar {
+    padding-inline: 16px;
+  }
+  .prototype-review-caption {
+    display: none;
+  }
+  .prototype-split,
+  .prototype-recent-list {
+    grid-template-columns: 1fr;
+  }
+  .prototype-split {
+    gap: 0;
+  }
+  .prototype-summary {
+    align-items: flex-start;
+  }
+  .prototype-preserved {
+    font-size: 13px;
+  }
+}

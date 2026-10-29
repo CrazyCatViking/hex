@@ -81,6 +81,8 @@ type Server struct {
 	analyticsBootstrap    sync.Mutex
 	analyticsBootstrapped bool
 	integrationCache      responseCache
+	portalInventory       portalInventoryCache
+	portalIcons           portalIconCache
 	automationRuns        sync.WaitGroup
 	automationSlots       chan struct{}
 }
@@ -125,6 +127,9 @@ func New(config Config) *Server {
 func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /{$}", s.landingPage)
 	s.mux.HandleFunc("GET /start", s.startPage)
+	s.mux.HandleFunc("GET /library", s.libraryPage)
+	s.mux.HandleFunc("PUT /api/hex/preferences/pins/{site}", s.updatePin)
+	s.mux.HandleFunc("POST /api/hex/preferences/recent/{site}", s.recordRecent)
 	s.mux.HandleFunc("GET /api/hex/favicon.svg", s.portalAsset)
 	if s.siteIconReader() != nil {
 		s.mux.HandleFunc("GET /api/hex/sites/{site}/icon", s.siteIcon)

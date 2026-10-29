@@ -26,6 +26,7 @@ func TestPortalDiscoversPublishedFavicons(t *testing.T) {
 		contentType string
 	}{
 		{"declared SVG", `<head><link rel="icon" href="assets/logo.svg?v=1"></head>`, "assets/logo.svg", testAppIcon, "image/svg+xml"},
+		{"large index", `<head><link rel="icon" href="assets/logo.svg"></head><body>` + strings.Repeat("x", 257<<10), "assets/logo.svg", testAppIcon, "image/svg+xml"},
 		{"shortcut icon", `<head><link rel="SHORTCUT ICON" href="/assets/logo.svg"></head>`, "assets/logo.svg", testAppIcon, "image/svg+xml"},
 		{"base URL", `<head><base href="/assets/"><link rel="icon" href="logo.svg"></head>`, "assets/logo.svg", testAppIcon, "image/svg+xml"},
 		{"same-origin absolute", `<head><link rel="icon" href="http://demo.example.com/assets/logo.svg"></head>`, "assets/logo.svg", testAppIcon, "image/svg+xml"},
@@ -70,7 +71,7 @@ func TestPortalDiscoversPublishedFavicons(t *testing.T) {
 }
 
 func TestPortalIconAuthorizationAndFallback(t *testing.T) {
-	server, store, _ := analyticsFixture(t)
+	server, _, _ := analyticsFixture(t)
 	owner := principalHeaders("owner")
 	viewer := principalHeaders("viewer")
 	publishSite(t, server, owner, "demo", map[string]string{"index.html": `<head><link rel="icon" href="/private/icon.svg"></head>`, "private/icon.svg": testAppIcon}, `{"viewers":["user:owner","user:viewer"],"paths":[{"prefix":"/private/","viewers":"owners"}]}`)
@@ -93,9 +94,9 @@ func TestPortalIconAuthorizationAndFallback(t *testing.T) {
 	}
 	// Non-images and oversized images fall back without serving app markup.
 	for _, data := range []string{`<html><script>bad()</script></html>`, strings.Repeat("x", 257<<10)} {
-		if err := store.WriteSiteFile(context.Background(), "demo", "private/icon.svg", int64(len(data)), strings.NewReader(data)); err != nil {
-			t.Fatal(err)
-		}
+		// Republishing invalidates the file-byte cache immediately. Out-of-band
+		// storage edits otherwise have the documented short cache lifetime.
+		publishSite(t, server, owner, "demo", map[string]string{"index.html": `<head><link rel="icon" href="/private/icon.svg"></head>`, "private/icon.svg": data}, "")
 		icon := requestAs(t, server, owner, "GET", path, nil, 200)
 		if !strings.Contains(icon.Body.String(), "<text") || strings.Contains(icon.Body.String(), "<script>") {
 			t.Fatal("invalid image was not replaced by initials")

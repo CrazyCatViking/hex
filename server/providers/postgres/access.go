@@ -32,6 +32,28 @@ func (d *Database) GetSiteAccess(ctx context.Context, site string) (hex.SiteAcce
 	return hex.NormalizeSiteAccess(access), nil
 }
 
+func (d *Database) GetSiteAccessBatch(ctx context.Context, sites []string) (map[string]hex.SiteAccess, error) {
+	rows, err := d.pool.Query(ctx, `SELECT site, policy FROM hex_site_policies WHERE site = ANY($1)`, sites)
+	if err != nil {
+		return nil, fmt.Errorf("read site policies: %w", err)
+	}
+	defer rows.Close()
+	policies := make(map[string]hex.SiteAccess, len(sites))
+	for rows.Next() {
+		var site string
+		var data []byte
+		if err := rows.Scan(&site, &data); err != nil {
+			return nil, fmt.Errorf("scan site policy: %w", err)
+		}
+		var policy hex.SiteAccess
+		if err := decodeSitePolicy(data, &policy); err != nil {
+			return nil, fmt.Errorf("decode site policy for %s: %w", site, err)
+		}
+		policies[site] = hex.NormalizeSiteAccess(policy)
+	}
+	return policies, rows.Err()
+}
+
 func (d *Database) PutSiteAccess(ctx context.Context, site string, access hex.SiteAccess) error {
 	return d.UpdateSiteAccess(ctx, site, func(hex.SiteAccess, bool) (*hex.SiteAccess, error) {
 		return &access, nil

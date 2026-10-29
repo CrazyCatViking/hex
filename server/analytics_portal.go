@@ -209,30 +209,27 @@ func (s *Server) adminInventory(ctx context.Context) ([]adminSiteRow, adminInven
 	if s.config.Sites == nil {
 		return rows, counts, nil
 	}
-	names, err := s.config.Sites.ListSites(ctx)
+	sites, err := s.portalSites(ctx)
 	if err != nil {
 		return nil, counts, err
 	}
-	slices.Sort(names)
-	names = slices.Compact(names)
-	reader, _ := s.config.Sites.(SiteMetadataReader)
+	policies, err := s.portalPolicies(ctx, sites)
+	if err != nil {
+		return nil, counts, err
+	}
+	var principals []string
+	for _, access := range policies {
+		principals = append(principals, access.Owners...)
+	}
+	slices.Sort(principals)
+	ownerLabels := make(map[string]principalLabel)
+	for _, label := range s.describePrincipals(ctx, slices.Compact(principals)) {
+		ownerLabels[label.Principal] = label
+	}
 	creators := make(map[string]bool)
 	now := time.Now()
-	for _, name := range names {
-		if !siteNamePattern.MatchString(name) {
-			continue
-		}
-		var metadata *SiteMetadata
-		if reader != nil {
-			metadata, err = reader.ReadSiteMetadata(ctx, name)
-			if err != nil {
-				return nil, counts, err
-			}
-		}
-		siteURL, err := s.siteURL(name)
-		if err != nil {
-			return nil, counts, err
-		}
+	for _, site := range sites {
+		name, siteURL, metadata := site.Name, site.URL, site.Metadata
 		row := adminSiteRow{siteCard: s.cardForSite(name, siteURL, metadata, now), Published: true}
 		if metadata != nil {
 			row.CreatedAt = metadata.CreatedAt
@@ -245,13 +242,11 @@ func (s *Server) adminInventory(ctx context.Context) ([]adminSiteRow, adminInven
 		if row.CreatorID == "" {
 			counts.UnknownCreators++
 		}
-		access, exists, err := s.sitePolicy(ctx, name)
-		if err != nil {
-			return nil, counts, err
-		}
+		access, exists := policies[name]
 		row.Access, row.AccessTone = audience(access, exists)
 		var owners []string
-		for _, owner := range s.describePrincipals(ctx, access.Owners) {
+		for _, principal := range access.Owners {
+			owner := ownerLabels[principal]
 			owners = append(owners, owner.Name)
 			if owner.Kind == "user" {
 				_, id, _ := strings.Cut(owner.Principal, ":")

@@ -1,4 +1,4 @@
-// Management pages: instant filtering of your sites, and the sharing editor
+// Management pages: the sharing editor
 // with a searchable people and group picker. Everything is built with DOM
 // methods so names and emails are never parsed as HTML.
 
@@ -64,26 +64,6 @@ function avatar(entry) {
     box.textContent = initials(entry.name);
   }
   return box;
-}
-
-// --- Your sites: instant filter while typing ---------------------------------
-
-const manageSearch = document.querySelector("[data-filter-target]");
-if (manageSearch) {
-  const list = document.querySelector(manageSearch.dataset.filterTarget);
-  const empty = document.getElementById("manage-list-empty");
-  manageSearch.addEventListener("input", () => {
-    const query = manageSearch.value.trim().toLowerCase();
-    let shown = 0;
-    for (const row of list?.children ?? []) {
-      const match = row.dataset.filterText.toLowerCase().includes(query);
-      row.hidden = !match;
-      shown += match ? 1 : 0;
-    }
-    if (empty) {
-      empty.hidden = shown > 0;
-    }
-  });
 }
 
 // --- Sharing editor ----------------------------------------------------------

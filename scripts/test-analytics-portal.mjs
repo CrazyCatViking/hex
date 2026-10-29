@@ -18,33 +18,40 @@ export async function verifyAnalyticsPortal(port) {
       await page.waitForTimeout(50);
     }
     await page.goto(base);
+    assert.equal(
+      await page.locator(".site-card-traffic").count(),
+      0,
+      "Home does not wait for analytics",
+    );
+    await page.goto(`${base}/library`);
+    const popular = page.waitForResponse(
+      (response) =>
+        response.url().includes("/library?") &&
+        response.url().includes("sort=popular"),
+    );
+    await page.locator('select[name="sort"]').selectOption("popular");
+    await popular;
+    await page.locator("#catalog .site-card-traffic").waitFor();
     assert.match(
       await page.locator("#catalog .site-card-traffic").textContent(),
       /[1-9]\d* page views?[\s\S]*all time/,
     );
-    const popular = page.waitForResponse(
-      (response) =>
-        response.url().includes("/api/hex/catalog?") &&
-        response.url().includes("sort=popular"),
-    );
-    await page.locator("#sort").selectOption("popular");
-    await popular;
     const noViews = page.waitForResponse(
       (response) =>
-        response.url().includes("/api/hex/catalog?") &&
+        response.url().includes("/library?") &&
         response.url().includes("traffic=unvisited"),
     );
-    await page.locator("#traffic").selectOption("unvisited");
+    await page.locator('select[name="traffic"]').selectOption("unvisited");
     await noViews;
     await page.waitForFunction(
       () => document.querySelectorAll("#catalog .site-card").length === 0,
     );
     const visited = page.waitForResponse(
       (response) =>
-        response.url().includes("/api/hex/catalog?") &&
+        response.url().includes("/library?") &&
         response.url().includes("traffic=visited"),
     );
-    await page.locator("#traffic").selectOption("visited");
+    await page.locator('select[name="traffic"]').selectOption("visited");
     await visited;
     await page.waitForFunction(
       () => document.querySelectorAll("#catalog .site-card").length === 1,

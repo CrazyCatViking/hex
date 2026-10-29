@@ -1841,6 +1841,89 @@ textarea:focus {
 }
 
 /* Shared modal and form components; feature styles should only add layout. */
+.site-card {
+  position: relative;
+}
+.site-card-top .pin-button {
+  position: absolute;
+  z-index: 2;
+  top: 12px;
+  right: 12px;
+}
+.site-card:has(.pin-button) .site-card-top {
+  padding-right: 32px;
+}
+.pin-button[aria-pressed="true"] {
+  color: var(--accent);
+}
+.pin-button[aria-pressed="true"] path {
+  fill: currentColor;
+}
+.home-sections {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 28px;
+}
+.home-sections .section {
+  min-width: 0;
+}
+.home-sections:has(> .section:only-child) {
+  grid-template-columns: 1fr;
+}
+.home-sections .site-row {
+  position: relative;
+  padding-right: 50px;
+}
+.home-sections .site-row > .pin-button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+.site-row .site-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.library-scopes {
+  border-radius: var(--radius);
+  flex-wrap: wrap;
+  margin: 20px 0;
+}
+.portal-pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 24px 0;
+}
+#main.htmx-swapping {
+  opacity: 0.7;
+}
+.htmx-request {
+  cursor: progress;
+}
+@media (max-width: 850px) {
+  .home-sections {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+}
+@media (max-width: 640px) {
+  .site-row:has(.pin-button) {
+    position: relative;
+    padding-right: 40px;
+  }
+  .site-row > .pin-button {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+  }
+}
+
 .dialog {
   border: 1px solid var(--line);
   border-radius: var(--radius);

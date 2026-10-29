@@ -72,6 +72,7 @@ func (s *Server) siteIcon(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	reader = cachedIconReader{server: s, reader: reader}
 	siteURL, err := s.siteURL(site)
 	if err != nil {
 		writeServerError(w, err)

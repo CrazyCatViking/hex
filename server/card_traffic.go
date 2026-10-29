@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"time"
 )
 
 func (s *Server) cardTrafficEnabled() bool {
@@ -14,10 +15,12 @@ func (s *Server) cardTrafficEnabled() bool {
 
 // Load aggregate traffic once per listing, for its visible sites only. An
 // analytics outage must not make the app directory unavailable or look empty.
-func (s *Server) fillCardTraffic(ctx context.Context, groups ...[]siteCard) {
+func (s *Server) fillCardTraffic(ctx context.Context, groups ...[]siteCard) bool {
+	ctx, cancel := context.WithTimeout(ctx, 750*time.Millisecond)
+	defer cancel()
 	reader, ok := s.config.Analytics.(SiteTrafficReader)
 	if !ok {
-		return
+		return false
 	}
 	names := []string{}
 	for _, cards := range groups {
@@ -26,14 +29,14 @@ func (s *Server) fillCardTraffic(ctx context.Context, groups ...[]siteCard) {
 		}
 	}
 	if len(names) == 0 {
-		return
+		return true
 	}
 	slices.Sort(names)
 	names = slices.Compact(names)
 	rows, err := reader.SiteTraffic(ctx, names)
 	if err != nil {
 		slog.Error("load card traffic", "error", err)
-		return
+		return false
 	}
 	traffic := make(map[string]TrafficTotals, len(rows))
 	for _, row := range rows {
@@ -45,6 +48,11 @@ func (s *Server) fillCardTraffic(ctx context.Context, groups ...[]siteCard) {
 			cards[index].Traffic = &total
 		}
 	}
+	return true
+}
+
+func trafficRequested(sort, filter string) bool {
+	return sort == "popular" || sort == "visitors" || sort == "visited" || filter == "visited" || filter == "unvisited"
 }
 
 func (s *Server) cardSortChoices(selected string) []choice {

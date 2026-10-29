@@ -14,11 +14,18 @@ export async function verifyPortal(port) {
       await page.locator("#platform-name").textContent(),
       "Test Hex",
     );
-    assert.equal(await page.locator("#site-count").textContent(), "2");
     assert.equal(await page.locator(".site-card").count(), 2);
-    assert.equal(await page.locator("#author-count").textContent(), "1");
-    assert.equal(await page.locator("#recent-count").textContent(), "1");
-    await page.locator("#search").fill("reports");
+    const overview = await (
+      await page.request.get(`http://localhost:${port}/api/hex/overview`, {
+        headers: { "X-Hex-Request": "1" },
+      })
+    ).json();
+    assert.deepEqual(overview.statistics, {
+      sites: 2,
+      authors: 1,
+      updatedRecently: 1,
+    });
+    await page.locator("#hero-search").fill("reports");
     await page.waitForFunction(
       () => document.querySelectorAll(".site-card").length === 1,
     );
@@ -26,7 +33,7 @@ export async function verifyPortal(port) {
       await page.locator(".site-link").textContent(),
       "Team dashboard",
     );
-    await page.locator("#search").fill("does-not-exist");
+    await page.locator("#hero-search").fill("does-not-exist");
     await page.waitForFunction(
       () => document.querySelectorAll(".site-card").length === 0,
     );
@@ -34,18 +41,18 @@ export async function verifyPortal(port) {
       await page.locator("#site-list").textContent(),
       /No apps match/,
     );
-    await page.locator("#search").fill("");
+    await page.locator("#hero-search").fill("");
     await page.waitForFunction(
       () => document.querySelectorAll(".site-card").length === 2,
     );
-    await page.locator("#sort").selectOption("name");
-    await page.waitForFunction(
-      () => document.querySelector(".site-label").textContent === "other",
+    await page.locator('select[name="sort"]').selectOption("name");
+    await page.waitForFunction(() =>
+      document.querySelector(".site-link").href.includes("other.localhost"),
     );
     const refreshed = page.waitForResponse((response) =>
-      response.url().includes("/api/hex/catalog"),
+      response.url().includes("/library?"),
     );
-    await page.locator("#refresh").click();
+    await page.getByRole("button", { name: "Search", exact: true }).click();
     assert.equal((await refreshed).status(), 200);
     assert.equal(await page.locator("#page-error").isVisible(), false);
     await page.goto(`http://localhost:${port}/start`);
@@ -65,7 +72,7 @@ export async function verifyPortal(port) {
       assert.equal(await download.failure(), null);
     }
     await page.setViewportSize({ width: 390, height: 844 });
-    for (const path of ["/", "/start"]) {
+    for (const path of ["/", "/library", "/start"]) {
       await page.goto(`http://localhost:${port}${path}`);
       const overflow = await page.evaluate(() =>
         [...document.querySelectorAll("body *")]
@@ -96,7 +103,7 @@ export async function verifyPortal(port) {
       "Team dashboard",
     );
     console.log(
-      "Portal passed: Go-rendered HTML, HTMX search/sort/refresh, statistics, build-and-publish installer downloads, mobile layout, and no-JavaScript browsing.",
+      "Portal passed: Go-rendered HTML, unified HTMX library search/sort/refresh, overview API statistics, installer downloads, mobile layout, and no-JavaScript browsing.",
     );
   } finally {
     await browser.close();

@@ -42,6 +42,73 @@ function showError(message) {
 }
 window.hexError = showError;
 
+// Personal shortcuts are stored on the server, never shared browser storage.
+// Refresh only the bounded main content after a successful pin change.
+document.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-pin]");
+  if (!button || button.disabled) return;
+  event.preventDefault();
+  const site = button.dataset.pin;
+  const pinned = button.getAttribute("aria-pressed") !== "true";
+  button.disabled = true;
+  try {
+    const response = await fetch(
+      `/api/hex/preferences/pins/${encodeURIComponent(site)}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "X-Hex-Request": "1" },
+        body: JSON.stringify({ pinned }),
+      },
+    );
+    if (!response.headers.get("Content-Type")?.includes("application/json")) {
+      throw new Error(
+        "The shortcut could not be saved. Reload to sign in or try again.",
+      );
+    }
+    const result = await response.json();
+    if (!response.ok)
+      throw new Error(
+        result.error || "The shortcut could not be saved. Try again.",
+      );
+    await htmx.ajax("GET", location.href, {
+      target: "#main",
+      select: "#main",
+      swap: "outerHTML settle:0ms",
+    });
+    const focus =
+      document.querySelector(`[data-pin="${CSS.escape(site)}"]`) ||
+      element("hero-search") ||
+      element("manage-search");
+    focus?.focus();
+    toast(pinned ? "Pinned to your home page" : "Removed from pinned apps");
+  } catch (error) {
+    showError(error.message);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+document.addEventListener("click", (event) => {
+  const link = event.target.closest("[data-open-site]");
+  if (!link?.dataset.openSite || !document.querySelector("[data-pin]")) return;
+  // Recording history must never hold up opening an app.
+  fetch(
+    `/api/hex/preferences/recent/${encodeURIComponent(link.dataset.openSite)}`,
+    {
+      method: "POST",
+      headers: { "X-Hex-Request": "1" },
+      keepalive: true,
+    },
+  )
+    .then((response) => {
+      if (!response.ok)
+        console.warn("Recently opened could not be saved", response.status);
+    })
+    .catch((error) => {
+      console.warn("Recently opened could not be saved", error);
+    });
+});
+
 document.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-copy]");
   if (!button) {
@@ -196,6 +263,13 @@ function setupTrendCharts(root) {
 setupTrendCharts(document);
 document.addEventListener("htmx:afterSettle", () => setupTrendCharts(document));
 
+document.addEventListener("htmx:beforeRequest", (event) => {
+  event.detail.target?.setAttribute("aria-busy", "true");
+});
+document.addEventListener("htmx:afterRequest", (event) => {
+  event.detail.target?.removeAttribute("aria-busy");
+});
+
 // HTMX errors: show the API's message, or a sign-in hint when a session
 // expired and the gateway answered with its login page instead.
 document.addEventListener("htmx:responseError", (event) => {
@@ -223,9 +297,23 @@ document.addEventListener("htmx:beforeSwap", (event) => {
       "Your session may have expired. Reload this page to sign in again.",
     );
   }
+  if (
+    event.detail.target?.id === "main" &&
+    event.detail.xhr.status === 200 &&
+    event.detail.xhr.getResponseHeader("X-Hex-Portal") !== "1"
+  ) {
+    event.detail.shouldSwap = false;
+    showError(
+      "Your session may have expired. Reload this page to sign in again.",
+    );
+  }
 });
 document.addEventListener("htmx:afterRequest", (event) => {
-  if (event.detail.successful && element("page-error")) {
+  if (
+    event.detail.successful &&
+    event.detail.xhr.getResponseHeader("X-Hex-Portal") === "1" &&
+    element("page-error")
+  ) {
     element("page-error").hidden = true;
   }
 });

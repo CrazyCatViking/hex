@@ -15,12 +15,26 @@
             apps, in one place.{{end}}
           </h1>
           <p class="lead">
-            Open the tools your colleagues built, find what has been shared with
-            you, and keep track of your own.
+            Open your pinned tools, find what's shared with you, and keep track
+            of your own.
           </p>
         </div>
-        <form class="hero-search" action="/" method="get" role="search">
-          <label class="visually-hidden" for="hero-search">Search apps</label>
+        <form
+          class="hero-search"
+          action="/library"
+          method="get"
+          role="search"
+          hx-get="/library"
+          hx-target="#main"
+          hx-select="#main"
+          hx-swap="outerHTML settle:0ms"
+          hx-push-url="true"
+          hx-sync="this:replace"
+          hx-trigger="submit, input changed delay:300ms"
+        >
+          <label class="visually-hidden" for="hero-search"
+            >Search all apps</label
+          >
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <circle cx="11" cy="11" r="7" />
             <path d="m20 20-3.5-3.5" />
@@ -30,119 +44,113 @@
             name="search"
             type="search"
             placeholder="Search apps by name, purpose or person…"
-            value="{{.Catalog.Search}}"
             autocomplete="off"
           />
+          <button class="visually-hidden" type="submit">Search</button>
         </form>
       </section>
-
-      {{if .Shared}}
-      <section class="section" aria-labelledby="shared-heading">
+      {{if .PinsEnabled}}
+      <section class="section" aria-labelledby="pinned-heading">
         <div class="section-heading">
           <div>
-            <h2 id="shared-heading">Shared with you</h2>
+            <h2 id="pinned-heading">Pinned apps</h2>
             <p class="muted">
-              Links people have shared with you directly or with one of your
-              groups.
+              Your personal shortcuts. Pin an app using the star on its card.
+            </p>
+          </div>
+          <a class="link-button" href="/library?scope=pinned"
+            >View all pins →</a
+          >
+        </div>
+        {{if .Pinned}}
+        <div class="card-grid">
+          {{range .Pinned}}{{template "site-card" .}}{{end}}
+        </div>
+        {{else}}
+        <div class="empty-state">
+          <div>
+            <strong>Your favorite tools, a little closer.</strong>
+            <p class="muted">
+              Browse the <a href="/library">app library</a> and pin the tools
+              you use most. Pins never change access.
             </p>
           </div>
         </div>
-        <div class="card-grid">
-          {{range .Shared}}{{template "site-card" .}}{{end}}
-        </div>
-        {{if .SharedMore}}
-        <p class="muted">And {{.SharedMore}} more.</p>
         {{end}}
       </section>
-      {{end}} {{if .Manage}}
-      <section class="section" aria-labelledby="mine-heading">
+      {{end}} {{if .Recent}}
+      <section class="section" aria-labelledby="recent-heading">
         <div class="section-heading">
-          <div>
-            <h2 id="mine-heading">Your sites</h2>
-            <p class="muted">Apps and files you have published.</p>
-          </div>
-          {{if .Mine}}<a class="button button-secondary" href="/manage"
-            >Manage all</a
-          >{{end}}
+          <h2 id="recent-heading">Recently opened</h2>
+          <a class="link-button" href="/library?scope=recent">View all →</a>
         </div>
-        {{if .Mine}}
-        <div class="card-grid">
-          {{range .Mine}}{{template "site-card" .}}{{end}}
+        <div class="site-list">
+          {{range .Recent}}{{template "library-row" .}}{{end}}
         </div>
-        {{if .MineMore}}
-        <p class="muted">
-          And {{.MineMore}} more under <a href="/manage">Your sites</a>.
-        </p>
-        {{end}} {{else}}
-        <div class="empty-state">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M12 3v12M7 8l5-5 5 5" />
-            <path d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4" />
-          </svg>
-          <div>
-            <strong>Nothing published yet</strong>
-            <p class="muted">
-              Share a report or file in seconds, or publish an app your agent
-              built. <a href="/start">See how</a>.
-            </p>
-          </div>
-        </div>
-        {{end}}
       </section>
       {{end}}
-
-      <section id="sites" class="section" aria-labelledby="sites-heading">
+      <div class="home-sections">
+        {{if .Shared}}
+        <section class="section" aria-labelledby="shared-heading">
+          <div class="section-heading">
+            <div>
+              <h2 id="shared-heading">Shared with you</h2>
+              <p class="muted">
+                Apps and files shared with you or your groups.
+              </p>
+            </div>
+            <a class="link-button" href="/library?scope=shared">View all →</a>
+          </div>
+          <div class="site-list">
+            {{range .Shared}}{{template "library-row" .}}{{end}}
+          </div>
+        </section>
+        {{end}} {{if .Manage}}
+        <section class="section" aria-labelledby="mine-heading">
+          <div class="section-heading">
+            <div>
+              <h2 id="mine-heading">Your sites</h2>
+              <p class="muted">Apps and files you have published.</p>
+            </div>
+            <a class="link-button" href="/manage">Manage all →</a>
+          </div>
+          {{if .Mine}}
+          <div class="site-list">
+            {{range .Mine}}{{template "library-row" .}}{{end}}
+          </div>
+          {{else}}
+          <div class="empty-state">
+            <div>
+              <strong>Nothing published yet</strong>
+              <p class="muted">
+                Share a report or build an app. <a href="/start">See how</a>.
+              </p>
+            </div>
+          </div>
+          {{end}}
+        </section>
+        {{end}}
+      </div>
+      <section class="section" aria-labelledby="sites-heading">
         <div class="section-heading">
           <div>
             <h2 id="sites-heading">Apps for everyone</h2>
             <p class="muted">
-              Tools your colleagues have published for the team.
+              A few tools from your team. Browse the library for everything you
+              can access.
             </p>
           </div>
-        </div>
-        <form
-          id="site-filters"
-          class="toolbar"
-          action="/"
-          method="get"
-          hx-get="/api/hex/catalog"
-          hx-target="#catalog"
-          hx-swap="outerHTML"
-          hx-trigger="submit, input changed delay:250ms, change"
-          hx-sync="this:replace"
-          hx-disabled-elt="#refresh"
-        >
-          <label class="field field-grow"
-            ><span class="field-label">Search</span
-            ><input
-              id="search"
-              name="search"
-              type="search"
-              placeholder="Filter apps…"
-              value="{{.Catalog.Search}}"
-              autocomplete="off"
-          /></label>
-          <label class="field"
-            ><span class="field-label">Sort by</span
-            ><select id="sort" name="sort">
-              {{range .Catalog.SortChoices}}
-              <option value="{{.Value}}" {{.Attr}}>{{.Label}}</option>
-              {{end}}
-            </select></label
+          <a class="button button-secondary" href="/library"
+            >Browse all apps →</a
           >
-          <button id="refresh" class="button button-secondary" type="submit">
-            Refresh
-          </button>
-          {{if .Catalog.TrafficEnabled}}<label class="field"
-            ><span class="field-label">Activity</span
-            ><select id="traffic" name="traffic">
-              {{range .Catalog.TrafficChoices}}
-              <option value="{{.Value}}" {{.Attr}}>{{.Label}}</option>
-              {{end}}
-            </select></label
-          >{{end}}
-        </form>
-        {{template "catalog" .Catalog}}
+        </div>
+        <div class="card-grid">
+          {{range .Catalog.Sites}}{{template "site-card" .}}{{else}}
+          <div class="empty-state">
+            <strong>No apps are listed yet.</strong>
+          </div>
+          {{end}}
+        </div>
       </section>
     </main>
     {{template "footer" .Chrome}}

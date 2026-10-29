@@ -10,21 +10,60 @@ People/group pickers in permission dialogs use an anchored, scrollable dropdown,
 
 ## Pages
 
-| Page | Path | Contents |
-| --- | --- | --- |
-| Home | `/` | A greeting for the signed-in person, a search across all apps, **Shared with you**, **Your sites**, and **Apps for everyone**. Cards show all-time page views when analytics is enabled; the catalogue can sort by popularity, visitors or recent visits and filter by activity. Without an identity provider only the catalog is shown. |
-| Your sites | `/manage` | Every site the person owns, filterable by text, kind and traffic, with popularity sorting, page-view/visitor counts and open, copy-link, share and analytics actions. Platform admins see every site. |
-| Site | `/manage/<site>` | Tabs for **Overview** (who created and last published it, and its audience), **Sharing**, **Data**, **History** and **Settings** (taking the site down). |
-| Build & publish | `/start` | The installer for the detected OS and three steps: install, share a file or folder, and build an app with a coding agent. |
-| Admin | `/admin`, `/admin/sites`, `/admin/users` | Platform-wide inventory, user activity, publishing history and nginx traffic, with date ranges and site/user drill-downs. Requires analytics and platform-admin access. |
-| Integration audit | `/admin/integration-audit` | Every call of audited integrations, cached answers included: when, who, from which site, the endpoint, the input and the records it showed, filterable and downloadable as CSV. Requires an integration audit store and platform-admin access; see [Auditing](integrations.md#auditing). |
-| Integrations | `/integrations`, `/integrations?site=<site>` | Registry-driven integration catalog, grants, connection and approval status. Owners request approval for a site; admins review, approve and revoke requests. Site management also exposes an Integrations tab. |
+| Page              | Path                                         | Contents                                                                                                                                                                                                                                                                                 |
+| ----------------- | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Home              | `/`                                          | A greeting, unified search, four personal pins, and bounded recent/shared/owned/company previews. **View all** opens the appropriate complete listing. No traffic aggregate is needed to open Home.                                                                                      |
+| App library       | `/library`                                   | Search by name, purpose or person across all accessible discovery/personal listings, with pinned/recent/shared/owned/company scopes, app/file filtering, sorting, grid/list views and 12 results per page.                                                                               |
+| Your sites        | `/manage`                                    | The familiar ownership list and actions, with complete server-side search and 12 rows per page. Platform admins retain their existing all-sites switch. Traffic sorting/filtering is optional; it does not run on ordinary list requests.                                                |
+| Site              | `/manage/<site>`                             | Tabs for **Overview** (who created and last published it, and its audience), **Sharing**, **Data**, **History** and **Settings** (taking the site down).                                                                                                                                 |
+| Build & publish   | `/start`                                     | The installer for the detected OS and three steps: install, share a file or folder, and build an app with a coding agent.                                                                                                                                                                |
+| Admin             | `/admin`, `/admin/sites`, `/admin/users`     | Platform-wide inventory, user activity, publishing history and nginx traffic, with date ranges and site/user drill-downs. Requires analytics and platform-admin access.                                                                                                                  |
+| Integration audit | `/admin/integration-audit`                   | Every call of audited integrations, cached answers included: when, who, from which site, the endpoint, the input and the records it showed, filterable and downloadable as CSV. Requires an integration audit store and platform-admin access; see [Auditing](integrations.md#auditing). |
+| Integrations      | `/integrations`, `/integrations?site=<site>` | Registry-driven integration catalog, grants, connection and approval status. Owners request approval for a site; admins review, approve and revoke requests. Site management also exposes an Integrations tab.                                                                           |
 
 The account menu in the header shows the person's name, email, their configured groups and whether they are a platform admin. **Your sites** appears only when management is enabled. **Sign out** appears only when the host supplies `Config.LogoutURL`; it points to that host's logout route. Azure Easy Auth hosts can explicitly configure `/.auth/logout`. There is no provider-specific logout route assumed by the portal, and browser logout does not clear the CLI's saved session (`hex logout` does that).
 
 ## Hosting
 
-The Go framework renders the portal pages and catalog fragments with `html/template`. HTMX handles search, sort, and refresh requests. The page, styles, scripts, and pinned HTMX distribution are embedded in the server, so there is no frontend build step when installing the Go framework and no runtime CDN dependency. Small scripts detect the visitor's OS, copy links and commands, filter lists and run the sharing picker. Light and dark themes follow the operating system. Browsing also works with ordinary GET forms when JavaScript is disabled.
+The Go framework renders the portal pages and catalog fragments with `html/template`. HTMX handles debounced search, sorting and pin refreshes, cancels superseded requests, and preserves query/scope/page in browser history. Main-content responses carry a portal marker so a gateway sign-in page cannot silently replace search results. Sensitive pages are not saved in HTMX's local history cache. The page, styles, scripts, and pinned HTMX distribution are embedded in the server, so there is no frontend build step when installing the Go framework and no runtime CDN dependency. Small scripts detect the visitor's OS, copy links and commands and run the sharing picker. Light and dark themes follow the operating system. Searching, filters and pagination also work with ordinary GET navigation when JavaScript is disabled.
+
+### Personal shortcuts and listing performance
+
+Pinning requires a signed-in human and `Config.Database` implementing
+`GuardedDatabase` (the built-in PostgreSQL and memory providers do). Preferences
+are stored per provider/identity in the database's workspace, using the internal
+`@hex-portal` namespace, which cannot be addressed through site APIs. PostgreSQL
+persists them across replicas/restarts; the development memory provider does not
+persist across restarts. Up to 100 pins and 20 recently opened site names are
+retained. Recent history records portal launches only, not arbitrary app visits,
+and saving it never blocks navigation. Neither pins nor history grant access;
+each read filters them through current policies. Unpinning is idempotent and is
+also allowed after access has been revoked. Sites without a suitable database
+still have ordinary discovery and management, but no personal shortcuts.
+
+The descriptive inventory is refreshed at most every five seconds, coalescing
+concurrent requests with eight bounded metadata readers and a ten-second refresh
+deadline. Cache retention is capped at 10,000 entries and approximately 8 MiB of
+descriptive data. Same-replica publish/unpublish invalidates it immediately;
+other replicas and out-of-band storage edits converge within five seconds.
+**Authorization is never cached:** each listing reads fresh policies in one
+batch on PostgreSQL/memory, validates/migrates them through the existing policy
+path, and only then projects visible cards. Custom access stores can implement
+`SiteAccessBatchReader`; otherwise the fresh per-site fallback remains.
+
+Ordinary home/search/manage requests make no traffic calls. Explicit popularity
+or activity requests aggregate only matching accessible candidates, with a
+750 ms deadline and an explicit unavailable state on failure (not false zero
+counts). PostgreSQL never holds its traffic-cache mutex during database I/O.
+Management loads history, people and action summaries only on tabs that use
+them; the full per-app page, tabs, sharing editor and admin roles are unchanged.
+Admin inventory also reuses the descriptive cache, batches policy reads and
+resolves owner labels once rather than once per site.
+
+This removes repeated remote reads at the reported 100+ app scale, but filtering
+and authorization projection are still linear in inventory size. An indexed,
+query-shaped persistent directory and query-shaped admin reports remain a later
+step for much larger installations; UI pagination alone is not that index.
 
 NGINX forwards main-domain requests to Go and serves published app files directly from storage on subdomains. The existing hosting authentication protects the landing page, catalog, and installer downloads. Preserve the external `Host` header when configuring another reverse proxy.
 
@@ -35,6 +74,10 @@ The portal discovers local `rel="icon"` / `rel="shortcut icon"` links in the roo
 same-site absolute URLs work; external/data URLs are not fetched. This works for
 existing publications without republishing. PNG, ICO, SVG, JPEG, GIF and WebP
 previews are limited to 256 KiB and preserve site/path access permissions.
+Icon source bytes and missing-file probes are cached for 30 seconds (at most
+128 files); publish/unpublish invalidates them locally. Current policy and path
+checks still run before every response. Rendered icon responses remain
+`no-store`, so browser caching never bypasses revocation.
 
 Icon path checks use the same host-selected case mode as static authorization: exact by default, or `Config.PathCaseInsensitive: true` for case-insensitive mounts such as Azure Files. Configure the mode to match the actual static storage before serving protected assets.
 
@@ -73,7 +116,26 @@ To keep an app out of the overview, set this in its source `hex.json` and republ
 }
 ```
 
-Set `discoverable` to `true` or remove it and republish to list the app. Missing metadata and omitted visibility fields retain the default visible behavior. Hidden apps are excluded server-side from the HTML catalog, `/api/sites`, and overview statistics. Their URLs and app APIs continue to work; this is a listing preference, not authorization. The server records the setting in `.hex-site.json` alongside the descriptive metadata. For actual authorization, restrict the site's viewers in its [access policy](access-control.md); the catalog, discovery API and statistics then omit the site for people who cannot view it.
+Set `discoverable` to `true` or remove it and republish to list the app. Missing metadata and omitted visibility fields retain the default visible behavior. Hidden apps and artifacts are excluded from company discovery, `/api/sites`, and overview statistics. Owned or explicitly shared hidden apps/files remain available in personal library scopes; an accessible known app can also be pinned. Their URLs and app APIs continue to work; this is a listing preference, not authorization. The server records the setting in `.hex-site.json` alongside the descriptive metadata. For actual authorization, restrict the site's admission in its [access policy](access-control.md); the library, discovery API and statistics then omit the site for people who cannot view it (ownership still permits management, independently of app admission).
+
+### Testing the production portal
+
+With npm dependencies and Playwright Chromium installed:
+
+```sh
+go test -race ./server ./server/providers/memory ./server/providers/local
+HEX_TEST_POSTGRES_URL='<local test database>' go test -race ./server/providers/postgres
+HEX_PORTAL_BROWSER=1 go test ./server -run '^TestPortalBrowser$' -count=1 -v
+npm run test:browser
+npm run test:analytics
+go test ./server -run '^$' -bench BenchmarkPortalInventoryAudit -benchtime=20x
+go test ./server -run '^$' -bench BenchmarkPortalColdInventoryWithStorageLatency -benchtime=3x
+```
+
+Browser tests exercise actual embedded templates/handlers with 156 sites, not
+prototype mocks, including shortcuts, persisted pins, full-inventory search,
+pagination, history, no-JavaScript browsing, login-response rejection and mobile
+dark layouts. Screenshots go to `/tmp/opencode/hex-portal-implementation`.
 
 ## Managing sites
 
@@ -104,11 +166,11 @@ No separate `hex setup` command, downloaded configuration import, or manual JSON
 
 The browser download is intentional: terminal `curl`/PowerShell requests cannot reuse a hosting-authentication browser session. Installer scripts do not fetch protected platform configuration, transfer browser cookies, or register OAuth clients. Hosting SSO protects script downloads; the release files must be reachable by the terminal independently.
 
-| Installer | Targets | User installation directory |
-| --- | --- | --- |
-| `/api/hex/install/macos` | Apple Silicon and Intel | `~/.local/bin` |
-| `/api/hex/install/linux` | x86-64 | `~/.local/bin` |
-| `/api/hex/install/windows` | x86-64 | `%LOCALAPPDATA%\Hex\bin` |
+| Installer                  | Targets                 | User installation directory |
+| -------------------------- | ----------------------- | --------------------------- |
+| `/api/hex/install/macos`   | Apple Silicon and Intel | `~/.local/bin`              |
+| `/api/hex/install/linux`   | x86-64                  | `~/.local/bin`              |
+| `/api/hex/install/windows` | x86-64                  | `%LOCALAPPDATA%\Hex\bin`    |
 
 Unix scripts require Bash, curl, base64, and sha256sum or shasum. They add the bin directory to common shell startup files idempotently. The Windows script uses PowerShell and adds its bin directory to the user's PATH. Neither requires administrator privileges. The displayed PowerShell command sets execution policy only for that installation process.
 

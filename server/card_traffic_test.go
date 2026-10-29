@@ -59,12 +59,12 @@ func TestCardsShowTrafficAndSortFilterPopularity(t *testing.T) {
 					t.Fatalf("public cards leaked visitor %s", id)
 				}
 			}
-			if !strings.Contains(body, "all time") {
+			if test.query != "sort=name" && !strings.Contains(body, "all time") {
 				t.Fatal("card counts need a clear time scope")
 			}
 		})
 	}
-	root := requestAs(t, server, viewer, "GET", "/?sort=popular", nil, 200).Body.String()
+	root := requestAs(t, server, viewer, "GET", "/library?sort=popular", nil, 200).Body.String()
 	if !strings.Contains(root, "Most popular (page views)") || !strings.Contains(root, `name="traffic"`) || !strings.Contains(root, "3 page views") {
 		t.Fatal("browsing controls or counts missing")
 	}

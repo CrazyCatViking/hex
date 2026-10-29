@@ -1,24 +1,15 @@
 {{define "catalog"}}
 <div id="catalog">
-  <dl class="stats" aria-label="Catalogue statistics">
-    <div>
-      <dt>Apps</dt>
-      <dd id="site-count">{{.Statistics.Sites}}</dd>
-    </div>
-    <div>
-      <dt>Contributors</dt>
-      <dd id="author-count">{{.Statistics.Authors}}</dd>
-    </div>
-    <div>
-      <dt>Updated this month</dt>
-      <dd id="recent-count">{{.Statistics.UpdatedRecently}}</dd>
-    </div>
-  </dl>
+  {{if .TrafficUnavailable}}{{template "traffic-unavailable"}}{{end}}
   <p id="site-status" class="visually-hidden" role="status" aria-live="polite">
-    {{len .Sites}} apps{{if .Filtered}} matching your filters{{end}}
+    {{.Pagination.Total}} results{{if .Filtered}} matching your filters{{end}}
   </p>
-  <div id="site-list" class="card-grid">
-    {{range .Sites}}{{template "site-card" .}}{{else}}
+  <div
+    id="site-list"
+    class="{{if eq .Mode `list`}}site-list{{else}}card-grid{{end}}"
+  >
+    {{range .Sites}}{{if eq $.Mode "list"}}{{template "library-row"
+    .}}{{else}}{{template "site-card" .}}{{end}}{{else}}
     <div class="empty-state">
       <div>
         <strong
@@ -33,18 +24,23 @@
     </div>
     {{end}}
   </div>
+  {{template "pagination" .Pagination}}
 </div>
 {{end}} {{define "site-card"}}
 <article class="site-card">
   <div class="site-card-top">
-    {{template "site-icon" .}} {{if .Access}}<span
+    {{template "pin-button" .}} {{template "site-icon" .}} {{if .Access}}<span
       class="site-card-spacer"
     ></span
     >{{template "access-badge" .}}{{else}}<span class="site-label"
       >{{.Name}}</span
     >{{end}}
   </div>
-  <h3><a class="site-link" href="{{.URL}}">{{.Title}}</a></h3>
+  <h3>
+    <a class="site-link" href="{{.URL}}" data-open-site="{{.Name}}"
+      >{{.Title}}</a
+    >
+  </h3>
   {{if .Description}}
   <p class="site-description">{{.Description}}</p>
   {{end}}
@@ -69,16 +65,6 @@
       <span class="traffic-scope">· all time</span></span
     >
   </p>
-  {{end}} {{if .Owned}}
-  <div class="site-card-actions">
-    <a class="link-button" href="/manage/{{.Name}}">Manage</a>
-    {{if .Traffic}}<a class="link-button" href="/manage/{{.Name}}?tab=analytics"
-      >Analytics</a
-    >{{end}}
-    <button class="link-button" type="button" data-copy="{{.URL}}">
-      Copy link
-    </button>
-  </div>
-  {{end}}
+  {{end}} {{template "card-actions" .}}
 </article>
 {{end}}

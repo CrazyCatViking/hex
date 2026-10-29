@@ -121,6 +121,12 @@ func (a *Audience) UnmarshalJSON(data []byte) error {
 // AccessStore persists site access policies. Implementations return
 // hex.ErrNotFound for sites without a policy; such sites are open to every
 // authenticated user. Stores persist every field, including Published.
+// SiteAccessBatchReader reads a fresh snapshot of the requested policies. Missing
+// names are omitted. Implementations must not serve replica-local cached policy.
+type SiteAccessBatchReader interface {
+	GetSiteAccessBatch(context.Context, []string) (map[string]SiteAccess, error)
+}
+
 type AccessStore interface {
 	GetSiteAccess(ctx context.Context, site string) (SiteAccess, error)
 	PutSiteAccess(ctx context.Context, site string, access SiteAccess) error

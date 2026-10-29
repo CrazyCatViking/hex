@@ -25,7 +25,19 @@
         <a class="button button-secondary" href="/start">Publish something</a>
       </section>
 
-      <form class="toolbar" action="/manage" method="get" role="search">
+      <form
+        class="toolbar"
+        action="/manage"
+        method="get"
+        role="search"
+        hx-get="/manage"
+        hx-target="#main"
+        hx-select="#main"
+        hx-swap="outerHTML settle:0ms"
+        hx-push-url="true"
+        hx-trigger="submit, input changed delay:300ms, change"
+        hx-sync="this:replace"
+      >
         {{if .All}}<input type="hidden" name="all" value="1" />{{end}} {{if
         .Filter}}<input type="hidden" name="kind" value="{{.Filter}}" />{{end}}
         <label class="field field-grow"
@@ -37,7 +49,6 @@
             value="{{.Query}}"
             placeholder="Filter by title or name…"
             autocomplete="off"
-            data-filter-target="#manage-list"
         /></label>
         <label class="field"
           ><span class="field-label">Sort by</span
@@ -83,7 +94,8 @@
         {{end}}
       </form>
 
-      {{if .Sites}}
+      {{if .TrafficUnavailable}}{{template "traffic-unavailable"}}{{end}} {{if
+      .Sites}}
       <ul id="manage-list" class="site-list">
         {{range .Sites}}
         <li
@@ -107,7 +119,10 @@
           </div>
           {{template "access-badge" .}}
           <div class="row-actions">
-            <a class="button button-secondary button-small" href="{{.URL}}"
+            <a
+              class="button button-secondary button-small"
+              href="{{.URL}}"
+              data-open-site="{{if .CanPin}}{{.Name}}{{end}}"
               >Open</a
             >
             <button
@@ -120,12 +135,13 @@
             <a class="button button-small" href="/manage/{{.Name}}?tab=sharing"
               >Share</a
             >
-            {{if .Traffic}}<a
+            {{if .Analytics}}<a
               class="link-button"
               href="/manage/{{.Name}}?tab=analytics"
               >Analytics</a
             >{{end}}
           </div>
+          {{template "pin-button" .}}
         </li>
         {{end}}
       </ul>
@@ -152,7 +168,7 @@
           </p>
         </div>
       </div>
-      {{end}}
+      {{end}} {{template "pagination" .Pagination}}
     </main>
     {{template "footer" .Chrome}}
   </body>

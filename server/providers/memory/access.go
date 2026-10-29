@@ -40,6 +40,21 @@ func (s *AccessStore) PutSiteAccess(ctx context.Context, site string, access hex
 	})
 }
 
+func (s *AccessStore) GetSiteAccessBatch(ctx context.Context, sites []string) (map[string]hex.SiteAccess, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	policies := make(map[string]hex.SiteAccess, len(sites))
+	for _, site := range sites {
+		if policy, exists := s.entries[site]; exists {
+			policies[site] = hex.CloneSiteAccess(policy)
+		}
+	}
+	return policies, nil
+}
+
 func (s *AccessStore) DeleteSiteAccess(ctx context.Context, site string) error {
 	return s.UpdateSiteAccess(ctx, site, func(_ hex.SiteAccess, exists bool) (*hex.SiteAccess, error) {
 		if !exists {

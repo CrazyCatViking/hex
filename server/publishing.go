@@ -164,6 +164,7 @@ func (s *Server) uploadSiteFile(w http.ResponseWriter, r *http.Request) {
 // files that are no longer part of the site, and records the manifest,
 // metadata and optional access policy.
 func (s *Server) completePublish(w http.ResponseWriter, r *http.Request) {
+	defer s.invalidatePortalInventory()
 	request, ok := s.readPublishRequest(w, r)
 	if !ok {
 		return
@@ -258,6 +259,7 @@ func (s *Server) unpublishSite(w http.ResponseWriter, r *http.Request) {
 
 // removePublishedSite is shared by the API and portal after authorization.
 func (s *Server) removePublishedSite(ctx context.Context, site string, identity *Identity) error {
+	defer s.invalidatePortalInventory()
 	if err := s.recoverPublicationHistory(ctx, site); err != nil {
 		return err
 	}

@@ -298,6 +298,11 @@ func (s *Server) sitePolicy(ctx context.Context, site string) (SiteAccess, bool,
 	if err != nil {
 		return SiteAccess{}, false, err
 	}
+	return s.validateSitePolicy(ctx, site, access)
+}
+
+func (s *Server) validateSitePolicy(ctx context.Context, site string, access SiteAccess) (SiteAccess, bool, error) {
+	var err error
 	if err := s.validatePathPrefixes(access.Paths); err != nil {
 		return SiteAccess{}, false, err
 	}

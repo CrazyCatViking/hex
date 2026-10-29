@@ -289,7 +289,6 @@ func (d *Database) SiteTraffic(ctx context.Context, sites []string) ([]hex.Analy
 		return []hex.AnalyticsRow{}, nil
 	}
 	d.trafficCacheMu.Lock()
-	defer d.trafficCacheMu.Unlock()
 	if d.trafficCache == nil {
 		d.trafficCache = make(map[string]cachedSiteTraffic)
 	}
@@ -300,18 +299,46 @@ func (d *Database) SiteTraffic(ctx context.Context, sites []string) ([]hex.Analy
 			missing = append(missing, site)
 		}
 	}
+	result := d.cachedSiteTraffic(sites)
+	d.trafficCacheMu.Unlock()
+	if len(missing) == 0 {
+		return result, nil
+	}
+	// Never hold the cache mutex during database I/O. A slow aggregate must
+	// not serialize unrelated listings or block requests served from cache.
+	loaded, err := d.readSiteTraffic(ctx, missing)
+	if err != nil {
+		return nil, err
+	}
+	missingSet := make(map[string]bool, len(missing))
+	for _, site := range missing {
+		missingSet[site] = true
+	}
+	result = slices.DeleteFunc(result, func(row hex.AnalyticsRow) bool { return missingSet[row.Key] })
+	result = append(result, loaded...)
+	d.trafficCacheMu.Lock()
+	defer d.trafficCacheMu.Unlock()
 	if len(d.trafficCache)+len(missing) > 1024 {
 		clear(d.trafficCache)
-		missing = slices.Clone(sites)
 	}
-	if len(missing) == 0 {
-		return d.cachedSiteTraffic(sites), nil
+	if len(missing) <= 1024 {
+		for _, site := range missing {
+			d.trafficCache[site] = cachedSiteTraffic{row: hex.AnalyticsRow{Key: site}, expires: time.Now().Add(time.Minute)}
+		}
+		for _, row := range loaded {
+			d.trafficCache[row.Key] = cachedSiteTraffic{row: row, expires: time.Now().Add(time.Minute)}
+		}
 	}
+	slices.SortFunc(result, func(a, b hex.AnalyticsRow) int { return strings.Compare(a.Key, b.Key) })
+	return result, nil
+}
+
+func (d *Database) readSiteTraffic(ctx context.Context, sites []string) ([]hex.AnalyticsRow, error) {
 	const statement = `SELECT site, sum(requests)::bigint, sum(page_views)::bigint,
 		sum(visits)::bigint, count(DISTINCT user_id) FILTER (WHERE page_views > 0 AND user_id <> ''),
 		sum(errors)::bigint, sum(bytes)::bigint, sum(duration_ms)::bigint, max(last_visited)
 		FROM hex_analytics_traffic WHERE site=ANY($1) GROUP BY site ORDER BY site`
-	rows, err := d.pool.Query(ctx, statement, missing)
+	rows, err := d.pool.Query(ctx, statement, sites)
 	if err != nil {
 		return nil, fmt.Errorf("read site traffic totals: %w", err)
 	}
@@ -332,20 +359,7 @@ func (d *Database) SiteTraffic(ctx context.Context, sites []string) ([]hex.Analy
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	// Bound both freshness and cache size. Missing sites are cached as zero too.
-	for _, site := range missing {
-		d.trafficCache[site] = cachedSiteTraffic{row: hex.AnalyticsRow{Key: site}, expires: now.Add(time.Minute)}
-	}
-	for _, row := range result {
-		d.trafficCache[row.Key] = cachedSiteTraffic{row: row, expires: now.Add(time.Minute)}
-	}
-	if len(d.trafficCache) > 1024 {
-		// A large listing must remain correct without retaining an unbounded cache.
-		result = d.cachedSiteTraffic(sites)
-		clear(d.trafficCache)
-		return result, nil
-	}
-	return d.cachedSiteTraffic(sites), nil
+	return result, nil
 }
 
 func (d *Database) cachedSiteTraffic(sites []string) []hex.AnalyticsRow {

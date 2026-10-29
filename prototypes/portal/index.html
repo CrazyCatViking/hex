@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Hex · Portal design review</title>
+    <link rel="stylesheet" href="./portal.css" />
+    <link rel="stylesheet" href="./themes.css" />
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="./prototype.js" defer></script>
+  </head>
+  <body data-concept="__CONCEPT__">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <div class="prototype-review-bar">
+      <span
+        >DESIGN REVIEW · REVISION 2
+        <span class="prototype-review-caption"
+          >· Existing Hex styles · Fictional data</span
+        ></span
+      >
+      <div>
+        <label class="visually-hidden" for="concept">Preview page</label
+        ><select id="concept">
+          <option value="launchpad">01 / Home</option>
+          <option value="library">02 / App library</option>
+          <option value="operations">03 / Your sites</option></select
+        ><button id="review-notes" class="button button-secondary button-small">
+          Review notes
+        </button>
+      </div>
+    </div>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="?concept=launchpad">
+          <svg class="brand-mark" viewBox="0 0 32 36" aria-hidden="true">
+            <path d="M16 1 31 9.5v17L16 35 1 26.5v-17z" />
+            <path
+              class="brand-mark-inner"
+              d="M16 10 23.5 14.25v8.5L16 27l-7.5-4.25v-8.5z"
+            />
+          </svg>
+          <span>Hex</span>
+        </a>
+        <nav
+          class="primary-nav"
+          aria-label="Main navigation"
+          id="main-nav"
+        ></nav>
+        <button
+          class="account prototype-account"
+          id="account"
+          aria-label="Prototype account information"
+        >
+          <span class="avatar tone-0" aria-hidden="true">JD</span>
+          <span class="account-name">Jamie</span>
+        </button>
+      </div>
+    </header>
+    <div id="shell" class="prototype-shell">
+      <main id="main" class="page" tabindex="-1">
+        <div id="heading"></div>
+        <form id="search-form" role="search">
+          <div class="prototype-search-row">
+            <div class="hero-search">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="11" cy="11" r="7" />
+                <path d="m20 20-3.5-3.5" />
+              </svg>
+              <label class="visually-hidden" for="search"
+                >Search all accessible apps and files</label
+              ><input
+                id="search"
+                type="search"
+                placeholder="Search apps by name, purpose or person…"
+                autocomplete="off"
+              />
+            </div>
+            <button
+              class="button button-secondary"
+              type="button"
+              id="clear-search"
+              hidden
+            >
+              Clear
+            </button>
+          </div>
+          <p id="search-hint" class="field-hint">
+            Search everything you can access, including shared and owned apps.
+          </p>
+        </form>
+        <div id="content"></div>
+      </main>
+    </div>
+    <footer class="footer">
+      <span>Hex · Built by your team, for your team.</span
+      ><label class="prototype-scenario"
+        >Preview state
+        <select id="scenario">
+          <option value="ready">Normal</option>
+          <option value="loading">Loading</option>
+          <option value="empty">No apps yet</option>
+          <option value="error">Connection error</option>
+        </select></label
+      ><button class="button button-secondary button-small" id="theme">
+        Change theme
+      </button>
+    </footer>
+    <div
+      id="announcement"
+      class="visually-hidden"
+      role="status"
+      aria-live="polite"
+    ></div>
+    <div id="toast" class="toast" role="status" hidden></div>
+    <dialog
+      class="dialog prototype-dialog"
+      id="dialog"
+      aria-labelledby="dialog-title"
+    >
+      <div class="dialog-heading">
+        <span class="eyebrow">DESIGN PREVIEW</span
+        ><button
+          class="icon-button"
+          id="close-dialog"
+          aria-label="Close dialog"
+        >
+          ✕
+        </button>
+      </div>
+      <div class="dialog-body" id="dialog-content"></div>
+    </dialog>
+    <noscript
+      ><p>
+        This interactive design exploration requires JavaScript. The production
+        proposal retains ordinary GET navigation and search.
+      </p></noscript
+    >
+  </body>
+</html>

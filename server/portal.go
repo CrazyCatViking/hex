@@ -22,7 +22,7 @@ var platformAssets embed.FS
 var portalTemplates = template.Must(template.ParseFS(platformAssets, "portal/*.html"))
 
 const (
-	homeSectionSize    = 6
+	homeSectionSize    = 4
 	portalPolicyHeader = "default-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
 )
 
@@ -54,23 +54,30 @@ type viewerView struct {
 
 // siteCard is how sites and artifacts appear across the portal.
 type siteCard struct {
-	Traffic     *TrafficTotals `json:"traffic,omitempty"`
-	IconURL     string         `json:"iconURL,omitempty"`
-	Name        string         `json:"name"`
-	URL         string         `json:"url"`
-	Title       string         `json:"title"`
-	Description string         `json:"description,omitempty"`
-	Kind        string         `json:"kind"`
-	Access      string         `json:"audience"`
-	AccessTone  string         `json:"-"`
-	CreatedBy   string         `json:"createdBy,omitempty"`
-	PublishedBy string         `json:"publishedBy,omitempty"`
-	Timestamp   time.Time      `json:"publishedAt,omitzero"`
-	Updated     string         `json:"-"`
-	UpdatedISO  string         `json:"-"`
-	Initial     string         `json:"-"`
-	Tone        string         `json:"-"`
-	Owned       bool           `json:"-"`
+	Traffic       *TrafficTotals `json:"traffic,omitempty"`
+	IconURL       string         `json:"iconURL,omitempty"`
+	Name          string         `json:"name"`
+	URL           string         `json:"url"`
+	Title         string         `json:"title"`
+	Description   string         `json:"description,omitempty"`
+	Kind          string         `json:"kind"`
+	Access        string         `json:"audience"`
+	AccessTone    string         `json:"-"`
+	CreatedBy     string         `json:"createdBy,omitempty"`
+	PublishedBy   string         `json:"publishedBy,omitempty"`
+	Timestamp     time.Time      `json:"publishedAt,omitzero"`
+	Updated       string         `json:"-"`
+	UpdatedISO    string         `json:"-"`
+	Initial       string         `json:"-"`
+	Tone          string         `json:"-"`
+	Owned         bool           `json:"-"`
+	PersonalOwner bool           `json:"-"`
+	Shared        bool           `json:"-"`
+	Company       bool           `json:"-"`
+	CanPin        bool           `json:"-"`
+	Pinned        bool           `json:"-"`
+	Recent        int            `json:"-"`
+	Analytics     bool           `json:"-"`
 }
 
 type siteStatistics struct {
@@ -80,15 +87,21 @@ type siteStatistics struct {
 }
 
 type catalogView struct {
-	Sites          []siteCard
-	Statistics     siteStatistics
-	Search         string
-	Sort           string
-	SortChoices    []choice
-	TrafficEnabled bool
-	TrafficFilter  string
-	TrafficChoices []choice
-	Filtered       bool
+	Scope              string
+	Scopes             []scopeLink
+	Kind               string
+	Mode               string
+	Pagination         paginationView
+	Sites              []siteCard
+	Statistics         siteStatistics
+	Search             string
+	Sort               string
+	SortChoices        []choice
+	TrafficEnabled     bool
+	TrafficUnavailable bool
+	TrafficFilter      string
+	TrafficChoices     []choice
+	Filtered           bool
 }
 
 // choice is an option in a select. Attr carries "selected" so templates need
@@ -125,6 +138,9 @@ type homeView struct {
 	SharedMore          int
 	Mine                []siteCard
 	MineMore            int
+	Pinned              []siteCard
+	Recent              []siteCard
+	PinsEnabled         bool
 	Catalog             catalogView
 	InstallersAvailable bool
 }
@@ -177,6 +193,7 @@ func (s *Server) chromeFor(identity *Identity, active string) Chrome {
 }
 
 func (s *Server) writePortalPage(w http.ResponseWriter, name string, view any) {
+	w.Header().Set("X-Hex-Portal", "1")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Security-Policy", portalPolicyHeader)
 	w.Header().Set("Referrer-Policy", "same-origin")
@@ -191,22 +208,25 @@ func (s *Server) landingPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity := s.requestIdentity(r)
-	catalog, err := s.catalogView(r.Context(), identity, r.URL.Query())
+	for _, key := range []string{"search", "scope", "sort", "traffic", "page", "kind", "mode"} {
+		if r.URL.Query().Has(key) {
+			http.Redirect(w, r, "/library?"+r.URL.RawQuery, http.StatusSeeOther)
+			return
+		}
+	}
+	cards, err := s.portalCards(r.Context(), identity, false)
 	if err != nil {
 		writeServerError(w, err)
 		return
 	}
 
-	view := homeView{Chrome: s.chromeFor(identity, "home"), Catalog: catalog, InstallersAvailable: s.installersAvailable()}
-	if view.Manage {
-		mine, shared, err := s.personalSites(r.Context(), identity, false)
-		if err != nil {
-			writeServerError(w, err)
-			return
-		}
-		view.Mine, view.MineMore = firstCards(mine)
-		view.Shared, view.SharedMore = firstCards(shared)
-	}
+	sortSiteCards(cards, "recent")
+	view := homeView{Chrome: s.chromeFor(identity, "home"), InstallersAvailable: s.installersAvailable(), PinsEnabled: s.preferencesEnabled(identity)}
+	view.Pinned, _ = firstCards(cardsInScope(cards, "pinned"))
+	view.Recent, _ = firstCards(cardsInScope(cards, "recent"))
+	view.Mine, view.MineMore = firstCards(cardsInScope(cards, "owned"))
+	view.Shared, view.SharedMore = firstCards(cardsInScope(cards, "shared"))
+	view.Catalog.Sites, _ = firstCards(cardsInScope(cards, "everyone"))
 	s.writePortalPage(w, "home", view)
 }
 
@@ -244,44 +264,11 @@ func (s *Server) catalog(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) catalogView(ctx context.Context, viewer *Identity, query url.Values) (catalogView, error) {
-	sites, err := s.discoverSites(ctx, viewer)
+	cards, err := s.portalCards(ctx, viewer, false)
 	if err != nil {
 		return catalogView{}, err
 	}
-	view := catalogView{
-		Statistics:     summarizeSites(sites, time.Now()),
-		Search:         query.Get("search"),
-		Sort:           query.Get("sort"),
-		TrafficEnabled: s.cardTrafficEnabled(),
-		TrafficFilter:  query.Get("traffic"),
-	}
-	if view.Sort == "" {
-		view.Sort = "recent"
-	}
-	if view.TrafficFilter == "" {
-		view.TrafficFilter = "all"
-	}
-	view.SortChoices = s.cardSortChoices(view.Sort)
-	view.TrafficChoices = cardTrafficChoices(view.TrafficFilter)
-	view.Filtered = strings.TrimSpace(view.Search) != "" || view.TrafficEnabled && view.TrafficFilter != "all"
-	search := strings.ToLower(strings.TrimSpace(view.Search))
-	now := time.Now()
-	for _, site := range sites {
-		card := s.cardForSite(site.Name, site.URL, site.Metadata, now)
-		if card.Description == "" {
-			card.Description = "A tool built by your team."
-		}
-		text := strings.ToLower(strings.Join([]string{card.Name, card.Title, card.Description, card.CreatedBy}, " "))
-		if strings.Contains(text, search) {
-			view.Sites = append(view.Sites, card)
-		}
-	}
-	s.fillCardTraffic(ctx, view.Sites)
-	if view.TrafficEnabled {
-		view.Sites = slices.DeleteFunc(view.Sites, func(card siteCard) bool { return !matchesTraffic(card, view.TrafficFilter) })
-	}
-	sortSiteCards(view.Sites, view.Sort)
-	return view, nil
+	return s.libraryCatalog(ctx, cards, query), nil
 }
 
 func cardFromMetadata(name, siteURL string, metadata *SiteMetadata, now time.Time) siteCard {

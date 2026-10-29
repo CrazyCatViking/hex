@@ -24,16 +24,18 @@ const managePageSize = 25
 
 type manageListView struct {
 	Chrome
-	Sites          []siteCard
-	Filter         string
-	Query          string
-	All            bool
-	Counts         struct{ All, Apps, Files int }
-	Sort           string
-	SortChoices    []choice
-	TrafficEnabled bool
-	TrafficFilter  string
-	TrafficChoices []choice
+	Pagination         paginationView
+	Sites              []siteCard
+	Filter             string
+	Query              string
+	All                bool
+	Counts             struct{ All, Apps, Files int }
+	Sort               string
+	SortChoices        []choice
+	TrafficEnabled     bool
+	TrafficUnavailable bool
+	TrafficFilter      string
+	TrafficChoices     []choice
 }
 
 type sitePageView struct {
@@ -144,10 +146,14 @@ func (s *Server) managePage(w http.ResponseWriter, r *http.Request) {
 	}
 	view.TrafficChoices = cardTrafficChoices(view.TrafficFilter)
 
-	mine, _, err := s.personalSites(r.Context(), identity, view.All)
+	cards, err := s.portalCards(r.Context(), identity, view.All)
 	if err != nil {
 		writeServerError(w, err)
 		return
+	}
+	mine := cards
+	if !view.All {
+		mine = cardsInScope(cards, "owned")
 	}
 	for _, card := range mine {
 		view.Counts.All++
@@ -156,12 +162,17 @@ func (s *Server) managePage(w http.ResponseWriter, r *http.Request) {
 		} else {
 			view.Counts.Apps++
 		}
-		if !matchesFilter(card, view.Filter, view.Query) || view.TrafficEnabled && !matchesTraffic(card, view.TrafficFilter) {
+		if !matchesFilter(card, view.Filter, view.Query) {
 			continue
 		}
 		view.Sites = append(view.Sites, card)
 	}
+	if trafficRequested(view.Sort, view.TrafficFilter) {
+		view.TrafficUnavailable = !s.fillCardTraffic(r.Context(), view.Sites)
+		view.Sites = slices.DeleteFunc(view.Sites, func(card siteCard) bool { return !matchesTraffic(card, view.TrafficFilter) })
+	}
 	sortSiteCards(view.Sites, view.Sort)
+	view.Sites, view.Pagination = paginateCards(view.Sites, query, "/manage", libraryPageSize)
 	s.writePortalPage(w, "manage", view)
 }
 
@@ -253,11 +264,17 @@ func (s *Server) manageSitePage(w http.ResponseWriter, r *http.Request) {
 	siteURL, _ := s.siteURL(site)
 	view.Site = s.cardForSite(site, siteURL, metadata, time.Now())
 	view.Site.Access, view.Site.AccessTone = audience(access, exists)
-	view.History = s.historyEntries(r.Context(), site)
-	view.Facts = factsFrom(metadata, view.History)
-	view.Sharing = s.sharingView(r.Context(), site, access, exists)
-	view.People = view.Sharing.Entries
-	view.Actions = s.actionSummaries(r.Context(), site)
+	if view.Tab == "overview" || view.Tab == "history" {
+		view.History = s.historyEntries(r.Context(), site)
+	}
+	if view.Tab == "overview" {
+		view.Facts = factsFrom(metadata, view.History)
+		view.Actions = s.actionSummaries(r.Context(), site)
+	}
+	if view.Tab == "overview" || view.Tab == "sharing" {
+		view.Sharing = s.sharingView(r.Context(), site, access, exists)
+		view.People = view.Sharing.Entries
+	}
 	if view.Tab == "ai" {
 		ai, err := s.loadSiteAI(r.Context(), site, identity, r.URL.Query())
 		if err != nil {

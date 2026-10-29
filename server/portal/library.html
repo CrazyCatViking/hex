@@ -1,0 +1,156 @@
+{{define "library"}}
+<!doctype html>
+<html lang="en">
+  <head>
+    {{template "head" (printf "%s · App library" .Platform)}}
+  </head>
+  <body hx-headers='{"X-Hex-Request":"1"}'>
+    {{template "header" .Chrome}}
+    <main id="main" class="page" data-library>
+      <section class="page-heading">
+        <div>
+          <p class="eyebrow"><a href="/">Home</a> / App library</p>
+          <h1>App library</h1>
+          <p class="lead">
+            Find apps and files you can access, including what's shared with you
+            and what you own.
+          </p>
+        </div>
+      </section>
+      {{with .Catalog}}
+      <form
+        id="library-filters"
+        class="toolbar"
+        action="/library"
+        method="get"
+        role="search"
+        hx-get="/library"
+        hx-target="#main"
+        hx-select="#main"
+        hx-swap="outerHTML settle:0ms"
+        hx-push-url="true"
+        hx-trigger="submit, input changed delay:300ms, change"
+        hx-sync="this:replace"
+      >
+        <input type="hidden" name="scope" value="{{.Scope}}" />
+        <label class="field field-grow"
+          ><span class="field-label">Search all accessible apps</span
+          ><input
+            id="hero-search"
+            type="search"
+            name="search"
+            value="{{.Search}}"
+            autocomplete="off"
+            placeholder="Search by name, purpose or person…"
+        /></label>
+        <label class="field"
+          ><span class="field-label">Sort by</span
+          ><select name="sort">
+            {{range .SortChoices}}
+            <option value="{{.Value}}" {{.Attr}}>{{.Label}}</option>
+            {{end}}
+          </select></label
+        >
+        <label class="field"
+          ><span class="field-label">Type</span
+          ><select name="kind">
+            <option value="">Apps and files</option>
+            <option value="apps" {{if eq .Kind `apps`}}selected{{end}}>
+              Apps
+            </option>
+            <option value="files" {{if eq .Kind `files`}}selected{{end}}>
+              Files
+            </option>
+          </select></label
+        >
+        {{if .TrafficEnabled}}<label class="field"
+          ><span class="field-label">Activity</span
+          ><select name="traffic">
+            {{range .TrafficChoices}}
+            <option value="{{.Value}}" {{.Attr}}>{{.Label}}</option>
+            {{end}}
+          </select></label
+        >{{end}}
+        <label class="field"
+          ><span class="field-label">View</span
+          ><select name="mode" aria-label="View">
+            <option value="grid" {{if eq .Mode `grid`}}selected{{end}}>
+              Grid
+            </option>
+            <option value="list" {{if eq .Mode `list`}}selected{{end}}>
+              List
+            </option>
+          </select></label
+        >
+        <button class="button button-secondary" type="submit">Search</button
+        ><a class="link-button" href="/library">Clear filters</a>
+      </form>
+      <nav class="segmented library-scopes" aria-label="Library scope">
+        {{range .Scopes}}<a
+          href="{{.URL}}"
+          aria-current="{{if .Active}}page{{else}}false{{end}}"
+          >{{.Label}}</a
+        >{{end}}
+      </nav>
+      {{template "catalog" .}} {{end}}
+    </main>
+    {{template "footer" .Chrome}}
+  </body>
+</html>
+{{end}} {{define "pagination"}}
+<nav class="portal-pagination" aria-label="Pagination">
+  <span class="muted"
+    >Showing {{.Start}}–{{.End}} of {{.Total}} · Page {{.Page}} of
+    {{.Pages}}</span
+  >
+  <div>
+    {{if .Previous}}<a
+      class="button button-secondary button-small"
+      href="{{.Previous}}"
+      >← Previous</a
+    >{{end}} {{if .Next}}<a
+      class="button button-secondary button-small"
+      href="{{.Next}}"
+      >Next →</a
+    >{{end}}
+  </div>
+</nav>
+{{end}} {{define "library-row"}}
+<article class="site-row">
+  {{template "site-icon" .}}
+  <div class="site-row-main">
+    <a class="site-title" href="{{.URL}}" data-open-site="{{.Name}}"
+      >{{.Title}}</a
+    ><span class="muted">{{.Description}}</span
+    ><span class="muted"
+      >{{.CreatedBy}}{{if .Updated}}{{if .CreatedBy}} ·
+      {{end}}{{.Updated}}{{end}}</span
+    >
+  </div>
+  {{template "access-badge" .}} {{template "card-actions" .}} {{template
+  "pin-button" .}}
+</article>
+{{end}} {{define "pin-button"}} {{if .CanPin}}<button
+  class="icon-button pin-button"
+  type="button"
+  data-pin="{{.Name}}"
+  aria-label="Pin {{.Title}}"
+  aria-pressed="{{.Pinned}}"
+  title="{{if .Pinned}}Remove from pinned apps{{else}}Pin to your home page{{end}}"
+>
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path
+      d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9z"
+    />
+  </svg></button
+>{{end}} {{end}} {{define "card-actions"}} {{if .Owned}}
+<div class="site-card-actions">
+  <a class="link-button" href="/manage/{{.Name}}">Manage</a>{{if .Analytics}}<a
+    class="link-button"
+    href="/manage/{{.Name}}?tab=analytics"
+    >Analytics</a
+  >{{end}}<button class="link-button" type="button" data-copy="{{.URL}}">
+    Copy link
+  </button>
+</div>
+{{end}} {{end}}
