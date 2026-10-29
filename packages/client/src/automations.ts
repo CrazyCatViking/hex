@@ -77,6 +77,15 @@ export interface AutomationContext {
     dryRun: boolean;
   }>;
   readonly now: AutomationClock;
+  readonly sites: {
+    /** Uses the server-authenticated site identity; mutations need a stable key. */
+    call<T = JSONValue>(
+      target: string,
+      action: string,
+      input: Record<string, JSONValue>,
+      options: { version: number; idempotencyKey?: string },
+    ): Promise<T | { wouldRun: string; target: string }>;
+  };
   /** Read endpoints return T; dry-run write endpoints return a preview. */
   call<T = JSONValue>(
     endpoint: `${string}.${string}`,

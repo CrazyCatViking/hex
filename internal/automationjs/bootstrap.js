@@ -23,6 +23,10 @@
     ...metadata,
     call: async (name, input = {}) => request("call", { name, input }),
     action: async (name, input = {}) => request("action", { name, input }),
+    sites: {
+      call: async (target, action, input = {}, options = {}) =>
+        request("site-action", { ...options, target, action, input }),
+    },
     ai: {
       complete: async (requestInput) => request("ai", requestInput),
     },

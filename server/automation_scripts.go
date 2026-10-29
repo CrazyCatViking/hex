@@ -154,6 +154,21 @@ func (r *automationRunner) scriptInvoke(ctx context.Context, kind string, input 
 		r.run.Operations = append(r.run.Operations, operation)
 	}()
 	switch kind {
+	case "site-action":
+		var request SiteCall
+		if err := decodeScriptInput(input, &request); err != nil {
+			return nil, err
+		}
+		operation.Target = request.Target + "." + request.Action
+		authorization, err := r.server.automationAuthorization(ctx, r.site, r.automation.Name)
+		if err != nil {
+			return nil, automationError(err)
+		}
+		output, err := r.server.invokeSiteAction(ctx, r.site, authorization, request, true, r.run.DryRun)
+		if r.run.DryRun {
+			operation.Status = OperationDryRun
+		}
+		return output, err
 	case "call", "action":
 		var request struct {
 			Name  string          `json:"name"`

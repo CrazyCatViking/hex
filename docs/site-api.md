@@ -51,6 +51,18 @@ The transport is `POST /api/sites/A/site-api/call` with
 `{target,action,version,input,idempotencyKey}`. Unknown request fields are rejected.
 Discovery is `GET /api/sites/A/site-api/actions/B`.
 
+## Automations
+
+Scripts call `await hex.sites.call("inventory", "reserve-stock", input,
+{version: 1, idempotencyKey: businessOperationId})`. The source `site-action`
+grant must select `automation:<name>`. The target's `action-consumer`, `action`
+and required collection grants select the source's opaque `site:<id>` identity.
+Automations never inherit the deploying or triggering user's target privileges.
+Dry runs authorize and validate calls but skip mutations; read-only calls execute.
+Calls participate in the existing timeout, operation-count, output-size and
+operation-history limits. Use a stable business-operation key when subsequent
+runs must deduplicate; a new run ID intentionally denotes a new operation.
+
 ## Retry semantics and storage
 
 Mutations require a key of 1–128 bytes. Keys are scoped to source, effective
