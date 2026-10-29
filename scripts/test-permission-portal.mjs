@@ -1414,6 +1414,56 @@ try {
     }
   }
   await designPage.close();
+  await page.goto(`${url}/manage/demo?tab=sharing`);
+  await page.locator('#permission-manager[data-ready="true"]').waitFor();
+  const workspaceSharing = page.locator(
+    '[data-workspace-sharing][data-resource="expense-summary"]',
+  );
+  const beforeSharing = await policy();
+  await workspaceSharing.selectOption("workspace");
+  assert.deepEqual(
+    await policy(),
+    beforeSharing,
+    "workspace access must remain staged",
+  );
+  await save();
+  assert.equal(
+    Object.values((await policy()).grants).filter(
+      (grant) => grant.subjects.workspace,
+    ).length,
+    2,
+  );
+  await page.reload();
+  await page.locator('#permission-manager[data-ready="true"]').waitFor();
+  assert.equal(await workspaceSharing.inputValue(), "workspace");
+  await page.goto(`${url}/workspace-apis`);
+  assert.match(await page.locator("main").innerText(), /expense-summary/);
+  assert.match(
+    await page.locator("main").innerText(),
+    /Everyone in this workspace/,
+  );
+  for (const colorScheme of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme });
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth > innerWidth,
+      ),
+      false,
+      "workspace catalog must fit mobile screens",
+    );
+    await screenshot(`workspace-catalog-${colorScheme}`);
+  }
+  await page.goto(`${url}/manage/demo?tab=sharing`);
+  await page.locator('#permission-manager[data-ready="true"]').waitFor();
+  await workspaceSharing.selectOption("restricted");
+  await save();
+  assert.equal(
+    Object.values((await policy()).grants).filter(
+      (grant) => grant.subjects.workspace,
+    ).length,
+    0,
+  );
   assert.deepEqual(errors, []);
   console.log(
     "Production permission matrix passed: groups and resource rules, atomic saves, defaults and owner assignments, scoped memberships, revocation, lossless custom rules, validation/stale-form/sign-in error retention, technical-editor draft protection, keyboard access, escaping, and mobile layout. Routine management required no JSON.",

@@ -716,3 +716,30 @@
     gap: 8px;
   }
 }
+.workspace-api-sharing {
+  display: grid;
+  gap: 1.25rem;
+}
+.workspace-api-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 1.25rem;
+}
+.workspace-api-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.workspace-api-heading h4 {
+  font-size: 1.1rem;
+  margin: 0.25rem 0;
+  overflow-wrap: anywhere;
+}
+.workspace-api-card > p {
+  margin: 0.75rem 0 1rem;
+}
+.workspace-api-card select {
+  width: 100%;
+}

@@ -119,6 +119,25 @@
       const get = (key) => values[key]?.[0];
       const id = get("id");
       switch (action) {
+        case "workspace-sharing": {
+          policy.grants ||= {};
+          const kinds =
+            get("kind") === "action"
+              ? ["action", "action-consumer"]
+              : ["event"];
+          const ids = [get("grant_id"), get("consumer_id")];
+          kinds.forEach((kind, index) => {
+            if (get("mode") === "restricted") delete policy.grants[ids[index]];
+            else
+              put(policy.grants, ids[index], {
+                kind,
+                resource: get("resource"),
+                operations: [kind === "event" ? "subscribe" : "run"],
+                subjects: { workspace: true },
+              });
+          });
+          break;
+        }
         case "role":
           policy.roles ||= {};
           put(policy.roles, id, JSON.parse(get("entry")));
@@ -202,6 +221,7 @@
               (role) => role !== id,
             );
             if (
+              !rule.subjects.workspace &&
               !rule.subjects.signedIn &&
               !rule.subjects.owners &&
               !rule.subjects.roles.length &&
@@ -804,7 +824,8 @@
       const rules = Object.entries(policy.grants || {}).filter(
         ([, rule]) =>
           rule.kind !== "path" &&
-          (rule.subjects.signedIn ||
+          (rule.subjects.workspace ||
+            rule.subjects.signedIn ||
             rule.subjects.owners ||
             rule.subjects.principals?.length),
       );
@@ -814,6 +835,7 @@
       const audiences = new Map();
       for (const [id, rule] of rules) {
         const subjects = {
+          workspace: Boolean(rule.subjects.workspace),
           signedIn: Boolean(rule.subjects.signedIn),
           owners: Boolean(rule.subjects.owners),
           principals: [...(rule.subjects.principals || [])].sort(),
@@ -915,6 +937,28 @@
     }
 
     function render() {
+      manager
+        .querySelectorAll("[data-workspace-sharing]")
+        .forEach((control) => {
+          const pending = edits
+            .filter(
+              (edit) =>
+                edit.action === "workspace-sharing" &&
+                edit.values.kind[0] === control.dataset.kind &&
+                edit.values.resource[0] === control.dataset.resource,
+            )
+            .at(-1);
+          control.value = pending
+            ? pending.values.mode[0]
+            : control.dataset.originalMode;
+          const status = manager.querySelector(
+            `[data-workspace-status="${control.dataset.grantId}"]`,
+          );
+          status.textContent =
+            control.value === "workspace"
+              ? "Shared with workspace"
+              : "Access by permission";
+        });
       const matrixFocus = query("[data-permission-matrix]").contains(
         document.activeElement,
       )
@@ -1267,6 +1311,7 @@
             roles: (rule.subjects.roles || []).filter((role) => role !== id),
           };
           if (
+            !subjects.workspace &&
             !subjects.signedIn &&
             !subjects.owners &&
             !subjects.principals?.length &&
@@ -1305,6 +1350,7 @@
       if (
         id &&
         rule.subjects.roles?.length === 1 &&
+        !rule.subjects.workspace &&
         !rule.subjects.signedIn &&
         !rule.subjects.owners &&
         !rule.subjects.principals?.length
@@ -1337,6 +1383,7 @@
         groupID &&
         id &&
         (rule.subjects.roles?.length > 1 ||
+          rule.subjects.workspace ||
           rule.subjects.signedIn ||
           rule.subjects.owners ||
           rule.subjects.principals?.length);
@@ -1506,6 +1553,17 @@
       mode.focus();
     }
 
+    manager.querySelectorAll("[data-workspace-sharing]").forEach((control) => {
+      control.addEventListener("change", () => {
+        stage("workspace-sharing", {
+          kind: control.dataset.kind,
+          resource: control.dataset.resource,
+          mode: control.value,
+          grant_id: control.dataset.grantId,
+          consumer_id: control.dataset.consumerId,
+        });
+      });
+    });
     query("[data-general-access]").addEventListener("change", (event) => {
       const mode = event.target.value;
       if (

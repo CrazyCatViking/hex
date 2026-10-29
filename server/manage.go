@@ -62,6 +62,9 @@ type actionSummary struct {
 	Description string
 	Effect      string
 	Who         string
+	Version     int
+	Usage       string
+	Access      string
 }
 
 type siteTab struct {
@@ -320,25 +323,39 @@ func (s *Server) actionSummaries(ctx context.Context, site string) []actionSumma
 		return nil
 	}
 	summaries := make([]actionSummary, 0, len(actions))
+	access, _, err := s.sitePolicy(ctx, site)
+	if err != nil {
+		slog.Error("load action permissions", "site", site, "error", err)
+		return nil
+	}
 	for _, action := range actions {
 		effect := action.effect
 		if effect == "" {
 			effect = "Provided by the platform"
 		}
-		who := "Editors"
-		switch action.audience.Level {
-		case LevelViewers:
-			who = "Everyone who can open it"
-		case LevelOwners:
-			who = "Owners"
-		case "":
-			if len(action.audience.Principals) > 0 {
-				who = "Selected people"
+		who := "Requires an action permission"
+		usage := "Within this site · people and AI assistants"
+		accessNote := "Ask a site owner to grant access in Sharing. Data permissions and record rules may also be required."
+		for _, grant := range access.Grants {
+			if grant.Kind == "action" && permissionSelectorMatches("action", grant.Resource, action.definition.Name) && slices.Contains(grant.Operations, "run") && !slices.Contains(grant.Except, action.definition.Name) && !slices.Contains(grant.Except, "*") {
+				if grant.Subjects.SignedIn {
+					who = "Signed-in people · subject to record rules"
+				}
+			}
+		}
+		if action.definition.Exported {
+			usage = "Cross-site API · people, AI assistants and automations"
+			who = "Restricted workspace API"
+			if workspaceShared(access, "action-consumer", action.definition.Name, "run") && workspaceShared(access, "action", action.definition.Name, "run") {
+				who = "Everyone in this workspace"
+				accessNote = "No site-connection approval needed. Data permissions and record rules still apply."
+			} else {
+				accessNote = "Ask this site's owner for consumer and action access. Your source site may also need permission to call this API."
 			}
 		}
 		summaries = append(summaries, actionSummary{
 			Name: action.definition.Name, Description: action.definition.Description,
-			Effect: effect, Who: who,
+			Effect: effect, Who: who, Version: action.definition.Version, Usage: usage, Access: accessNote,
 		})
 	}
 	return summaries

@@ -115,6 +115,11 @@ func (s *Server) permissionSharingView(ctx context.Context, site string, access 
 		return sharingView{Site: site, V2: true, Error: err.Error()}
 	}
 	view := sharingView{Site: site, Platform: s.platformName(), V2: true, Policy: string(encoded), Base: string(encoded), General: sharingMode(access), Summary: sharingSummary(access, s.platformName())}
+	view.WorkspaceAPIs, err = s.workspaceShareRows(ctx, site, access)
+	if err != nil {
+		slog.Error("load workspace sharing", "site", site, "error", err)
+		view.Error = "Workspace APIs could not be loaded. Reload to try again."
+	}
 	view.GeneralChoices = choices(view.General, [2]string{"owners", "Only site owners"}, [2]string{"selected", "Only selected people and groups"}, [2]string{"everyone", "Everyone signed in to " + view.Platform})
 	if view.General == "custom" {
 		view.GeneralChoices = append(view.GeneralChoices, choices("custom", [2]string{"custom", "Custom site admission (keep current settings)"})...)

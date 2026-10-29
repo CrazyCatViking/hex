@@ -72,7 +72,11 @@ func run() error {
 		return err
 	}
 	baseURL := fmt.Sprintf("http://localhost:%d", listener.Addr().(*net.TCPAddr).Port)
-	platform := hex.New(hex.Config{Identity: hex.StaticIdentity{Identity: hex.Identity{ID: "owner", Name: "Site Owner"}}, Access: policies, Database: memory.NewDatabase(), Sites: files, Publisher: files, Files: files, People: people, Groups: []hex.NamedGroup{{ID: "finance", Name: "Finance"}}, SiteBaseURL: baseURL})
+	actions := &hex.ActionRegistry{}
+	if err := actions.Register("demo", hex.Action{Definition: hex.ActionDefinition{Name: "expense-summary", Description: "Read the expense summary", Version: 1, Exported: true, ReadOnly: true, InputSchema: json.RawMessage(`{"type":"object"}`), OutputSchema: json.RawMessage(`{"type":"object"}`)}, Handler: func(context.Context, hex.ActionContext, json.RawMessage) (any, error) { return map[string]any{}, nil }}); err != nil {
+		return err
+	}
+	platform := hex.New(hex.Config{Actions: actions, Identity: hex.StaticIdentity{Identity: hex.Identity{ID: "owner", Name: "Site Owner"}}, Access: policies, Database: memory.NewDatabase(), Sites: files, Publisher: files, Files: files, People: people, Groups: []hex.NamedGroup{{ID: "finance", Name: "Finance"}}, SiteBaseURL: baseURL})
 	server := &http.Server{Handler: platform, ReadHeaderTimeout: 5 * time.Second}
 	errorsCh := make(chan error, 1)
 	go func() { errorsCh <- server.Serve(listener) }()

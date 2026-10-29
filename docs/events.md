@@ -95,3 +95,16 @@ ordinary publishers do not need management authority.
 Events and deduplication state are retained until operator archival. The worker
 uses bounded, cursor-paginated scans of pending records. Archive completed event
 records only after the application's replay and publication-key retention window.
+# Sharing events with the workspace
+
+Under **Sharing → Workspace APIs**, select **Everyone in this workspace · all
+sites** for an event to allow any site in the current workspace to subscribe.
+The setting applies to all registered versions of that event name. It creates an
+`event` / `subscribe` grant with `subjects: {"workspace": true}`. It does not
+grant event publishing or change the consumer automation's data permissions.
+
+Subscriptions still bind to persistent site identities and a registered event
+version. Delivery rechecks the producer's current policy, so restricting sharing
+stops unauthorized delivery. Other explicit subscription grants remain valid.
+Consumers can use event-triggered automations to compose workflows; workflow
+execution and management keep their own permissions.

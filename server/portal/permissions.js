@@ -83,6 +83,10 @@
     file: "Uploaded files",
     channel: "Realtime channel",
     action: "Business action",
+    "action-consumer": "Incoming site connection",
+    "site-action": "Outgoing site action",
+    event: "Durable event",
+    workflow: "Workflow",
     integration: "Integration endpoint",
   };
   const operations = {
@@ -91,6 +95,10 @@
     file: ["read", "upload", "delete"],
     channel: ["read", "send"],
     action: ["run"],
+    "action-consumer": ["run"],
+    "site-action": ["run"],
+    event: ["publish", "subscribe"],
+    workflow: ["run"],
     integration: ["read", "write"],
   };
   const operationLabels = {
@@ -449,6 +457,7 @@
   function audienceText(subjects, labels, roles = {}) {
     return (
       [
+        ...(subjects.workspace ? ["All workspace API callers"] : []),
         ...(subjects.signedIn ? ["Everyone signed in"] : []),
         ...(subjects.owners ? ["Site owners & platform administrators"] : []),
         ...(subjects.roles || []).map(
@@ -830,7 +839,11 @@
       "Site managers and platform administrators",
       grant.subjects?.owners,
     );
-    who.append(all.wrapper, owners.wrapper);
+    const workspace = checkbox(
+      "All workspace API callers (people and automations)",
+      grant.subjects?.workspace,
+    );
+    who.append(all.wrapper, owners.wrapper, workspace.wrapper);
     const groups = [];
     for (const role of Object.keys(policy.roles || {}).sort()) {
       const option = checkbox(
@@ -916,6 +929,10 @@
         file: "exports/ or *",
         channel: "updates or *",
         action: "approve-request or *",
+        "action-consumer": "approve-request or *",
+        "site-action": "tasks.approve-request or *",
+        event: "request-approved or *",
+        workflow: "process-request or *",
         integration: "crm.deals or crm.*",
       }[kind.value];
     };
@@ -957,6 +974,7 @@
         if (!selectedOperations.length)
           throw new Error("Select at least one allowed operation.");
         const subjects = {
+          workspace: workspace.control.checked,
           signedIn: all.control.checked,
           owners: owners.control.checked,
           roles: groups
@@ -965,6 +983,7 @@
           principals: people.value(),
         };
         if (
+          !subjects.workspace &&
           !subjects.signedIn &&
           !subjects.owners &&
           !subjects.roles.length &&
@@ -989,7 +1008,8 @@
         if (
           record &&
           scopeKind.value.trim() &&
-          (subjects.signedIn ||
+          (subjects.workspace ||
+            subjects.signedIn ||
             subjects.owners ||
             subjects.principals.length ||
             !subjects.roles.length)

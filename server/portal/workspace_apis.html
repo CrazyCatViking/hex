@@ -1,0 +1,96 @@
+{{define "workspace-apis"}}
+<!doctype html>
+<html lang="en">
+  <head>
+    {{template "head" (printf "%s · Workspace APIs" .Platform)}}
+    <link rel="stylesheet" href="/api/hex/permissions.css" />
+  </head>
+  <body hx-headers='{"X-Hex-Request":"1"}'>
+    {{template "header" .Chrome}}
+    <main id="main" class="page">
+      <section class="page-heading">
+        <div>
+          <p class="eyebrow">BUILD TOGETHER</p>
+          <h1>Workspace APIs</h1>
+          <p class="lead">
+            Discover tasks and events your sites can use together.
+          </p>
+        </div>
+      </section>
+      <form class="toolbar" action="/workspace-apis" method="get" role="search">
+        <label class="field"
+          ><span class="field-label">Find an action, event or site</span
+          ><input
+            type="search"
+            name="q"
+            value="{{.Query}}"
+            placeholder="Search workspace APIs" /></label
+        ><button class="button" type="submit">Search</button>
+      </form>
+      <div class="workspace-api-sharing">
+        {{range .Entries}}
+        <article class="panel workspace-api-card">
+          <div class="workspace-api-heading">
+            <div>
+              <p class="eyebrow">
+                {{.Site}} · {{if eq .Kind "action"}}ACTION ·
+                v{{.Version}}{{else}}EVENT{{end}}
+              </p>
+              <h2>{{.Name}}</h2>
+            </div>
+            <span class="tag"
+              >{{if eq .Mode "workspace"}}Everyone in this
+              workspace{{else}}Extra access may be needed{{end}}</span
+            >
+          </div>
+          <p>{{.Description}}</p>
+          <p class="field-hint">{{.Detail}}</p>
+          {{if eq .Mode "workspace"}}
+          <p>
+            {{if eq .Kind "action"}}Use from any site without a separate
+            connection grant. Action data permissions still apply.{{else}}Any
+            site can subscribe. Use incoming events to trigger automations and
+            workflows.{{end}}
+          </p>
+          {{else}}
+          <p>
+            Ask {{if .Owners}}<strong>{{.Owners}}</strong>{{else}}a site
+            owner{{end}} for {{if eq .Kind "action"}}permission to connect your
+            site and run this action{{else}}permission for your site to
+            subscribe{{end}}.
+          </p>
+          {{end}} {{if .Owned}}<a
+            class="button button-secondary"
+            href="/manage/{{.Site}}?tab=sharing#workspace-apis"
+            >Manage sharing</a
+          >{{else}}
+          <p class="field-hint">Site owners: {{.Owners}}</p>
+          {{end}}
+          <details>
+            <summary>Connection details</summary>
+            <p>
+              Site: <code>{{.Site}}</code> · {{.Kind}}: <code>{{.Name}}</code>
+            </p>
+            <p>
+              {{if eq .Kind "action"}}Call through your source site's Hex
+              client. Pin the contract version shown above.{{else}}Create a
+              subscription from your consuming site and select the registered
+              event version.{{end}}
+            </p>
+          </details>
+        </article>
+        {{else}}
+        <section class="panel empty-state">
+          <h2>No matching workspace APIs</h2>
+          <p>
+            Try another search, or export an action from your site and share it
+            with the workspace.
+          </p>
+        </section>
+        {{end}}
+      </div>
+    </main>
+    {{template "footer" .Chrome}}
+  </body>
+</html>
+{{end}}

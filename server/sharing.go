@@ -29,6 +29,7 @@ const (
 )
 
 type sharingView struct {
+	WorkspaceAPIs  []workspaceShareRow
 	V2             bool
 	Policy         string
 	Base           string

@@ -100,3 +100,55 @@ Cross-site calls, event publications and workflow starts each have a default
 can configure `Config.SiteOperationsPerMinute`. HTTP throttling returns 429 and
 `Retry-After`. Cross-site mutation results are limited to 512 KiB to leave room
 for the durable invocation envelope.
+# Workspace-public APIs
+
+In the portal, open **Your sites → your site → Sharing → Workspace APIs**.
+Each exported action can be **Restricted** or shared with **Everyone in this
+workspace · all sites**. Save changes to apply the selection. This grants both
+the incoming site connection and action execution to brokered callers, including
+site automations. Consumers do not need an outgoing `site-action` grant for a
+workspace-public connection. Restricted connections retain the explicit grants.
+
+The **Workspace APIs** navigation item lists exported actions and durable events,
+their sharing status, usage and site owners. It includes workspace-public APIs
+even when the site's pages are private. Restricted APIs are listed only for
+people admitted to the site; sites marked undiscoverable are omitted. Owners can
+go directly from a catalog card to Sharing. Access guidance identifies which
+owner to contact; it does not submit an approval request automatically.
+
+The policy audience is `"subjects": {"workspace": true}`. It matches only
+authenticated calls brokered inside this workspace, not direct browser requests,
+anonymous visitors, local automations or site admission. The source site must
+have an existing policy. Schema validation, version pinning, record constraints,
+rate limits and idempotency continue to apply. Revocations affect subsequent
+requests and are preserved by the normal three-way publication merge.
+
+Servers supporting this audience advertise `capabilities.workspaceAPISharing`.
+Upgrade the Hex runtime before publishing policies that use it.
+
+For example, these grants expose an exported `submit` action:
+
+```json
+{
+  "workspace-connection": {
+    "kind": "action-consumer", "resource": "submit", "operations": ["run"],
+    "subjects": {"workspace": true}
+  },
+  "workspace-execution": {
+    "kind": "action", "resource": "submit", "operations": ["run"],
+    "subjects": {"workspace": true}
+  }
+}
+```
+
+Action execution and underlying data authority remain distinct. An action using
+`authorization: "action"` executes its declared, constrained effects with its
+action grant. Caller-authorized actions (including declared reads) additionally
+need the relevant collection grants; those can also select `workspace: true`
+through **Developer tools → Add a rule outside permission groups**. This does
+not open direct collection access. Platform handlers may enforce further rules.
+The catalog therefore describes connection sharing separately from data access.
+
+The simple sharing selector owns only its dedicated grants. If a custom rule
+(such as a wildcard) also opens the resource, restricting it reports that rule
+must be changed rather than silently claiming access was revoked.

@@ -209,6 +209,9 @@ func (s *Server) registerRoutes() {
 	}
 	if s.actionsEnabled() {
 		if _, ok := s.config.Database.(GuardedDatabase); ok {
+			if s.config.Sites != nil {
+				s.mux.HandleFunc("GET /workspace-apis", s.workspaceAPIsPage)
+			}
 			s.mux.HandleFunc("POST /api/sites/{site}/site-api/call", s.siteScoped(s.siteCallHTTP))
 			s.mux.HandleFunc("GET /api/sites/{site}/site-api/identity", s.siteScoped(s.siteIdentityHTTP))
 			s.mux.HandleFunc("GET /api/sites/{site}/site-api/actions/{target}", s.siteScoped(s.siteActionsHTTP))
@@ -384,24 +387,25 @@ func (s *Server) capabilities(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) capabilityDescription() map[string]any {
 	return map[string]any{
-		"version":           1,
-		"files":             s.config.Files != nil,
-		"database":          s.config.Database != nil,
-		"realtime":          s.config.Realtime != nil,
-		"sites":             s.config.Sites != nil,
-		"identity":          s.config.Identity != nil,
-		"accessControl":     s.config.Identity != nil && s.config.Access != nil,
-		"permissionVersion": 2,
-		"publishing":        s.config.Publisher != nil,
-		"artifacts":         s.artifactsEnabled(),
-		"actions":           s.actionsEnabled(),
-		"analytics":         s.config.Analytics != nil,
-		"integrations":      s.integrationsEnabled(),
-		"connections":       s.connectionsEnabled(),
-		"ai":                s.aiEnabled(),
-		"automations":       s.automationsEnabled(),
-		"siteAPI":           s.siteAPIEnabled(),
-		"durableEvents":     s.eventsEnabled(),
-		"maxUploadBytes":    s.config.MaxUploadBytes,
+		"version":             1,
+		"files":               s.config.Files != nil,
+		"database":            s.config.Database != nil,
+		"realtime":            s.config.Realtime != nil,
+		"sites":               s.config.Sites != nil,
+		"identity":            s.config.Identity != nil,
+		"accessControl":       s.config.Identity != nil && s.config.Access != nil,
+		"permissionVersion":   2,
+		"publishing":          s.config.Publisher != nil,
+		"artifacts":           s.artifactsEnabled(),
+		"actions":             s.actionsEnabled(),
+		"analytics":           s.config.Analytics != nil,
+		"integrations":        s.integrationsEnabled(),
+		"connections":         s.connectionsEnabled(),
+		"ai":                  s.aiEnabled(),
+		"automations":         s.automationsEnabled(),
+		"siteAPI":             s.siteAPIEnabled(),
+		"workspaceAPISharing": s.siteAPIEnabled(),
+		"durableEvents":       s.eventsEnabled(),
+		"maxUploadBytes":      s.config.MaxUploadBytes,
 	}
 }
