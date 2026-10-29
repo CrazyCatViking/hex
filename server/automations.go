@@ -48,6 +48,7 @@ type ScheduledAutomation struct {
 
 // AutomationRun records one script's result and bounded operation history.
 type AutomationRun struct {
+	Event      *DurableEvent         `json:"event,omitempty"`
 	ID         string                `json:"id"`
 	Site       string                `json:"site"`
 	Automation string                `json:"automation"`

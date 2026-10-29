@@ -73,10 +73,26 @@ export interface AutomationContext {
   readonly automation: string;
   readonly run: Readonly<{
     id: string;
-    trigger: "schedule" | "manual" | "test";
+    trigger: "schedule" | "manual" | "test" | "event" | "workflow";
     dryRun: boolean;
   }>;
   readonly now: AutomationClock;
+  readonly event: null | {
+    id: string;
+    site: string;
+    name: string;
+    version: number;
+    actor: string;
+    data: JSONValue;
+    createdAt: string;
+  };
+  readonly events: {
+    publish(
+      name: string,
+      data: JSONValue,
+      options: { version: number; idempotencyKey: string },
+    ): Promise<{ id: string }>;
+  };
   readonly sites: {
     /** Uses the server-authenticated site identity; mutations need a stable key. */
     call<T = JSONValue>(

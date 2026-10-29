@@ -224,6 +224,7 @@ func (s *Server) registerRoutes() {
 	s.registerPortalIntegrationRoutes()
 	s.registerAIRoutes()
 	s.registerAutomationRoutes()
+	s.registerEventRoutes()
 	s.registerManageRoutes()
 	s.registerAdminAccessRoutes()
 	s.registerPortalConnectionRoutes()
@@ -391,6 +392,7 @@ func (s *Server) capabilityDescription() map[string]any {
 		"ai":                s.aiEnabled(),
 		"automations":       s.automationsEnabled(),
 		"siteAPI":           s.siteAPIEnabled(),
+		"durableEvents":     s.eventsEnabled(),
 		"maxUploadBytes":    s.config.MaxUploadBytes,
 	}
 }

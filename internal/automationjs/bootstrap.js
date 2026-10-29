@@ -27,6 +27,9 @@
       call: async (target, action, input = {}, options = {}) =>
         request("site-action", { ...options, target, action, input }),
     },
+    events: {
+      publish: async (name, data, options) => request("event", { ...options, name, data }),
+    },
     ai: {
       complete: async (requestInput) => request("ai", requestInput),
     },

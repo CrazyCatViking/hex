@@ -74,6 +74,7 @@ func (r *automationRunner) executeScript(ctx context.Context) (json.RawMessage, 
 		return nil, err
 	}
 	metadata := map[string]any{
+		"event":      r.run.Event,
 		"site":       r.site,
 		"automation": r.automation.Name,
 		"run":        map[string]any{"id": r.run.ID, "trigger": r.run.Trigger, "dryRun": r.run.DryRun},
@@ -154,6 +155,25 @@ func (r *automationRunner) scriptInvoke(ctx context.Context, kind string, input 
 		r.run.Operations = append(r.run.Operations, operation)
 	}()
 	switch kind {
+	case "event":
+		var request struct {
+			Name           string          `json:"name"`
+			Version        int             `json:"version"`
+			Data           json.RawMessage `json:"data"`
+			IdempotencyKey string          `json:"idempotencyKey"`
+		}
+		if err := decodeScriptInput(input, &request); err != nil {
+			return nil, err
+		}
+		operation.Target = request.Name
+		authorization, err := r.server.automationAuthorization(ctx, r.site, r.automation.Name)
+		if err != nil {
+			return nil, err
+		}
+		if r.run.DryRun {
+			operation.Status = OperationDryRun
+		}
+		return r.server.publishEvent(ctx, r.site, request.Name, authorization, publishEventRequest{Version: request.Version, Data: request.Data, IdempotencyKey: request.IdempotencyKey}, r.run.DryRun)
 	case "site-action":
 		var request SiteCall
 		if err := decodeScriptInput(input, &request); err != nil {

@@ -10,6 +10,7 @@ export * from "./integrations.js";
 
 export interface Capabilities {
   siteAPI?: boolean;
+  durableEvents?: boolean;
   analytics?: boolean;
   /** Third-party integrations are configured. */
   integrations?: boolean;
@@ -302,6 +303,56 @@ export function createHexClient(options: ClientOptions) {
   }
 
   return {
+    events: {
+      define(
+        name: string,
+        definition: {
+          version: number;
+          description: string;
+          schema: Record<string, unknown>;
+        },
+      ) {
+        return requestJSON(
+          `${root}/events/types/${validateName(name)}`,
+          jsonBody("PUT", definition),
+        );
+      },
+      subscribe(
+        id: string,
+        subscription: {
+          producer: string;
+          event: string;
+          version: number;
+          automation: string;
+          disabled?: boolean;
+          where?: RecordCondition;
+        },
+      ) {
+        return requestJSON(
+          `${root}/events/subscriptions/${validateName(id)}`,
+          jsonBody("PUT", subscription),
+        );
+      },
+      publish(
+        name: string,
+        data: unknown,
+        options: { version: number; idempotencyKey: string },
+      ) {
+        return requestJSON<{ id: string }>(
+          `${root}/events/publish/${validateName(name)}`,
+          jsonBody("POST", { ...options, data }),
+        );
+      },
+      inspect(id: string) {
+        return requestJSON(`${root}/events/records/${validateName(id)}`);
+      },
+      replay(id: string, subscription: string) {
+        return requestJSON(
+          `${root}/events/records/${validateName(id)}/replay/${validateName(subscription)}`,
+          jsonBody("POST", {}),
+        );
+      },
+    },
     sites: {
       identity() {
         return requestJSON<Identity>(`${root}/site-api/identity`);

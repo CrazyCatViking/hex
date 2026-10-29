@@ -12,6 +12,9 @@ import (
 // progress have finished.
 func (s *Server) RunBackground(ctx context.Context) {
 	var tasks sync.WaitGroup
+	if s.eventsEnabled() {
+		tasks.Go(func() { s.runEventDispatcher(ctx) })
+	}
 	if s.automationsEnabled() {
 		tasks.Go(func() { s.runAutomationScheduler(ctx) })
 	}
