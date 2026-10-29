@@ -145,6 +145,9 @@ func (s *Server) invokeSiteAction(ctx context.Context, source string, authorizat
 	if err := action.validateInput(request.Input); err != nil {
 		return nil, err
 	}
+	if err := s.admitSiteOperation(ctx, source, "site-call"); err != nil {
+		return nil, err
+	}
 	if dryRun && !action.definition.ReadOnly {
 		return json.Marshal(map[string]any{"wouldRun": request.Action, "target": request.Target})
 	}
@@ -172,6 +175,9 @@ func (s *Server) invokeSiteAction(ctx context.Context, source string, authorizat
 		return json.Marshal(invocation)
 	})
 	if err != nil {
+		if errors.Is(err, errInvocationConflict) {
+			return nil, fmt.Errorf("%w (invocation %s)", err, key)
+		}
 		return nil, err
 	}
 	if !created {
@@ -179,6 +185,9 @@ func (s *Server) invokeSiteAction(ctx context.Context, source string, authorizat
 	}
 	caller.InvocationID = key
 	output, executionError := action.execute(ctx, caller, request.Input)
+	if executionError == nil && len(output) > MaxActionInputBytes/2 {
+		executionError = &actionResultError{name: request.Action, err: errors.New("cross-site mutation output exceeds 512 KiB")}
+	}
 	invocation.Status = "uncertain"
 	if executionError == nil {
 		invocation.Status, invocation.Output = "succeeded", output
@@ -205,6 +214,9 @@ func writeSiteCallError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusNotFound, "action or record not found")
 	case errors.Is(err, errInvocationConflict):
 		writeError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, errSiteRateLimit):
+		w.Header().Set("Retry-After", "60")
+		writeError(w, http.StatusTooManyRequests, err.Error())
 	case errors.As(err, &input), errors.As(err, &business):
 		writeError(w, http.StatusBadRequest, err.Error())
 	default:

@@ -375,7 +375,7 @@ func (s *Server) readPublishRequest(w http.ResponseWriter, r *http.Request) (pub
 		writeError(w, http.StatusBadRequest, err.Error())
 		return request, false
 	}
-	if err := s.validateDeclaredActions(r.PathValue("site"), request.Actions); err != nil {
+	if err := s.validateDeclaredActions(r.Context(), r.PathValue("site"), request.Actions); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return request, false
 	}

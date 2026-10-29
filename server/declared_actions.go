@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -59,7 +60,7 @@ var declaredActionOutput = json.RawMessage(`{"type":"object","properties":{"id":
 // validateDeclaredActions checks the actions of a publication before any
 // file is changed. Names may not shadow actions the server registers for the
 // site in Go.
-func (s *Server) validateDeclaredActions(site string, actions []DeclaredAction) error {
+func (s *Server) validateDeclaredActions(ctx context.Context, site string, actions []DeclaredAction) error {
 	if len(actions) > maxDeclaredActions {
 		return fmt.Errorf("a site can declare at most %d actions", maxDeclaredActions)
 	}
@@ -67,9 +68,22 @@ func (s *Server) validateDeclaredActions(site string, actions []DeclaredAction) 
 		return errors.New("this platform has no database, so it cannot run declared actions")
 	}
 	names := make(map[string]bool, len(actions))
+	previous, err := s.declaredActions(ctx, site)
+	if err != nil {
+		return err
+	}
 	for _, action := range actions {
-		if _, err := compileDeclaredAction(action); err != nil {
+		compiled, err := compileDeclaredAction(action)
+		if err != nil {
 			return err
+		}
+		for _, old := range previous {
+			if old.definition.Name != action.Name || !old.definition.Exported || !action.Exported || old.definition.Version != action.Version {
+				continue
+			}
+			if !equalActionSchema(old.definition.InputSchema, compiled.definition.InputSchema) || !equalActionSchema(old.definition.OutputSchema, compiled.definition.OutputSchema) || old.definition.ReadOnly != compiled.definition.ReadOnly {
+				return fmt.Errorf("exported action %s version %d is immutable; publish a new version", action.Name, action.Version)
+			}
 		}
 		if names[action.Name] {
 			return fmt.Errorf("action %s is declared more than once", action.Name)
@@ -80,6 +94,14 @@ func (s *Server) validateDeclaredActions(site string, actions []DeclaredAction) 
 		}
 	}
 	return nil
+}
+
+func equalActionSchema(a, b json.RawMessage) bool {
+	var left, right any
+	if json.Unmarshal(a, &left) != nil || json.Unmarshal(b, &right) != nil {
+		return false
+	}
+	return reflect.DeepEqual(left, right)
 }
 
 // compileDeclaredAction validates a declared action and compiles its input

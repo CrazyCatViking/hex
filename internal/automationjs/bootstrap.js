@@ -37,9 +37,14 @@
       step: async (name, callback) => {
         const step = request("step-begin", { name });
         if (step.done) return step.output;
-        const output = (await callback()) ?? null;
-        request("step-complete", { name, output });
-        return output;
+        try {
+          const output = (await callback()) ?? null;
+          request("step-complete", { name, output });
+          return output;
+        } catch (error) {
+          request("step-abort", { name });
+          throw error;
+        }
       },
     },
     ai: {

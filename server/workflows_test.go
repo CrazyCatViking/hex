@@ -9,14 +9,11 @@ import (
 
 	hex "github.com/crazycatviking/hex/server"
 	"github.com/crazycatviking/hex/server/providers/easyauth"
-	"github.com/crazycatviking/hex/server/providers/memory"
 )
 
 func TestWorkflowCompositionResumesCheckpointsAndChildren(t *testing.T) {
 	ctx := context.Background()
-	database := memory.NewDatabase()
-	access := memory.NewAccessStore()
-	automations := memory.NewAutomationStore()
+	database, access, automations := durableTestStores(t)
 	registry := &hex.ActionRegistry{}
 	var calls atomic.Int32
 	if err := registry.Register("demo", hex.Action{Definition: hex.ActionDefinition{Name: "counter", Description: "Count", InputSchema: json.RawMessage(`{"type":"object"}`), OutputSchema: json.RawMessage(`{"type":"integer"}`)}, Handler: func(context.Context, hex.ActionContext, json.RawMessage) (any, error) { return calls.Add(1), nil }}); err != nil {
@@ -31,7 +28,8 @@ func TestWorkflowCompositionResumesCheckpointsAndChildren(t *testing.T) {
 	}
 	definitions := []hex.ScheduledAutomation{
 		{Site: "demo", Automation: hex.Automation{Name: "main", Input: json.RawMessage(`{"type":"object","required":["value"]}`), Script: &hex.AutomationScript{Source: `export default async hex => {
- const count = await hex.workflow.step("count", () => hex.action("counter"));
+	 try { await hex.workflow.step("optional", async () => { throw new Error("recoverable"); }); } catch {}
+	 const count = await hex.workflow.step("count", () => hex.action("counter"));
  const child = await hex.workflow.start("child", hex.input, {idempotencyKey:hex.workflowId});
  const result = await hex.workflow.wait(child.id);
  return {count, value:result.value};
@@ -90,7 +88,14 @@ func TestWorkflowCompositionResumesCheckpointsAndChildren(t *testing.T) {
 	if err := json.Unmarshal(document.Data, &workflow); err != nil {
 		t.Fatal(err)
 	}
-	if workflow.Status != "succeeded" || string(workflow.Output) != `{"count":1,"value":42}` || calls.Load() != 1 {
+	var output struct {
+		Count int `json:"count"`
+		Value int `json:"value"`
+	}
+	if err := json.Unmarshal(workflow.Output, &output); err != nil {
+		t.Fatal(err)
+	}
+	if workflow.Status != "succeeded" || output.Count != 1 || output.Value != 42 || calls.Load() != 1 {
 		t.Fatalf("workflow failed: %+v calls=%d", workflow, calls.Load())
 	}
 	requestAs(t, server, principalHeaders("outsider"), "GET", "/api/sites/demo/workflows/"+started.ID, nil, 403)

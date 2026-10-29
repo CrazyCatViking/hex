@@ -11,13 +11,11 @@ import (
 
 	hex "github.com/crazycatviking/hex/server"
 	"github.com/crazycatviking/hex/server/providers/easyauth"
-	"github.com/crazycatviking/hex/server/providers/memory"
 )
 
 func TestSiteCallsAuthorizationIdempotencyAndIsolation(t *testing.T) {
 	ctx := context.Background()
-	policies := memory.NewAccessStore()
-	database := memory.NewDatabase()
+	database, policies, _ := durableTestStores(t)
 	registry := &hex.ActionRegistry{}
 	var calls atomic.Int32
 	err := registry.Register("target", hex.Action{Definition: hex.ActionDefinition{Name: "submit", Description: "Submit a request", Version: 1, Exported: true, InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false}`), OutputSchema: json.RawMessage(`{"type":"object"}`)}, Handler: func(ctx context.Context, caller hex.ActionContext, input json.RawMessage) (any, error) {
@@ -34,7 +32,7 @@ func TestSiteCallsAuthorizationIdempotencyAndIsolation(t *testing.T) {
 	if err := policies.PutSiteAccess(ctx, "source", source); err != nil {
 		t.Fatal(err)
 	}
-	config := hex.Config{Identity: easyauth.Resolver{}, Database: database, Access: policies, Actions: registry}
+	config := hex.Config{Identity: easyauth.Resolver{}, Database: database, Access: policies, Actions: registry, SiteOperationsPerMinute: 2}
 	server := hex.New(config)
 	headers := principalHeaders("alice")
 	identityResponse := requestAs(t, server, headers, "GET", "/api/sites/source/site-api/identity", nil, 200)
@@ -56,6 +54,7 @@ func TestSiteCallsAuthorizationIdempotencyAndIsolation(t *testing.T) {
 	if calls.Load() != 1 {
 		t.Fatal("mutation repeated")
 	}
+	requestAs(t, server, headers, "POST", "/api/sites/source/site-api/call", []byte(strings.Replace(string(body), `"one"`, `"two"`, 1)), 429)
 	requestAs(t, server, principalHeaders("bob"), "POST", "/api/sites/source/site-api/call", body, 403)
 	requestAs(t, server, headers, "POST", "/api/sites/source/site-api/call", []byte(strings.Replace(string(body), `"version":1`, `"version":2`, 1)), 403)
 	requestAs(t, server, headers, "POST", "/api/sites/source/site-api/call", []byte(strings.Replace(string(body), `"input":{}`, `"input":{"unexpected":true}`, 1)), 400)

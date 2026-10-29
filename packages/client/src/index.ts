@@ -305,6 +305,11 @@ export function createHexClient(options: ClientOptions) {
 
   return {
     workflows: {
+      list(after = "") {
+        return requestJSON(
+          `${root}/workflows?${new URLSearchParams({ after })}`,
+        );
+      },
       start(name: string, input: unknown, options: { idempotencyKey: string }) {
         return requestJSON<{ id: string; status: string }>(
           `${root}/workflows`,
@@ -328,6 +333,16 @@ export function createHexClient(options: ClientOptions) {
       },
     },
     events: {
+      list(after = "") {
+        return requestJSON(
+          `${root}/events/records?${new URLSearchParams({ after })}`,
+        );
+      },
+      types(after = "") {
+        return requestJSON(
+          `${root}/events/types?${new URLSearchParams({ after })}`,
+        );
+      },
       define(
         name: string,
         definition: {

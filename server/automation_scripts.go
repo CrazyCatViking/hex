@@ -173,7 +173,7 @@ func (r *automationRunner) scriptInvoke(ctx context.Context, kind string, input 
 		r.run.Operations = append(r.run.Operations, operation)
 	}()
 	switch kind {
-	case "workflow-start", "workflow-wait", "workflow-sleep", "step-begin", "step-complete":
+	case "workflow-start", "workflow-wait", "workflow-sleep", "step-begin", "step-complete", "step-abort":
 		return r.workflowOperation(ctx, kind, input)
 	case "event":
 		var request struct {
@@ -209,6 +209,12 @@ func (r *automationRunner) scriptInvoke(ctx context.Context, kind string, input 
 			return nil, automationError(err)
 		}
 		output, err := r.server.invokeSiteAction(ctx, r.site, authorization, request, true, r.run.DryRun)
+		if err != nil {
+			var inputError *actionInputError
+			if !errors.As(err, &inputError) && !errors.Is(err, errInvocationConflict) && !errors.Is(err, errSiteRateLimit) {
+				err = automationError(err)
+			}
+		}
 		if r.run.DryRun {
 			operation.Status = OperationDryRun
 		}

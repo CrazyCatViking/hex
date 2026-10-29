@@ -11,7 +11,10 @@ import (
 )
 
 type Config struct {
-	Analytics AnalyticsStore
+	// SiteOperationsPerMinute bounds each site's API calls, event publications
+	// and workflow starts independently across replicas. Zero defaults to 120.
+	SiteOperationsPerMinute int
+	Analytics               AnalyticsStore
 	// TrafficCollector is optional operational status for the admin dashboard.
 	TrafficCollector *TrafficCollector
 	Files            ObjectStore
@@ -95,6 +98,9 @@ func New(config Config) *Server {
 		if config.AdminAccess == nil {
 			config.AdminAccess, _ = config.Database.(AdminAccessStore)
 		}
+	}
+	if config.SiteOperationsPerMinute <= 0 {
+		config.SiteOperationsPerMinute = 120
 	}
 	if config.SiteBaseURL == "" {
 		config.SiteBaseURL = "http://localhost:8080"

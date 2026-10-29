@@ -91,6 +91,9 @@ func (s *Server) startWorkflow(ctx context.Context, site string, authorization s
 	if dryRun {
 		return workflow, nil
 	}
+	if err := s.admitSiteOperation(ctx, site, "workflow"); err != nil {
+		return Workflow{}, err
+	}
 	_, err = s.mutateSystem(ctx, "workflows", workflow.ID, func(current *Document) (json.RawMessage, error) {
 		if current != nil {
 			var previous Workflow
@@ -204,6 +207,7 @@ func (s *Server) registerWorkflowRoutes() {
 		return
 	}
 	s.mux.HandleFunc("POST /api/sites/{site}/workflows", s.siteScoped(s.workflowStartHTTP))
+	s.mux.HandleFunc("GET /api/sites/{site}/workflows", s.siteScoped(s.listWorkflowsHTTP))
 	s.mux.HandleFunc("GET /api/sites/{site}/workflows/{id}", s.siteScoped(s.workflowGetHTTP))
 	s.mux.HandleFunc("POST /api/sites/{site}/workflows/{id}/{control}", s.siteScoped(s.workflowControlHTTP))
 }
@@ -458,8 +462,12 @@ func (r *automationRunner) workflowOperation(ctx context.Context, kind string, i
 		if err := decodeScriptInput(input, &request); err != nil {
 			return nil, err
 		}
-		if kind == "step-complete" && r.checkpoint != request.Name {
+		if (kind == "step-complete" || kind == "step-abort") && r.checkpoint != request.Name {
 			return nil, errors.New("step completion does not match active step")
+		}
+		if kind == "step-abort" {
+			r.checkpoint = ""
+			return nil, nil
 		}
 		if kind == "step-begin" && r.checkpoint != "" {
 			return nil, errors.New("nested or concurrent steps are not supported")

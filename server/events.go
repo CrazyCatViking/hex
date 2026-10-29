@@ -37,6 +37,7 @@ type EventSubscription struct {
 }
 
 type eventTopic struct {
+	Site string `json:"site"`
 	EventType
 	Subscriptions map[string]EventSubscription `json:"subscriptions"`
 }
@@ -133,6 +134,9 @@ func (s *Server) publishEvent(ctx context.Context, site, name string, authorizat
 	if dryRun {
 		return event, nil
 	}
+	if err := s.admitSiteOperation(ctx, site, "event"); err != nil {
+		return DurableEvent{}, err
+	}
 	record := eventRecord{DurableEvent: event, Fingerprint: internalKey(string(request.Data)), Deliveries: map[string]EventDelivery{}}
 	for key, subscription := range topic.Subscriptions {
 		if subscription.Disabled || !subscription.Where.Matches(Document{Data: request.Data}) {
@@ -200,7 +204,7 @@ func (s *Server) eventTypeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, err := s.mutateSystem(r.Context(), "event-types", topicKey(r.PathValue("site"), definition.Name, definition.Version), func(current *Document) (json.RawMessage, error) {
-		topic := eventTopic{EventType: definition, Subscriptions: map[string]EventSubscription{}}
+		topic := eventTopic{Site: r.PathValue("site"), EventType: definition, Subscriptions: map[string]EventSubscription{}}
 		if current != nil {
 			if err := json.Unmarshal(current.Data, &topic); err != nil {
 				return nil, err
@@ -258,9 +262,13 @@ func (s *Server) eventSubscriptionHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	index := slices.IndexFunc(definitions, func(a ScheduledAutomation) bool { return a.Automation.Name == request.Automation })
-	if index < 0 {
+	if index < 0 && !request.Disabled {
 		writeError(w, 400, "subscription automation must be deployed first")
 		return
+	}
+	revision := ""
+	if index >= 0 {
+		revision = definitions[index].Revision
 	}
 	principal, err := s.sitePrincipal(r.Context(), site)
 	if err != nil {
@@ -272,7 +280,7 @@ func (s *Server) eventSubscriptionHTTP(w http.ResponseWriter, r *http.Request) {
 		writeServerError(w, err)
 		return
 	}
-	subscription := EventSubscription{ID: id, Site: site, Principal: principal.ID, Producer: request.Producer, Event: request.Event, Version: request.Version, Automation: request.Automation, Revision: definitions[index].Revision, Generation: generation, Disabled: request.Disabled, Where: request.Where}
+	subscription := EventSubscription{ID: id, Site: site, Principal: principal.ID, Producer: request.Producer, Event: request.Event, Version: request.Version, Automation: request.Automation, Revision: revision, Generation: generation, Disabled: request.Disabled, Where: request.Where}
 	if !subscription.Disabled {
 		if err := s.eventSubscriberAllowed(r.Context(), subscription); err != nil {
 			writeSiteCallError(w, err)
@@ -416,6 +424,8 @@ func (s *Server) registerEventRoutes() {
 		return
 	}
 	s.mux.HandleFunc("PUT /api/sites/{site}/events/types/{name}", s.siteScoped(s.eventTypeHTTP))
+	s.mux.HandleFunc("GET /api/sites/{site}/events/types", s.siteScoped(s.listEventTypesHTTP))
+	s.mux.HandleFunc("GET /api/sites/{site}/events/records", s.siteScoped(s.listEventsHTTP))
 	s.mux.HandleFunc("PUT /api/sites/{site}/events/subscriptions/{id}", s.siteScoped(s.eventSubscriptionHTTP))
 	s.mux.HandleFunc("POST /api/sites/{site}/events/publish/{name}", s.siteScoped(s.publishEventHTTP))
 	s.mux.HandleFunc("GET /api/sites/{site}/events/records/{id}", s.siteScoped(s.inspectEventHTTP))

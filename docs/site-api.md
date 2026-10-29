@@ -11,6 +11,8 @@ Add `"exported": true, "version": 1` to a declared action or Go action definitio
 Existing actions are not exported. Consumers pin a positive version. Publish a
 new action name for a breaking version that must coexist with the old contract.
 Changing the version of an existing name makes old calls fail closed.
+Publishing rejects changes to the input/output schema or read/mutation kind of
+an existing exported version. Use a new version for contract changes.
 
 Declarative reads use `operation: "get"` or `"list"`, `collection`, `input`,
 `output` (JSON Schema), and `select` (1–64 top-level data fields). They enforce
@@ -92,3 +94,9 @@ provider-atomic guarded mutations. PostgreSQL persists them; the development
 memory provider only retains them for its process lifetime. Records are retained
 until operator archival; do not prune mutation deduplication records while keys
 may still be retried.
+
+Cross-site calls, event publications and workflow starts each have a default
+120-operation/source-site/minute admission limit shared across replicas. Hosts
+can configure `Config.SiteOperationsPerMinute`. HTTP throttling returns 429 and
+`Retry-After`. Cross-site mutation results are limited to 512 KiB to leave room
+for the durable invocation envelope.

@@ -10,14 +10,11 @@ import (
 
 	hex "github.com/crazycatviking/hex/server"
 	"github.com/crazycatviking/hex/server/providers/easyauth"
-	"github.com/crazycatviking/hex/server/providers/memory"
 )
 
 func TestDurableEventsFanoutRecoveryRevocationAndReplay(t *testing.T) {
 	ctx := context.Background()
-	database := memory.NewDatabase()
-	access := memory.NewAccessStore()
-	automations := memory.NewAutomationStore()
+	database, access, automations := durableTestStores(t)
 	config := hex.Config{Database: database, Access: access, Automations: automations, Actions: &hex.ActionRegistry{}, Identity: easyauth.Resolver{}}
 	server := hex.New(config)
 	producer := hex.SiteAccess{Version: 2, Owners: []string{"user:owner"}, Admission: hex.Subjects{Owners: true}, Grants: map[string]hex.PermissionGrant{
@@ -66,6 +63,32 @@ func TestDurableEventsFanoutRecoveryRevocationAndReplay(t *testing.T) {
 	requestAs(t, server, headers, "POST", "/api/sites/producer/events/publish/approved", []byte(`{"version":1,"data":{"amount":13},"idempotencyKey":"one"}`), 409)
 	requestAs(t, server, headers, "POST", "/api/sites/producer/events/publish/approved", []byte(`{"version":1,"data":{"secret":13},"idempotencyKey":"bad"}`), 400)
 	// Independent instances race on the same durable queue after restart.
+	// Simulate a worker dying after it claimed the event, before execution.
+	if _, err := database.Mutate(ctx, ".hex-system", "events", event.ID, "", func(document *hex.Document) (json.RawMessage, error) {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(document.Data, &fields); err != nil {
+			return nil, err
+		}
+		var deliveries map[string]hex.EventDelivery
+		if err := json.Unmarshal(fields["deliveries"], &deliveries); err != nil {
+			return nil, err
+		}
+		for key, delivery := range deliveries {
+			delivery.Status = "running"
+			delivery.Attempts = 1
+			delivery.Lease = "crashed-worker"
+			delivery.LeaseUntil = time.Now().Add(-time.Minute)
+			deliveries[key] = delivery
+		}
+		encoded, err := json.Marshal(deliveries)
+		if err != nil {
+			return nil, err
+		}
+		fields["deliveries"] = encoded
+		return json.Marshal(fields)
+	}); err != nil {
+		t.Fatal(err)
+	}
 	var workers sync.WaitGroup
 	for range 4 {
 		workers.Go(func() {

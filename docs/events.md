@@ -74,6 +74,9 @@ idempotent consumer; do not use save-then-publish as a transactional outbox.
 ## Inspect and replay
 
 Producer owners can inspect all deliveries through `hex.events.inspect(id)`;
+`hex.events.list(after)` lists their published events, while `hex.events.types(after)`
+lists contracts and consuming subscriptions. These owner-only lists return
+`{items,after}` pages of 25; continue until empty.
 consumer owners see only their deliveries, subject to current subscription
 permission. Each delivery includes status, attempts, next attempt, run ID and
 last error. Automation run history retains the event context and operation trace.

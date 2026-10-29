@@ -69,6 +69,8 @@ Failures retry with exponential backoff up to eight failures, then become
 problem; successful checkpoints are retained. `hex.workflows.cancel(id)` stops
 a pending/running job. `hex.workflows.get(id)` returns status, run ID, attempts,
 failures, output, error and checkpoints to callers with the workflow grant.
+Owners can enumerate jobs with `hex.workflows.list(after)`, returning
+`{items,after}` pages of 25.
 
 HTTP: `POST /api/sites/<site>/workflows` with
 `{name,input,idempotencyKey}`, `GET workflows/<id>`,
