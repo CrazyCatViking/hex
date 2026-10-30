@@ -18,6 +18,7 @@ import (
 func (a *App) siteActionCodegenCommand(options *siteCommandOptions) *cobra.Command {
 	var output, catalog string
 	var check bool
+	consumer := &consumerOptions{}
 	command := &cobra.Command{Use: "codegen", Short: "Generate version-pinned TypeScript wrappers for a site's exported actions", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		if check && output == "" {
 			return errors.New("--check requires --out")
@@ -34,7 +35,13 @@ func (a *App) siteActionCodegenCommand(options *siteCommandOptions) *cobra.Comma
 			if configError != nil {
 				return configError
 			}
-			data, err = a.apiRequest(cmd.Context(), project, "/api/sites/"+options.site+"/actions")
+			path := "/api/sites/" + options.site + "/actions"
+			if cmd.Flags().Changed("from") || consumer.asSite {
+				if path, err = consumer.path(project, options.site); err != nil {
+					return err
+				}
+			}
+			data, err = a.apiRequest(cmd.Context(), project, path)
 		}
 		if err != nil {
 			return err
@@ -67,6 +74,7 @@ func (a *App) siteActionCodegenCommand(options *siteCommandOptions) *cobra.Comma
 	command.Flags().StringVar(&output, "out", "", "Generated TypeScript file (default: stdout)")
 	command.Flags().StringVar(&catalog, "catalog", "", "Saved actions list JSON; requires --site")
 	command.Flags().BoolVar(&check, "check", false, "Check the generated file without writing")
+	consumer.register(command)
 	return command
 }
 

@@ -36,7 +36,7 @@ Commands include `setup`, `login`, `logout`, `init`, `publish`, `delete`, `sites
 
 ## Agent access to deployed apps
 
-`hex fetch <url>` or `hex fetch --site <site> --path <path>` reads protected pages and assets using the saved sign-in. `hex data list|get` reads application documents, and `hex files list|get` lists and downloads application files. `hex actions list|describe|run` discovers and executes operations registered by app backends, validating JSON Schema contracts before execution. All support `--platform`; structured reads and action results print JSON. See [Agent access and app actions](agents.md) for flags, authentication boundaries and backend registration.
+`hex fetch <url>` or `hex fetch --site <site> --path <path>` reads protected pages and assets using the saved sign-in. `hex data list|get` reads application documents, and `hex files list|get` lists and downloads application files. `hex actions list|describe|run` discovers and executes operations registered by app backends, validating JSON Schema contracts before execution. `hex actions catalog` lists exported actions and events across the workspace, and `hex actions available --site <target> [--from <app>]` lists those an app can call (see [Site APIs](site-api.md)). All support `--platform`; structured reads and action results print JSON. See [Agent access and app actions](agents.md) for flags, authentication boundaries and backend registration.
 
 ## Updating an installed CLI
 

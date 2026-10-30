@@ -212,6 +212,7 @@ func (s *Server) registerRoutes() {
 		if _, ok := s.config.Database.(GuardedDatabase); ok {
 			if s.config.Sites != nil {
 				s.mux.HandleFunc("GET /workspace-apis", s.workspaceAPIsPage)
+				s.mux.HandleFunc("GET /api/hex/workspace-apis", s.workspaceAPIsHTTP)
 			}
 			s.mux.HandleFunc("POST /api/sites/{site}/site-api/call", s.siteScoped(s.siteCallHTTP))
 			s.mux.HandleFunc("GET /api/sites/{site}/site-api/identity", s.siteScoped(s.siteIdentityHTTP))

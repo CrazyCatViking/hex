@@ -13,6 +13,9 @@ type workspaceShareRow struct {
 	Choices                                                    []choice
 	Name, Description, Kind, Mode, GrantID, ConsumerID, Detail string
 	Version                                                    int
+	// Modes lists the workspace-shared connection modes of an action.
+	Modes      []string
+	definition *ActionDefinition
 }
 
 func workspaceGrantID(kind, resource string) string {
@@ -30,11 +33,11 @@ func (s *Server) workspaceShareRows(ctx context.Context, site string, access Sit
 			if !action.definition.Exported {
 				continue
 			}
-			mode := "restricted"
-			if workspaceShared(access, "action-consumer", action.definition.Name, "run") && workspaceShared(access, "action", action.definition.Name, "run") {
+			mode, modes := "restricted", workspaceConnectionModes(access, action.definition.Name)
+			if len(modes) > 0 {
 				mode = "workspace"
 			}
-			rows = append(rows, workspaceShareRow{Name: action.definition.Name, Description: action.definition.Description, Kind: "action", Version: action.definition.Version, Mode: mode, GrantID: workspaceGrantID("action", action.definition.Name), ConsumerID: workspaceGrantID("action-consumer", action.definition.Name), Detail: "People, AI assistants and automations can call this action through another site. Its data and record rules still apply."})
+			rows = append(rows, workspaceShareRow{Name: action.definition.Name, Description: action.definition.Description, Kind: "action", Version: action.definition.Version, Mode: mode, Modes: modes, definition: &action.definition, GrantID: workspaceGrantID("action", action.definition.Name), ConsumerID: workspaceGrantID("action-consumer", action.definition.Name), Detail: "People, AI assistants and automations can call this action through another site. Its data and record rules still apply."})
 		}
 	}
 	if s.eventsEnabled() {
@@ -74,6 +77,18 @@ func (s *Server) workspaceShareRows(ctx context.Context, site string, access Sit
 }
 
 // Probe with no claims: only a workspace audience can satisfy this check.
+// The portal's simple selector and the per-app editor share actions with
+// different connection modes; any of them opens the action to the workspace.
+func workspaceConnectionModes(access SiteAccess, action string) []string {
+	var modes []string
+	for _, mode := range []string{"user", "site", "run"} {
+		if workspaceShared(access, "action-consumer", action, mode) {
+			modes = append(modes, mode)
+		}
+	}
+	return modes
+}
+
 func workspaceShared(access SiteAccess, kind, resource, operation string) bool {
 	authorization := siteAuthorization{access: access, identity: &Identity{Provider: "site"}, role: roleViewer, apiOnly: true}
 	return authorization.operationGrant(kind, resource, operation) == grantAll

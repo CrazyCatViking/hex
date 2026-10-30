@@ -361,11 +361,11 @@ func (s *Server) actionSummaries(ctx context.Context, site string) []actionSumma
 		if action.definition.Exported {
 			usage = "Cross-site API · people, AI assistants and automations"
 			who = "Restricted workspace API"
-			if workspaceShared(access, "action-consumer", action.definition.Name, "run") && workspaceShared(access, "action", action.definition.Name, "run") {
+			if len(workspaceConnectionModes(access, action.definition.Name)) > 0 {
 				who = "Everyone in this workspace"
 				accessNote = "No site-connection approval needed. Data permissions and record rules still apply."
 			} else {
-				accessNote = "Ask this site's owner for consumer and action access. Your source site may also need permission to call this API."
+				accessNote = "Ask this site's owner to connect your site to this action."
 			}
 		}
 		summaries = append(summaries, actionSummary{

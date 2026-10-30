@@ -57,6 +57,29 @@ Actions run as the existing user. Version 2 requires an explicit action/run gran
 
 When building an app whose data people or agents should change from the CLI, declare actions in the `actions` array of its hex.json; `hex publish` registers them and the platform performs them, so no server code is needed. Each action has a `name`, a `description` written for agents, an `operation` (`create` stores the input as a new document and returns its ID; `update` merges the input's fields into an existing document; `delete` removes one), a `collection`, an `input` JSON Schema with `"type": "object"` (prefer `additionalProperties: false`), an optional `idField` for update/delete (default `id`, which the schema must require) and an optional `audience` (`viewers`, `editors` (default), `owners` or principals). Callers also need write access to the collection. Declare one action per real task, such as `log-call` or `close-ticket`, rather than generic "edit anything" actions. Logic beyond one create, update or delete needs an action registered by the platform's Go backend in `hex.Config.Actions`; ask the platform developer for that.
 
+## Connecting apps
+
+Apps can call other apps' exported actions and subscribe to their durable events. Before building an integration between apps, discover what already exists rather than duplicating data:
+
+```sh
+hex actions catalog [--query stock]                       # exported actions/events in the workspace, with owners and schemas
+hex actions available --site inventory [--from my-app]    # what my-app may call on inventory now (default --from: hex.json name)
+hex actions available --site inventory --as-site          # what my-app's automations may call
+hex actions codegen --site inventory --from my-app --out src/inventory.ts   # typed, version-pinned wrappers
+```
+
+Catalog entries give `site`, `kind` (`action` or `event`), `name`, `version`, `description`, `sharing` (`workspace`: every app in the workspace may connect; `restricted`: the owners must connect yours), `owners` and the input/output schemas. Restricted entries appear only for people admitted to that site, and undiscoverable sites are omitted, so an absent entry is not proof that no API exists. An empty `available` list means the app is not connected yet. There is no request command: tell the user which `owners` to ask and what to ask for: in the target site's portal, **Overview → Actions & events → Details & access → Other apps**, add the calling app with **On behalf of a user** (browser calls) and/or **As the calling site** (automations). The calling app itself needs no grant. Never edit another site's access policy. In user mode the person also needs the target's own action and data permissions.
+
+```js
+const api = hex.sites.api('inventory', { version: 1 });
+const contracts = await api.list(); // only exports this app may call
+await api.call('reserve-stock', { productId: 'p123', quantity: 2 }, { idempotencyKey: reservationId });
+```
+
+Browser calls always act as the person; automations call `await hex.sites.call('inventory', 'reserve-stock', input, { version: 1, idempotencyKey })` as the site. Mutations require an idempotency key that is stable for the business operation; a reused key with different input returns 409. Handle 403 (not connected or not permitted) in the UI. Generated wrappers use `typedSiteAPI(hex.sites)`; regenerate after the target publishes a new version, and use `--check --out` in CI.
+
+To offer an action to other apps, add `"exported": true, "version": 1` to a declared action and republish. Declarative reads use `"operation": "get"` or `"list"` with an `output` schema and `select` (top-level data fields to return). An exported version's schemas and read/write kind are frozen: publish a new version or action name for breaking changes. The owner then chooses which apps may connect in the portal dialog above, or **All workspace apps**. Events are defined with `hex.events.define(name, { version, schema })`, published with `hex.events.publish`, and consumed by subscribing an automation with `hex.events.subscribe`; handlers run with the consumer automation's own permissions.
+
 ## Building an app
 
 Read `hex.json` for the site name, source directory, and selected workspace, platform profile or explicit connection settings. `hex capabilities` reads cached profile capabilities when available; `--refresh` requests them from the API. Discovery is not a prerequisite for direct-profile publishing; directory-backed connections resolve current workspace membership first. Read the existing app before editing it.

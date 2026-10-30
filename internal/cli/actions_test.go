@@ -164,3 +164,26 @@ func TestActionsCLIAgainstPlatform(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestActionsCatalogAndAvailableRequests(t *testing.T) {
+	directory := t.TempDir()
+	var paths []string
+	platform := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.RequestURI())
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`[]`))
+	}))
+	defer platform.Close()
+	saveReadProfile(t, directory, platform.URL)
+	run(t, directory, "actions", "catalog", "--query", "stock levels")
+	run(t, directory, "actions", "available", "--site", "inventory", "--from", "orders")
+	run(t, directory, "actions", "available", "--site", "inventory", "--from", "orders", "--as-site")
+	want := []string{"/api/hex/workspace-apis?q=stock+levels", "/api/sites/orders/site-api/actions/inventory", "/api/sites/orders/site-api/actions/inventory?mode=site"}
+	if strings.Join(paths, " ") != strings.Join(want, " ") {
+		t.Fatalf("paths = %q", paths)
+	}
+	app, _ := testApp(t, directory)
+	if err := app.Execute(context.Background(), []string{"actions", "available", "--site", "inventory"}, "test"); err == nil || !strings.Contains(err.Error(), "--from") {
+		t.Fatal("outside a project, available must ask for --from:", err)
+	}
+}

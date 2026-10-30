@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	hex "github.com/crazycatviking/hex/server"
@@ -30,8 +31,74 @@ func (a *App) actionsCommand() *cobra.Command {
 			return a.printJSON(data)
 		},
 	}
-	command.AddCommand(list, a.actionCommand(options, false), a.actionCommand(options, true), a.siteActionCodegenCommand(options))
+	var query string
+	catalog := &cobra.Command{
+		Use: "catalog", Short: "List exported actions and events shared in the workspace, with their owners", Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			project, err := a.commandConfig(options.platform, false)
+			if err != nil {
+				return err
+			}
+			data, err := a.apiRequest(cmd.Context(), project, "/api/hex/workspace-apis?q="+url.QueryEscape(query))
+			if err != nil {
+				return err
+			}
+			return a.printJSON(data)
+		},
+	}
+	catalog.Flags().StringVar(&query, "query", "", "Only entries whose site, name or description contain this text")
+	consumer := &consumerOptions{}
+	available := &cobra.Command{
+		Use: "available", Short: "List exported actions on --site that this app (or --from) can call now", Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			project, err := options.config(a)
+			if err != nil {
+				return err
+			}
+			path, err := consumer.path(project, options.site)
+			if err != nil {
+				return err
+			}
+			data, err := a.apiRequest(cmd.Context(), project, path)
+			if err != nil {
+				return err
+			}
+			return a.printJSON(data)
+		},
+	}
+	consumer.register(available)
+	command.AddCommand(list, catalog, available, a.actionCommand(options, false), a.actionCommand(options, true), a.siteActionCodegenCommand(options))
 	return command
+}
+
+// consumerOptions name the calling app whose connections to a target are
+// checked; the default is the current project.
+type consumerOptions struct {
+	from   string
+	asSite bool
+}
+
+func (o *consumerOptions) register(command *cobra.Command) {
+	command.Flags().StringVar(&o.from, "from", "", "Calling app (default: this project's site)")
+	command.Flags().BoolVar(&o.asSite, "as-site", false, "Check calls made as the app, as its automations make them")
+}
+
+func (o *consumerOptions) path(project Project, target string) (string, error) {
+	from := o.from
+	if from == "" {
+		from = project.Name
+	}
+	if from == "" {
+		return "", errors.New("provide --from or run inside a Hex project")
+	}
+	if err := validateSiteName(from); err != nil {
+		return "", err
+	}
+	path := "/api/sites/" + from + "/site-api/actions/" + target
+	if o.asSite {
+		path += "?mode=site"
+	}
+	return path, nil
 }
 
 func (a *App) actionCommand(options *siteCommandOptions, execute bool) *cobra.Command {

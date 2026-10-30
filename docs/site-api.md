@@ -74,12 +74,27 @@ const result = await api.call("reserve-stock", { productId: "p123", quantity: 2 
 
 The transport is `POST /api/sites/A/site-api/call` with
 `{target,action,version,input,idempotencyKey}`. Unknown request fields are rejected.
-Discovery is `GET /api/sites/A/site-api/actions/B`.
+Discovery is `GET /api/sites/A/site-api/actions/B`; it lists the exports A may
+call in user mode, or with `?mode=site` those A's automations may call. Actions
+B has not exported are omitted.
+
+## Discover APIs
+
+`GET /api/hex/workspace-apis` (CLI `hex actions catalog [--query text]`) lists
+exported actions and events across the workspace as JSON: `site`, `kind`, `name`,
+`version`, `description`, `sharing` (`workspace` or `restricted`),
+`workspaceModes`, `owners`, `owned`, `readOnly` and the input/output schemas. It
+applies the same visibility rules as the **Workspace APIs** page below.
+`hex actions available --site B [--from A] [--as-site]` shows what A can call on
+B now; `--from` defaults to the current project. Neither command requests
+access; contact the listed owners.
 
 ## Typed consumers
 
 `hex actions codegen --site inventory --out src/inventory.ts` generates input
 and output types plus version-pinned wrappers from visible exported contracts.
+Add `--from <consumer>` (and `--as-site` for automations) to generate only the
+contracts that consumer may call.
 Use `typedSiteAPI(hex.sites)` from the generated module. Mutation methods require
 an idempotency key at compile time. `--catalog actions.json` supports offline
 generation from saved `hex actions list` JSON; `--check --out ...` detects drift
@@ -136,7 +151,7 @@ The **Workspace APIs** navigation item lists exported actions and durable events
 their sharing status, usage and site owners. It includes workspace-public APIs
 even when the site's pages are private. Restricted APIs are listed only for
 people admitted to the site; sites marked undiscoverable are omitted. Owners can
-go directly from a catalog card to Sharing. Access guidance identifies which
+go directly from a catalog card to the site's **Actions & events**. Access guidance identifies which
 owner to contact; it does not submit an approval request automatically.
 
 The policy audience is `"subjects": {"workspace": true}`. It matches only

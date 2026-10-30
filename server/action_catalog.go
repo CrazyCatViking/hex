@@ -28,7 +28,7 @@ func (s *Server) appActionCatalog(ctx context.Context, site string, identity *Id
 	}
 	authorization := siteAuthorization{access: access, identity: identity, role: s.siteRole(identity, access, true)}
 	for _, action := range actions {
-		public := workspaceShared(access, "action-consumer", action.definition.Name, "run") || workspaceShared(access, "action-consumer", action.definition.Name, "user") || workspaceShared(access, "action-consumer", action.definition.Name, "site")
+		public := len(workspaceConnectionModes(access, action.definition.Name)) > 0
 		if !owner && authorization.role == roleNone && (!action.definition.Exported || !public) {
 			continue
 		}

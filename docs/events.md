@@ -97,10 +97,11 @@ uses bounded, cursor-paginated scans of pending records. Archive completed event
 records only after the application's replay and publication-key retention window.
 # Sharing events with the workspace
 
-Under **Sharing → Workspace APIs**, select **Everyone in this workspace · all
-sites** for an event to allow any site in the current workspace to subscribe.
-The setting applies to all registered versions of that event name. It creates an
-`event` / `subscribe` grant with `subjects: {"workspace": true}`. It does not
+In the site's **Overview → Actions & events**, choose the event's **Details &
+access** and set **Other apps → Available to** to **All workspace apps** to allow
+any site in the current workspace to subscribe, or add selected apps. The setting
+applies to all registered versions of that event name. It creates an `event` /
+`subscribe` grant for a permission group with a workspace audience. It does not
 grant event publishing or change the consumer automation's data permissions.
 
 Subscriptions still bind to persistent site identities and a registered event

@@ -308,10 +308,16 @@ func (s *Server) siteActionsHTTP(w http.ResponseWriter, r *http.Request) {
 		writeServerError(w, err)
 		return
 	}
+	// Automations call as the site, so their owners discover with mode=site.
+	asSite := r.URL.Query().Get("mode") == "site"
 	definitions := []ActionDefinition{}
 	for _, action := range actions {
-		_, _, err := s.prepareSiteCall(r.Context(), r.PathValue("site"), requestAuthorization(r), SiteCall{Target: target, Action: action.definition.Name, Version: action.definition.Version}, false)
-		if errors.Is(err, ErrForbidden) || errors.Is(err, ErrNotFound) {
+		if !action.definition.Exported {
+			continue
+		}
+		_, _, err := s.prepareSiteCall(r.Context(), r.PathValue("site"), requestAuthorization(r), SiteCall{Target: target, Action: action.definition.Name, Version: action.definition.Version}, asSite)
+		var unusable *ActionError
+		if errors.Is(err, ErrForbidden) || errors.Is(err, ErrNotFound) || errors.As(err, &unusable) {
 			continue
 		}
 		if err != nil {
