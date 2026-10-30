@@ -18,8 +18,10 @@ func TestSiteCallsAuthorizationIdempotencyAndIsolation(t *testing.T) {
 	database, policies, _ := durableTestStores(t)
 	registry := &hex.ActionRegistry{}
 	var calls atomic.Int32
+	var invocationID atomic.Value
 	err := registry.Register("target", hex.Action{Definition: hex.ActionDefinition{Name: "submit", Description: "Submit a request", Version: 1, Exported: true, InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false}`), OutputSchema: json.RawMessage(`{"type":"object"}`)}, Handler: func(ctx context.Context, caller hex.ActionContext, input json.RawMessage) (any, error) {
 		calls.Add(1)
+		invocationID.Store(caller.InvocationID)
 		if caller.SourceSite != "source" || caller.Identity.ID != "alice" {
 			t.Errorf("wrong caller: %+v", caller)
 		}
@@ -28,7 +30,8 @@ func TestSiteCallsAuthorizationIdempotencyAndIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	source := hex.SiteAccess{Version: 2, Admission: hex.Subjects{SignedIn: true}, Grants: map[string]hex.PermissionGrant{"out": {Kind: "site-action", Resource: "target.submit", Operations: []string{"run"}, Subjects: hex.Subjects{SignedIn: true}}}}
+	// The source declares no outgoing grant; the target's consent suffices.
+	source := hex.SiteAccess{Version: 2, Admission: hex.Subjects{SignedIn: true}}
 	if err := policies.PutSiteAccess(ctx, "source", source); err != nil {
 		t.Fatal(err)
 	}
@@ -54,6 +57,9 @@ func TestSiteCallsAuthorizationIdempotencyAndIsolation(t *testing.T) {
 	if calls.Load() != 1 {
 		t.Fatal("mutation repeated")
 	}
+	invocation := "/api/sites/source/site-api/invocations/" + invocationID.Load().(string)
+	requestAs(t, server, headers, "GET", invocation, nil, 200)
+	requestAs(t, server, principalHeaders("bob"), "GET", invocation, nil, 403)
 	requestAs(t, server, headers, "POST", "/api/sites/source/site-api/call", []byte(strings.Replace(string(body), `"one"`, `"two"`, 1)), 429)
 	requestAs(t, server, principalHeaders("bob"), "POST", "/api/sites/source/site-api/call", body, 403)
 	requestAs(t, server, headers, "POST", "/api/sites/source/site-api/call", []byte(strings.Replace(string(body), `"version":1`, `"version":2`, 1)), 403)

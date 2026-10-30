@@ -108,9 +108,8 @@ func (s *Server) prepareSiteCall(ctx context.Context, source string, sourceAuth 
 	if !exists {
 		return nil, ActionContext{}, ErrForbidden
 	}
-	if !workspaceShared(targetAccess, "action-consumer", request.Action, "run") && !sourceAuth.permits("site-action", request.Target+"."+request.Action, "run") {
-		return nil, ActionContext{}, ErrForbidden
-	}
+	// The source site's own code chooses its targets, so only the target's
+	// consent is checked. Legacy outgoing site-action grants have no effect.
 	connection := siteAuthorization{identity: principal, access: targetAccess, role: roleViewer, apiOnly: true}
 	mode := "user"
 	if asSite {
@@ -337,15 +336,6 @@ func (s *Server) siteInvocationHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	authorization := requestAuthorization(r)
 	if invocation.Source != r.PathValue("site") || authorization.identity == nil || (invocation.Actor != authorization.identity.ID && authorization.role != roleOwner) {
-		writeSiteCallError(w, ErrForbidden)
-		return
-	}
-	access, _, err := s.sitePolicy(r.Context(), invocation.Target)
-	if err != nil {
-		writeServerError(w, err)
-		return
-	}
-	if !workspaceShared(access, "action-consumer", invocation.Action, "run") && !authorization.permits("site-action", invocation.Target+"."+invocation.Action, "run") {
 		writeSiteCallError(w, ErrForbidden)
 		return
 	}

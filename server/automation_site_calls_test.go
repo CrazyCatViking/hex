@@ -31,10 +31,7 @@ func testAutomationSiteCalls(t *testing.T, public bool) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	source := hex.SiteAccess{Version: 2, Owners: []string{"user:owner"}, Admission: hex.Subjects{SignedIn: true, Owners: true}, Grants: map[string]hex.PermissionGrant{"out": {Kind: "site-action", Resource: "target.submit", Operations: []string{"run"}, Subjects: hex.Subjects{Principals: []string{"automation:action-contract"}}}}}
-	if public {
-		source.Grants = nil
-	}
+	source := hex.SiteAccess{Version: 2, Owners: []string{"user:owner"}, Admission: hex.Subjects{SignedIn: true, Owners: true}}
 	if err := policies.PutSiteAccess(ctx, "demo", source); err != nil {
 		t.Fatal(err)
 	}

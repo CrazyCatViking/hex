@@ -29,7 +29,7 @@ func TestActionConnectionModesPreservePublishedPermissions(t *testing.T) {
 	if err := policies.PutSiteAccess(t.Context(), "target", policy); err != nil {
 		t.Fatal(err)
 	}
-	source := hex.SiteAccess{Version: 2, Owners: []string{"user:owner"}, Admission: hex.Subjects{SignedIn: true}, Grants: map[string]hex.PermissionGrant{"out": {Kind: "site-action", Resource: "target.*", Operations: []string{"run"}, Subjects: hex.Subjects{SignedIn: true, Principals: []string{"automation:action-contract"}}}}}
+	source := hex.SiteAccess{Version: 2, Owners: []string{"user:owner"}, Admission: hex.Subjects{SignedIn: true}}
 	sourceBaseline := hex.CloneSiteAccess(source)
 	source.Published = &sourceBaseline
 	if err := policies.PutSiteAccess(t.Context(), "demo", source); err != nil {

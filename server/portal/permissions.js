@@ -84,7 +84,7 @@
     channel: "Realtime channel",
     action: "Business action",
     "action-consumer": "Incoming site connection",
-    "site-action": "Outgoing site action",
+    "site-action": "Outgoing site action (no longer used)",
     event: "Durable event",
     workflow: "Workflow",
     integration: "Integration endpoint",
@@ -802,7 +802,13 @@
   }
 
   function grantEditor(manager, policy, labels, id, grant = {}, groupID = "") {
-    const kind = select(Object.entries(kindLabels), grant.kind || "collection");
+    // Outgoing site-action grants have no effect; only show existing ones.
+    const kind = select(
+      Object.entries(kindLabels).filter(
+        ([id]) => id !== "site-action" || grant.kind === id,
+      ),
+      grant.kind || "collection",
+    );
     const resource = input(grant.resource || "");
     resource.required = true;
     const operationBox = element(

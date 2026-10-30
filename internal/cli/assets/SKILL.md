@@ -84,7 +84,7 @@ Use `access.version: 2`. Site admission, management owners and application grant
 
 For new policies, bundle application grants (including `action/run`) into named permission groups using `subjects.roles`. Use a named group with `signedIn: true` for default human permissions. This makes access assignable in the Sharing table. Admission remains independent. Preserve existing direct grants when updating a published site; do not automatically reorganize its policy. The portal can explicitly move those audiences into groups without changing their record restrictions.
 
-Exported actions support `action-consumer` operations `user` (connect as the person, retaining their action/data permissions) and `site` (execute a declared action as the source app with action-local data authority). Site-mode grants may restrict records and fields and do not grant direct database access. Automations use site mode; browser callers never fall back to it. Source `site-action/run` permission is still required for these modes. Keep existing `action-consumer/run` grants unchanged unless explicitly asked to migrate them.
+Exported actions support `action-consumer` operations `user` (connect as the person, retaining their action/data permissions) and `site` (execute a declared action as the source app with action-local data authority). Site-mode grants may restrict records and fields and do not grant direct database access. Automations use site mode; browser callers never fall back to it. The calling site needs no grant of its own; only the target's consent is checked, and `site-action` grants have no effect. Keep existing `action-consumer/run` grants unchanged unless explicitly asked to migrate them.
 
 ```json
 {

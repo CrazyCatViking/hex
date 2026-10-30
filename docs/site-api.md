@@ -19,12 +19,14 @@ An `action-consumer` grant can use operation `user` or `site`:
 
 Site mode requires a declared action; arbitrary platform handlers cannot receive
 automatically synthesized data authority. Automations use the source site identity,
-not the triggering human. Browser calls always use user mode. Outgoing `site-action`
-permission is still required for these explicit modes.
+not the triggering human. Browser calls always use user mode.
 
-Existing `action-consumer/run` grants retain their original behavior, including
-the existing workspace-public outgoing exception. They are not automatically
-replaced. New mode grants are additive; revoke legacy grants explicitly if they
+The calling site needs no grant of its own. Its code already chooses which
+targets it calls, so only the target's consent is checked. `site-action` grants
+from earlier versions are still accepted in policies but have no effect.
+
+Existing `action-consumer/run` grants retain their original behavior. They are
+not automatically replaced. New mode grants are additive; revoke legacy grants explicitly if they
 would otherwise continue allowing a connection.
 
 ## Export an action
@@ -50,18 +52,17 @@ are limited to 1 MiB.
    `hex.sites.identity()`). The returned `id` is an opaque `site:<id>` principal.
    It is persistent and survives unpublishing, like the site's ownership policy.
    Namespace reassignment must rotate that identity and remove old grants.
-2. In A's v2 access policy grant `kind: "site-action"`,
-   `resource: "B.action-name"`, `operations: ["run"]` to the users or automations
-   allowed to use the connection. This is A's explicit dependency declaration.
-3. In B grant `kind: "action-consumer"`, `resource: "action-name"`,
-   `operations: ["run"]`, `subjects: {"principals":["site:<A-id>"]}`.
-4. In B grant the effective actor `action/run` and the collection permissions
+2. In B grant `kind: "action-consumer"`, `resource: "action-name"`,
+   `operations: ["user"]` and/or `["site"]`,
+   `subjects: {"principals":["site:<A-id>"]}`. In the portal, open B's
+   **Overview → Actions & events**, choose the action's **Details & access** and
+   add A under **Other apps**.
+3. In B grant the effective actor `action/run` and the collection permissions
    required by the action. Interactive calls use the user, never A's identity.
    API admission does not grant permission to visit B's pages or manage B.
 
-Both policies are checked on every invocation, including cached results.
-Use normal access-policy publishing/reconciliation; declaring an outbound grant
-does not grant inbound permission. `site:*` actors do not match `signedIn`.
+B's policy is checked on every invocation, including cached results. Use normal
+access-policy publishing/reconciliation. `site:*` actors do not match `signedIn`.
 
 ```ts
 const api = hex.sites.api("inventory", { version: 1 });
@@ -87,8 +88,8 @@ in CI. Exclude generated files from formatters.
 ## Automations
 
 Scripts call `await hex.sites.call("inventory", "reserve-stock", input,
-{version: 1, idempotencyKey: businessOperationId})`. The source `site-action`
-grant must select `automation:<name>`. The target's `action-consumer`, `action`
+{version: 1, idempotencyKey: businessOperationId})`. Any automation of the
+source site may make the call. The target's `action-consumer`, `action`
 and required collection grants select the source's opaque `site:<id>` identity.
 Automations never inherit the deploying or triggering user's target privileges.
 Dry runs authorize and validate calls but skip mutations; read-only calls execute.
@@ -107,8 +108,8 @@ safe to retry. Go handlers receive `InvocationID` for their own deduplication.
 
 Invocation records contain actor, source, target, version, timestamps and status.
 Inspect a known ID through `GET /api/sites/A/site-api/invocations/<id>` or
-`hex.sites.invocation(id)`. The actor or source owner must still have outbound
-permission. Server logs include invocation IDs. No cross-site transaction is
+`hex.sites.invocation(id)`. Only the actor and the source site's owners can read
+a record. Server logs include invocation IDs. No cross-site transaction is
 promised.
 
 Internal records use the inaccessible `.hex-system` database namespace and
@@ -124,12 +125,12 @@ can configure `Config.SiteOperationsPerMinute`. HTTP throttling returns 429 and
 for the durable invocation envelope.
 # Workspace-public APIs
 
-In the portal, open **Your sites → your site → Sharing → Workspace APIs**.
-Each exported action can be **Restricted** or shared with **Everyone in this
-workspace · all sites**. Save changes to apply the selection. This grants both
-the incoming site connection and action execution to brokered callers, including
-site automations. Consumers do not need an outgoing `site-action` grant for a
-workspace-public connection. Restricted connections retain the explicit grants.
+In the portal, open **Your sites → your site → Overview → Actions & events**,
+choose an exported action's **Details & access** and set **Other apps → Available
+to** to **All workspace apps**. Save access to apply the selection. This grants
+the incoming site connection to every site in the workspace, including site
+automations. Choosing selected apps or no other apps keeps access to explicit
+grants.
 
 The **Workspace APIs** navigation item lists exported actions and durable events,
 their sharing status, usage and site owners. It includes workspace-public APIs

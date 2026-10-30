@@ -125,10 +125,10 @@ Cross-site action calls use the source site's persistent `site:<opaque-id>`
 identity. In the target app's Actions dialog, grant **As the calling site** to
 authorize a declared operation, optionally restricted to a project or other
 record condition. This can include human-created records without granting
-general database access. In the source app's Sharing table, assign the automation
-a group with `site-action/run` for `target.action` (or `target.*`). User-mode
-connections do not authorize automation calls. Existing legacy connection grants
-retain their previous behavior; see [site APIs](site-api.md).
+general database access. The source app needs no grant of its own; any of its
+automations may make the call. User-mode connections do not authorize automation
+calls. Existing legacy connection grants retain their previous behavior; see
+[site APIs](site-api.md).
 
 Every run executes in a fresh QuickJS WebAssembly instance. There is no host
 filesystem, server environment, credential access, unrestricted networking,

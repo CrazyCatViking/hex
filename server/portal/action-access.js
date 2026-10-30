@@ -385,7 +385,7 @@
           "p",
           data.event
             ? "Subscription access applies to all versions of this event. Subscribers pin a version and choose a receiving automation; publication permissions are separate."
-            : "User mode uses the person’s permission groups. Site mode uses this app grant. The calling app must also allow the outgoing action.",
+            : "User mode uses the person’s permission groups. Site mode uses this app grant. The calling app needs no grant of its own.",
           "field-hint",
         ),
       );
