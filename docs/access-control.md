@@ -10,6 +10,27 @@ Version 2 policies deny application access unless a grant permits it. Owners and
 
 Admission accepts `signedIn`, `owners`, and explicit people/directory principals. It never references application permission groups: assigning, making a group default, or deleting a group does not change site entry. Page grants still govern separately protected paths.
 
+## Managing access through permission groups
+
+Use named permission groups for new application grants, including `action/run`.
+The Sharing table assigns those groups to people, directory groups, automations
+and app identities. A group with `signedIn: true` is a visible default for
+admitted humans; it does not automatically include automation or app identities.
+Groups may also carry `owners: true` (the current owners, including future owner
+changes) or `workspace: true` (authenticated brokered API callers only).
+
+Existing direct grants remain valid. The portal lists them under **Existing
+permissions to organize** and can explicitly move an audience's grants into a
+group. This preserves grant IDs, record limits and publication baselines rather
+than rewriting policies when a site is opened or a runtime is upgraded. Broad
+grants remain additive: an own-record rule does not deny a separate all-record grant.
+
+An app's **Actions** cards link to its details and external connection settings.
+User mode retains the person's action and data permissions. Site mode gives the
+source app an action-local grant, optionally restricted by records and fields.
+These grants appear in the same permission table as app permission groups.
+See [site API execution modes](site-api.md#explicit-execution-modes).
+
 ## Identity and principals
 
 The gateway authenticates the caller. The configured resolver supplies a stable ID, optional display name/email, groups and identity-provider roles. Read it with `hex whoami` or `hex.identity()`. Never match access against email or display-name claims.
@@ -20,6 +41,7 @@ The gateway authenticates the caller. The configured resolver supplies a stable 
 | `group:<id>` | Identity-provider group claim |
 | `role:<value>` | Identity-provider role claim, not an application role |
 | `automation:<name>` | That site's named automation; only matches the automation provider |
+| `site:<opaque-id>` | Persistent brokered app identity; resolved by Hex, not a site-name claim |
 
 Principal values are opaque printable ASCII strings, up to 256 characters. Only the first reserved prefix identifies the claim kind. Easy Auth canonicalizes Entra user/group GUIDs to lowercase; opaque subjects and role values retain their spelling. Application roles are site-defined names, assigned independently of identity-provider roles.
 

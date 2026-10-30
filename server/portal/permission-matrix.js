@@ -288,13 +288,7 @@
       const target = query("[data-admission-entries]");
       target.replaceChildren();
       if (policy.admission.owners && !policy.admission.signedIn)
-        target.append(
-          element(
-            "span",
-            "Site owners & platform administrators",
-            "permission-chip muted",
-          ),
-        );
+        target.append(element("span", "Site owners", "permission-chip muted"));
       for (const principal of policy.admission.principals || []) {
         const chip = element("span", undefined, "permission-chip");
         const remove = button(
@@ -375,13 +369,34 @@
       const control = input("true", "checkbox");
       const defaults = kind === "default",
         owners = kind === "owners";
+      if (kind === "workspace") {
+        control.checked = Boolean(role.workspace);
+        control.setAttribute(
+          "aria-label",
+          `${groupName(id)} for Workspace API callers`,
+        );
+        control.addEventListener("change", () =>
+          stage("role", {
+            id,
+            entry: JSON.stringify({ ...role, workspace: control.checked }),
+          }),
+        );
+        content.append(control);
+        cell.append(content);
+        return cell;
+      }
       const current = defaults
         ? []
         : owners
           ? (policy.owners || []).flatMap((owner) => bindings(owner, id))
           : bindings(principal, id);
       const defaultFor = (value) =>
-        Boolean(role.signedIn && !value.startsWith("automation:"));
+        Boolean(
+          (role.signedIn &&
+            !value.startsWith("automation:") &&
+            !value.startsWith("site:")) ||
+          (role.owners && policy.owners?.includes(value)),
+        );
       const inherited =
         !defaults &&
         (owners
@@ -452,7 +467,13 @@
       });
       content.append(control);
       if (inherited)
-        content.append(element("small", "Default", "permission-inherited"));
+        content.append(
+          element(
+            "small",
+            role.owners && !role.signedIn ? "Owners" : "Default",
+            "permission-inherited",
+          ),
+        );
       else if (!defaults && (current.length || control.indeterminate)) {
         const scopes = current.map((binding) => binding.scope).filter(Boolean);
         if (owners)
@@ -578,6 +599,9 @@
       const rows = [
         ["default", ""],
         ["owners", ""],
+        ...(groups.some((id) => policy.roles[id].workspace)
+          ? [["workspace", ""]]
+          : []),
         ...[...new Set([...principals, ...(ownerRowsNeeded ? owners : [])])]
           .filter(
             (principal) =>
@@ -607,9 +631,11 @@
                 ? "DIRECTORY GROUP"
                 : principal.startsWith("automation:")
                   ? "AUTOMATION"
-                  : principal.startsWith("role:")
-                    ? "DIRECTORY ROLE"
-                    : "PERSON",
+                  : principal.startsWith("site:")
+                    ? "APP"
+                    : principal.startsWith("role:")
+                      ? "DIRECTORY ROLE"
+                      : "PERSON",
               "permission-row-kind",
             ),
           );
@@ -620,7 +646,9 @@
               ? "Everyone with site access"
               : kind === "owners"
                 ? "Site owners"
-                : nameOf(principal),
+                : kind === "workspace"
+                  ? "Workspace API callers"
+                  : nameOf(principal),
           ),
         );
         heading.append(
@@ -630,7 +658,9 @@
               ? "Default permissions · no directory listing"
               : kind === "owners"
                 ? owners.map(nameOf).join(", ") || "No listed owners"
-                : labels.get(principal)?.detail || principal,
+                : kind === "workspace"
+                  ? "Brokered calls only · no page admission"
+                  : labels.get(principal)?.detail || principal,
             "field-hint",
           ),
         );
@@ -642,11 +672,7 @@
             heading.append(
               button(
                 "Also has existing access ↗",
-                () =>
-                  openAccessRules(
-                    "Site owners & platform administrators",
-                    ownerRules,
-                  ),
+                () => openAccessRules("Site owners", ownerRules),
                 "link-button",
               ),
             );
@@ -679,11 +705,14 @@
               ),
             );
         }
-        if (kind === "custom" && principal.startsWith("automation:")) {
+        if (
+          kind === "custom" &&
+          (principal.startsWith("automation:") || principal.startsWith("site:"))
+        ) {
           heading.append(
             element(
               "small",
-              "Automation · signed-in defaults do not apply",
+              "Execution identity · signed-in defaults do not apply",
               "field-hint",
             ),
           );
@@ -874,6 +903,59 @@
           button(
             "Review access",
             () => openAccessRules(name, rules),
+            "button button-secondary",
+          ),
+          button(
+            "Move into a permission group",
+            () => {
+              const id = `portal-${crypto.randomUUID()}`;
+              const baseName = subjects.signedIn
+                ? "Default permissions"
+                : subjects.workspace
+                  ? "Workspace app permissions"
+                  : subjects.owners
+                    ? "Site owner permissions"
+                    : subjects.principals.length === 1
+                      ? `${name.slice(0, 100)} permissions`
+                      : "Selected people permissions";
+              let groupLabel = baseName;
+              let suffix = 2;
+              while (
+                Object.keys(policy.roles || {}).some(
+                  (group) =>
+                    groupName(group).toLowerCase() === groupLabel.toLowerCase(),
+                )
+              ) {
+                groupLabel = `${baseName} ${suffix++}`;
+              }
+              const group = {
+                name: groupLabel,
+                signedIn: subjects.signedIn,
+                owners: subjects.owners,
+                workspace: subjects.workspace,
+              };
+              stage("role", {
+                id,
+                creating: "true",
+                entry: JSON.stringify(group),
+              });
+              for (const principal of subjects.principals)
+                stage("membership", { principal, group: id, assigned: "true" });
+              for (const [ruleID, rule] of rules)
+                stage("grant", {
+                  id: ruleID,
+                  keep_where: "true",
+                  keep_check: "true",
+                  entry: JSON.stringify({
+                    ...rule,
+                    subjects: { roles: [...(rule.subjects.roles || []), id] },
+                  }),
+                });
+              render();
+              announce(
+                "Existing access is represented by a permission group in the draft. Save changes to apply.",
+              );
+            },
             "button button-secondary",
           ),
         );
@@ -1135,6 +1217,7 @@
           ? "Assign this permission group to all listed site owners"
           : "Assign this new group to all listed site owners",
         !id ||
+          original.owners ||
           (policy.owners?.length > 0 &&
             policy.owners.every((owner) => bindings(owner, id).length > 0)),
       );
@@ -1293,6 +1376,9 @@
             ...original,
             name: name.value.trim(),
             description: description.value.trim(),
+            ...(original.owners && ownersEdited
+              ? { owners: owners.control.checked }
+              : {}),
           }),
           ...(id
             ? {}

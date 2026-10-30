@@ -95,7 +95,7 @@
     file: ["read", "upload", "delete"],
     channel: ["read", "send"],
     action: ["run"],
-    "action-consumer": ["run"],
+    "action-consumer": ["user", "site", "run"],
     "site-action": ["run"],
     event: ["publish", "subscribe"],
     workflow: ["run"],
@@ -109,6 +109,8 @@
     upload: "Upload / replace",
     send: "Send messages",
     run: "Run action",
+    user: "Connect on behalf of a user",
+    site: "Execute as the calling site",
     write: "Change external data",
   };
 
@@ -459,7 +461,7 @@
       [
         ...(subjects.workspace ? ["All workspace API callers"] : []),
         ...(subjects.signedIn ? ["Everyone signed in"] : []),
-        ...(subjects.owners ? ["Site owners & platform administrators"] : []),
+        ...(subjects.owners ? ["Site owners"] : []),
         ...(subjects.roles || []).map(
           (id) => `Group: ${roles[id]?.name || title(id)}`,
         ),
@@ -921,7 +923,9 @@
     conditionDetails.open = Boolean(grant.where || grant.check);
     limits.append(fieldDetails, conditionDetails, scopeDetails);
     const updateKind = () => {
-      const record = ["collection", "action"].includes(kind.value);
+      const record = ["collection", "action", "action-consumer"].includes(
+        kind.value,
+      );
       limits.hidden = !record;
       resource.placeholder = {
         path: "/reports/ or *",
@@ -990,7 +994,9 @@
           !subjects.principals.length
         )
           throw new Error("Choose who receives this permission.");
-        const record = ["collection", "action"].includes(kind.value);
+        const record = ["collection", "action", "action-consumer"].includes(
+          kind.value,
+        );
         if (
           !record &&
           (grant.scope ||

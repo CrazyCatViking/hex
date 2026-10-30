@@ -223,7 +223,7 @@ func validatePermissionGrant(grant PermissionGrant, roles map[string]Application
 		return err
 	}
 	if grant.Kind != "collection" && grant.Kind != "action" && !(grant.Kind == "action-consumer" && slices.Equal(grant.Operations, []string{"site"})) && (grant.Where != nil || grant.Check != nil || grant.Scope != nil || grant.Fields != nil) {
-		return errors.New("record conditions, scopes and writable fields are only available for collections and actions")
+		return errors.New("record conditions, scopes and writable fields require a collection, action, or site-only action-consumer grant")
 	}
 	if grant.Scope != nil {
 		if !validCollectionName(grant.Scope.Kind) || !validConditionField(grant.Scope.Field) || len(grant.Subjects.Roles) == 0 || grant.Subjects.Workspace || grant.Subjects.SignedIn || grant.Subjects.Owners || len(grant.Subjects.Principals) > 0 {

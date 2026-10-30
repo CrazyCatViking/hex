@@ -2,6 +2,7 @@ package hex
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -186,6 +187,21 @@ func (s *Server) describePrincipals(ctx context.Context, principals []string) []
 			label.Name = principal
 		}
 		switch kind {
+		case "site":
+			if database, ok := s.config.Database.(GuardedDatabase); ok {
+				value, _ := json.Marshal(principal)
+				documents, err := database.ListMatching(ctx, systemSite, "identities", ListOptions{Limit: 1}, &RecordCondition{Field: "data.id", Op: "eq", Value: value})
+				if err != nil {
+					slog.Error("look up app identity", "error", err)
+				} else if len(documents) > 0 {
+					var identity Identity
+					if err := json.Unmarshal(documents[0].Data, &identity); err != nil {
+						slog.Error("decode app identity", "error", err)
+					} else {
+						label.Name, label.Detail = identity.Name, "App execution identity"
+					}
+				}
+			}
 		case "user":
 			if person, ok := people[value]; ok {
 				label.Name = person.Name
