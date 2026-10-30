@@ -81,6 +81,7 @@ type siteCard struct {
 	Pinned        bool           `json:"-"`
 	Recent        int            `json:"-"`
 	Analytics     bool           `json:"-"`
+	Actions       bool           `json:"-"`
 }
 
 type siteStatistics struct {

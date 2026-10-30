@@ -25,6 +25,8 @@ type ApplicationRole struct {
 	Name        string `json:"name,omitempty"`
 	Description string `json:"description,omitempty"`
 	SignedIn    bool   `json:"signedIn,omitempty"`
+	Owners      bool   `json:"owners,omitempty"`
+	Workspace   bool   `json:"workspace,omitempty"`
 }
 
 type RoleScope struct {
@@ -191,7 +193,7 @@ func validatePermissionGrant(grant PermissionGrant, roles map[string]Application
 		"file":       {"read", "upload", "delete"}, "channel": {"read", "send"},
 		"path": {"read"}, "action": {"run"},
 		"integration": {"read", "write"},
-		"site-action": {"run"}, "action-consumer": {"run"}, "event": {"publish", "subscribe"},
+		"site-action": {"run"}, "action-consumer": {"run", "user", "site"}, "event": {"publish", "subscribe"},
 		"workflow": {"run"},
 	}
 	allowed, ok := operations[grant.Kind]
@@ -220,8 +222,8 @@ func validatePermissionGrant(grant PermissionGrant, roles map[string]Application
 	if err := validateSubjects(grant.Subjects, roles, principalLimit); err != nil {
 		return err
 	}
-	if grant.Kind != "collection" && grant.Kind != "action" && (grant.Where != nil || grant.Check != nil || grant.Scope != nil || grant.Fields != nil) {
-		return errors.New("record conditions, scopes and writable fields are only available for collections and actions")
+	if grant.Kind != "collection" && grant.Kind != "action" && !(grant.Kind == "action-consumer" && slices.Equal(grant.Operations, []string{"site"})) && (grant.Where != nil || grant.Check != nil || grant.Scope != nil || grant.Fields != nil) {
+		return errors.New("record conditions, scopes and writable fields require a collection, action, or site-only action-consumer grant")
 	}
 	if grant.Scope != nil {
 		if !validCollectionName(grant.Scope.Kind) || !validConditionField(grant.Scope.Field) || len(grant.Subjects.Roles) == 0 || grant.Subjects.Workspace || grant.Subjects.SignedIn || grant.Subjects.Owners || len(grant.Subjects.Principals) > 0 {

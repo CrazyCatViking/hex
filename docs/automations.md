@@ -99,7 +99,8 @@ variables and functions hold all workflow state.
 | API | Behavior |
 | --- | --- |
 | `await hex.call("integration.endpoint", input)` | Calls an endpoint with the site's grants and approvals, validating its input and output contracts |
-| `await hex.action("name", input)` | Runs a site action as the automation's owner identity |
+| `await hex.action("name", input)` | Runs a local action as `automation:<name>`, with its application permission grants |
+| `await hex.sites.call("target", "action", input, { version, idempotencyKey? })` | Calls an exported action as the source site's persistent identity; mutations need an idempotency key |
 | `await hex.ai.complete({ model, prompt, system?, maxTokens?, thinking?, tools? })` | Uses the shared AI provider, permissions, model restrictions and budgets; returns `{ text, stopReason, usage }` |
 | `await hex.db.query("collection", { where?, limit? })` | Reads this site's documents. Top-level fields must equal every `where` value, including its JSON type. Default limit 100; maximum 1000 |
 | `await hex.db.save("collection", data, { id? })` | Creates a document, or replaces the document with `id`, attributed to the automation |
@@ -116,8 +117,18 @@ error fails the run; completed effects are not rolled back. Strings such as
 Automations act as their **site**, never as their deployer or the person who
 triggers a run. Integration grants match `site:<name>` or `*`; required site
 approvals are checked on every call. Personal connected accounts are unavailable.
-Within the site, the automation acts as an owner, and documents record its
-identity as `automation:<name>`.
+Within a site with a v2 policy, the automation uses explicit application grants
+for `automation:<name>` (normally through a permission group). It is not an
+implicit owner. Local documents record that automation identity as their creator.
+
+Cross-site action calls use the source site's persistent `site:<opaque-id>`
+identity. In the target app's Actions dialog, grant **As the calling site** to
+authorize a declared operation, optionally restricted to a project or other
+record condition. This can include human-created records without granting
+general database access. In the source app's Sharing table, assign the automation
+a group with `site-action/run` for `target.action` (or `target.*`). User-mode
+connections do not authorize automation calls. Existing legacy connection grants
+retain their previous behavior; see [site APIs](site-api.md).
 
 Every run executes in a fresh QuickJS WebAssembly instance. There is no host
 filesystem, server environment, credential access, unrestricted networking,

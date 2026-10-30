@@ -143,14 +143,19 @@
       d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9z"
     />
   </svg></button
->{{end}} {{end}} {{define "card-actions"}} {{if .Owned}}
+>{{end}} {{end}} {{define "card-actions"}} {{if or .Owned .Actions}}
 <div class="site-card-actions">
-  <a class="link-button" href="/manage/{{.Name}}">Manage</a>{{if .Analytics}}<a
+  {{if .Actions}}<a class="link-button" href="/apps/{{.Name}}/actions"
+    >Actions</a
+  >{{end}} {{if .Owned}}<a class="link-button" href="/manage/{{.Name}}"
+    >Manage</a
+  >{{if .Analytics}}<a
     class="link-button"
     href="/manage/{{.Name}}?tab=analytics"
     >Analytics</a
   >{{end}}<button class="link-button" type="button" data-copy="{{.URL}}">
     Copy link
   </button>
+  {{end}}
 </div>
 {{end}} {{end}}

@@ -112,7 +112,12 @@ func (s *Server) prepareSiteCall(ctx context.Context, source string, sourceAuth 
 		return nil, ActionContext{}, ErrForbidden
 	}
 	connection := siteAuthorization{identity: principal, access: targetAccess, role: roleViewer, apiOnly: true}
-	if !connection.permits("action-consumer", request.Action, "run") {
+	mode := "user"
+	if asSite {
+		mode = "site"
+	}
+	explicitMode := connection.permits("action-consumer", request.Action, mode)
+	if !explicitMode && !connection.permits("action-consumer", request.Action, "run") {
 		return nil, ActionContext{}, ErrForbidden
 	}
 	actor := sourceAuth.identity
@@ -136,10 +141,44 @@ func (s *Server) prepareSiteCall(ctx context.Context, source string, sourceAuth 
 		return nil, ActionContext{}, ErrNotFound
 	}
 	action := actions[index]
+	if asSite && explicitMode {
+		var err error
+		authorization, err = siteActionAuthorization(connection, action)
+		if err != nil {
+			return nil, ActionContext{}, err
+		}
+	}
 	if !action.definition.Exported || action.definition.Version != request.Version || !actionAllowed(action, authorization) {
 		return nil, ActionContext{}, ErrForbidden
 	}
 	return action, ActionContext{Site: request.Target, SourceSite: source, Identity: actor, Role: roleNames[authorization.role], authorization: authorization}, nil
+}
+
+// A site-mode grant is authority for one declared operation, never a general
+// database grant. Build a request-local policy so direct APIs and unrelated
+// actions cannot inherit this authority. User-mode calls never take this path.
+func siteActionAuthorization(connection siteAuthorization, action *registeredAction) (siteAuthorization, error) {
+	if action.declared == nil {
+		return siteAuthorization{}, &ActionError{Message: "site-mode access requires a declared action with enforceable data effects"}
+	}
+	authorization := connection
+	authorization.access = CloneSiteAccess(connection.access)
+	authorization.access.Grants = map[string]PermissionGrant{}
+	operation := action.declared.Operation
+	if operation == "get" || operation == "list" {
+		operation = "read"
+	}
+	for i, grant := range connection.matchingGrants("action-consumer", action.definition.Name, "site") {
+		if _, matches := connection.grantCondition(grant); !matches {
+			continue
+		}
+		grant.Except = nil
+		grant.Kind, grant.Resource, grant.Operations = "action", action.definition.Name, []string{"run"}
+		authorization.access.Grants[fmt.Sprintf("action-%d", i)] = grant
+		grant.Kind, grant.Resource, grant.Operations = "collection", action.declared.Collection, []string{operation}
+		authorization.access.Grants[fmt.Sprintf("data-%d", i)] = grant
+	}
+	return authorization, nil
 }
 
 func (s *Server) invokeSiteAction(ctx context.Context, source string, authorization siteAuthorization, request SiteCall, asSite, dryRun bool) (json.RawMessage, error) {

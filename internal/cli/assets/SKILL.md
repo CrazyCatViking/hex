@@ -82,6 +82,10 @@ Use same-origin requests in deployed apps; no API keys or identity code is neede
 
 Use `access.version: 2`. Site admission, management owners and application grants are independent; no grant means no data access, even for owners. Existing deployed policies migrate automatically, including their previous local publication baselines. Legacy permission sections are rejected before publication changes anything. Read `hex access show <site>` to obtain a migrated policy; changing only the version number is not enough. Republishing merges local changes with portal edits, so never use `--replace-access` unless the user asks to discard those. Frontend checks are never enforcement.
 
+For new policies, bundle application grants (including `action/run`) into named permission groups using `subjects.roles`. Use a named group with `signedIn: true` for default human permissions. This makes access assignable in the Sharing table. Admission remains independent. Preserve existing direct grants when updating a published site; do not automatically reorganize its policy. The portal can explicitly move those audiences into groups without changing their record restrictions.
+
+Exported actions support `action-consumer` operations `user` (connect as the person, retaining their action/data permissions) and `site` (execute a declared action as the source app with action-local data authority). Site-mode grants may restrict records and fields and do not grant direct database access. Automations use site mode; browser callers never fall back to it. Source `site-action/run` permission is still required for these modes. Keep existing `action-consumer/run` grants unchanged unless explicitly asked to migrate them.
+
 ```json
 {
   "name": "team-dashboard",

@@ -158,6 +158,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/hex/integrations.js", s.portalAsset)
 	s.mux.HandleFunc("GET /api/hex/manage.js", s.portalAsset)
 	s.mux.HandleFunc("GET /api/hex/permissions.js", s.portalAsset)
+	s.mux.HandleFunc("GET /api/hex/action-access.js", s.portalAsset)
 	s.mux.HandleFunc("GET /api/hex/permission-matrix.js", s.portalAsset)
 	s.mux.HandleFunc("GET /api/hex/permissions.css", s.portalAsset)
 	s.mux.HandleFunc("GET /api/hex/capabilities", s.capabilities)

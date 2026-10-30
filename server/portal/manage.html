@@ -7,6 +7,8 @@
     <script src="/api/hex/permissions.js" defer></script>
     <script src="/api/hex/permission-matrix.js" defer></script>
     <link rel="stylesheet" href="/api/hex/permissions.css" />
+    <link rel="stylesheet" href="/api/hex/integrations.css" />
+    <script src="/api/hex/action-access.js" defer></script>
   </head>
   <body hx-headers='{"X-Hex-Request":"1"}'>
     {{template "header" .Chrome}}
@@ -173,6 +175,8 @@
 <html lang="en">
   <head>
     {{template "head" (printf "%s · %s" .Platform .Site.Title)}}
+    <link rel="stylesheet" href="/api/hex/integrations.css" />
+    <script src="/api/hex/action-access.js" defer></script>
     <script src="/api/hex/manage.js" defer></script>
     <script src="/api/hex/permissions.js" defer></script>
     <script src="/api/hex/permission-matrix.js" defer></script>
@@ -295,34 +299,8 @@
           </ul>
         </section>
       </div>
-      {{if .Actions}}
-      <section class="panel" aria-labelledby="actions-heading">
-        <h2 id="actions-heading">Actions</h2>
-        <p class="muted">
-          Reusable tasks this site provides. See how they can be used and
-          whether extra access is needed.
-          <a href="?tab=sharing#workspace-apis">Manage API sharing</a>
-        </p>
-        <ul class="action-list">
-          {{range .Actions}}
-          <li>
-            <div class="action-main">
-              <code>{{.Name}}</code>
-              <span>{{.Description}}</span>
-              <p class="field-hint">
-                {{.Usage}}{{if .Version}} · Version {{.Version}}{{end}}
-              </p>
-              <p class="field-hint">{{.Access}}</p>
-            </div>
-            <ul class="tag-list">
-              <li class="tag">{{.Effect}}</li>
-              <li class="tag">{{.Who}}</li>
-            </ul>
-          </li>
-          {{end}}
-        </ul>
-      </section>
-      {{end}} {{end}} {{if eq .Tab "sharing"}}
+      {{template "app-action-catalog" .ActionCatalog}} {{end}} {{if eq .Tab
+      "sharing"}}
       <section class="permission-workspace" aria-label="Sharing">
         {{template "sharing" .Sharing}}
       </section>

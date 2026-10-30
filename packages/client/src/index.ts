@@ -77,7 +77,13 @@ export interface PermissionPolicy {
   admission?: Omit<PermissionSubjects, "roles">;
   roles?: Record<
     string,
-    { name?: string; description?: string; signedIn?: boolean }
+    {
+      name?: string;
+      description?: string;
+      signedIn?: boolean;
+      owners?: boolean;
+      workspace?: boolean;
+    }
   >;
   bindings?: Record<
     string,

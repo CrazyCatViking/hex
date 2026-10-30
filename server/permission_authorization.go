@@ -39,7 +39,7 @@ func (a siteAuthorization) subjectsMatch(subjects Subjects) bool {
 		return true
 	}
 	for _, name := range subjects.Roles {
-		if a.access.Roles[name].SignedIn && a.role != roleNone && human {
+		if a.roleAudienceMatches(a.access.Roles[name]) {
 			return true
 		}
 	}
@@ -51,10 +51,14 @@ func (a siteAuthorization) subjectsMatch(subjects Subjects) bool {
 	return false
 }
 
+func (a siteAuthorization) roleAudienceMatches(role ApplicationRole) bool {
+	return a.subjectsMatch(Subjects{SignedIn: role.SignedIn, Owners: role.Owners, Workspace: role.Workspace})
+}
+
 func (a siteAuthorization) applicationRoles() []string {
 	var roles []string
 	for name, role := range a.access.Roles {
-		if role.SignedIn && a.role != roleNone && (a.identity == nil || (a.identity.Provider != "automation" && a.identity.Provider != "site")) {
+		if a.roleAudienceMatches(role) {
 			roles = appendUnique(roles, name)
 		}
 	}
@@ -76,7 +80,7 @@ func permissionSelectorMatches(kind, selector, resource string) bool {
 		return strings.HasPrefix(resource, selector) || resource+"/" == selector
 	case "file":
 		return keyHasPrefix(resource, selector)
-	case "integration":
+	case "integration", "site-action":
 		return resource == selector || strings.HasSuffix(selector, ".*") && strings.HasPrefix(resource, strings.TrimSuffix(selector, "*"))
 	default:
 		return selector == resource
@@ -112,7 +116,7 @@ func (a siteAuthorization) grantCondition(grant PermissionGrant) (*RecordConditi
 		return condition, a.subjectsMatch(grant.Subjects)
 	}
 	for _, role := range grant.Subjects.Roles {
-		if a.access.Roles[role].SignedIn && a.identity != nil && a.identity.Provider != "automation" {
+		if a.roleAudienceMatches(a.access.Roles[role]) {
 			return condition, true
 		}
 	}

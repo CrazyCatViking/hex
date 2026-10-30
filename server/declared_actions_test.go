@@ -204,7 +204,7 @@ func TestPortalShowsDeclaredActions(t *testing.T) {
 	owner := signedIn(t, "owner-id", "Olivia Owner", "olivia@example.test")
 	publishWithActions(t, server, owner, "calls", taskActions)
 	page := requestAs(t, server, owner, "GET", "/manage/calls", nil, 200).Body.String()
-	for _, text := range []string{"log-call", "Log a customer call.", "Adds a record to calls", "Changes a record in calls", "Removes a record from calls", "Requires an action permission", "Manage API sharing"} {
+	for _, text := range []string{"log-call", "Log a customer call.", "Adds a record to calls", "Changes a record in calls", "Removes a record from calls", "Your access", "data-action-catalog", "Permission groups"} {
 		if !strings.Contains(page, text) {
 			t.Fatalf("site overview lacks %q", text)
 		}
