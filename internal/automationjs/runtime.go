@@ -71,6 +71,13 @@ var compiledEngine = sync.OnceValues(func() (*compiledRuntime, error) {
 	return &compiledRuntime{runtime: runtime, module: compiled}, err
 })
 
+// Prepare compiles the engine once per process. Callers apply per-script
+// deadlines after it, so the one-time compilation is not charged to a script.
+func Prepare() error {
+	_, err := compiledEngine()
+	return err
+}
+
 // Validate compiles and resolves source without executing any user code.
 func Validate(ctx context.Context, source, filename string) error {
 	_, err := execute(ctx, source, filename, nil, nil, true)

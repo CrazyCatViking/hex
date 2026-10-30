@@ -47,6 +47,9 @@ func validateAutomationScript(ctx context.Context, script AutomationScript) erro
 	if strings.TrimSpace(script.Source) == "" || len(script.Source) > automationjs.MaxSourceBytes || !utf8.ValidString(script.Source) || strings.ContainsRune(script.Source, 0) {
 		return fmt.Errorf("script needs UTF-8 JavaScript source of at most %d bytes", automationjs.MaxSourceBytes)
 	}
+	if err := automationjs.Prepare(); err != nil {
+		return fmt.Errorf("initialize JavaScript engine: %w", err)
+	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	select {
