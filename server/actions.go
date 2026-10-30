@@ -126,7 +126,8 @@ type registeredAction struct {
 	output     *jsonschema.Schema
 	// effect describes a declared action's operation in plain words for
 	// the portal; registered actions leave it empty.
-	effect string
+	effect   string
+	declared *DeclaredAction
 }
 
 type actionInputError struct {

@@ -199,6 +199,7 @@ func compileDeclaredAction(action DeclaredAction) (*registeredAction, error) {
 		input:    input,
 		output:   output,
 		effect:   action.effect(),
+		declared: &action,
 	}, nil
 }
 

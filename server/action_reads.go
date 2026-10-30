@@ -6,6 +6,10 @@ import (
 )
 
 func (s *Server) executeDeclaredRead(ctx context.Context, caller ActionContext, action DeclaredAction, input json.RawMessage) (any, error) {
+	actionFilter, allowed := caller.authorization.resourceReadFilter("action", action.Name, "run")
+	if !allowed {
+		return nil, ErrForbidden
+	}
 	var request struct {
 		After string `json:"after"`
 		Limit int    `json:"limit"`
@@ -39,7 +43,7 @@ func (s *Server) executeDeclaredRead(ctx context.Context, caller ActionContext, 
 		if err != nil {
 			return nil, err
 		}
-		if !caller.CanReadDocument(action.Collection, document) {
+		if !caller.CanReadDocument(action.Collection, document) || !actionFilter.Matches(document) {
 			return nil, ErrNotFound
 		}
 		return project(document)
@@ -50,7 +54,21 @@ func (s *Server) executeDeclaredRead(ctx context.Context, caller ActionContext, 
 	if request.Limit < 1 || request.Limit > 100 || (request.After != "" && !validCollectionName(request.After)) {
 		return nil, &ActionError{Message: "list requires a limit of 1–100 and a valid cursor"}
 	}
-	documents, err := s.listAuthorizedDocuments(ctx, caller.authorization, caller.Site, action.Collection, ListOptions{After: request.After, Limit: request.Limit, MaxDocumentBytes: MaxActionInputBytes})
+	dataFilter, allowed := caller.authorization.readFilter(action.Collection)
+	if !allowed {
+		return nil, ErrForbidden
+	}
+	options := ListOptions{After: request.After, Limit: request.Limit, MaxDocumentBytes: MaxActionInputBytes}
+	filter := andConditions(dataFilter, actionFilter)
+	var documents []Document
+	var err error
+	if filter == nil {
+		documents, err = s.config.Database.List(ctx, caller.Site, action.Collection, options)
+	} else if database, supported := s.config.Database.(GuardedDatabase); supported {
+		documents, err = database.ListMatching(ctx, caller.Site, action.Collection, options, filter)
+	} else {
+		return nil, ErrAuthorizationUnsupported
+	}
 	if err != nil {
 		return nil, err
 	}

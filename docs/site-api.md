@@ -5,6 +5,28 @@ on the source site's origin; changing `site` in a URL does not bypass hostname
 isolation. Connections are local to one Hex runtime/workspace. No browser site
 credentials or arbitrary destination URLs are accepted.
 
+## Explicit execution modes
+
+An `action-consumer` grant can use operation `user` or `site`:
+
+- `user` permits a connection on behalf of a person. The person's target-side
+  action and data grants still apply. There is no fallback to site authority.
+- `site` authorizes the source site's persistent identity to execute one declared
+  action. It supplies action-local data authority, including optional `where`,
+  `check`, `fields` and group-binding scopes. It does not grant direct database
+  access. All-record access means all records eligible for that action, not every
+  operation on the collection. Restricted reads filter before pagination.
+
+Site mode requires a declared action; arbitrary platform handlers cannot receive
+automatically synthesized data authority. Automations use the source site identity,
+not the triggering human. Browser calls always use user mode. Outgoing `site-action`
+permission is still required for these explicit modes.
+
+Existing `action-consumer/run` grants retain their original behavior, including
+the existing workspace-public outgoing exception. They are not automatically
+replaced. New mode grants are additive; revoke legacy grants explicitly if they
+would otherwise continue allowing a connection.
+
 ## Export an action
 
 Add `"exported": true, "version": 1` to a declared action or Go action definition.
