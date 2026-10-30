@@ -7,6 +7,19 @@ checkpoints and wake times. Start a deployed automation through
 Schema validates workflow input. Grant `kind: "workflow"`, `resource: <name>`,
 `operations: ["run"]` to allowed users or `automation:<name>` callers.
 
+From the CLI (`--site` defaults to the project):
+
+```sh
+hex workflows start <automation> --input @input.json --idempotency-key <key>
+hex workflows get <workflow-id>
+hex workflows list
+hex workflows retry <workflow-id>
+hex workflows cancel <workflow-id>
+```
+
+Workflows belong to one site. Other sites reach them through an exported action
+or an event subscription whose handler starts the workflow.
+
 ```js
 export default async function (hex) {
   const reservation = await hex.workflow.step("reserve", () =>

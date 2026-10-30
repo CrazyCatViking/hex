@@ -433,6 +433,7 @@ func (s *Server) registerEventRoutes() {
 	s.mux.HandleFunc("PUT /api/sites/{site}/events/types/{name}", s.siteScoped(s.eventTypeHTTP))
 	s.mux.HandleFunc("GET /api/sites/{site}/events/types", s.siteScoped(s.listEventTypesHTTP))
 	s.mux.HandleFunc("GET /api/sites/{site}/events/records", s.siteScoped(s.listEventsHTTP))
+	s.mux.HandleFunc("GET /api/sites/{site}/events/subscriptions", s.siteScoped(s.listSubscriptionsHTTP))
 	s.mux.HandleFunc("PUT /api/sites/{site}/events/subscriptions/{id}", s.siteScoped(s.eventSubscriptionHTTP))
 	s.mux.HandleFunc("POST /api/sites/{site}/events/publish/{name}", s.siteScoped(s.publishEventHTTP))
 	s.mux.HandleFunc("GET /api/sites/{site}/events/records/{id}", s.siteScoped(s.inspectEventHTTP))

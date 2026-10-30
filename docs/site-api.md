@@ -83,7 +83,8 @@ B has not exported are omitted.
 `GET /api/hex/workspace-apis` (CLI `hex actions catalog [--query text]`) lists
 exported actions and events across the workspace as JSON: `site`, `kind`, `name`,
 `version`, `description`, `sharing` (`workspace` or `restricted`),
-`workspaceModes`, `owners`, `owned`, `readOnly` and the input/output schemas. It
+`workspaceModes`, `owners`, `owned`, `readOnly` and the input/output schemas;
+event entries list `versions` with each payload `schema`. It
 applies the same visibility rules as the **Workspace APIs** page below.
 `hex actions available --site B [--from A] [--as-site]` shows what A can call on
 B now; `--from` defaults to the current project. Neither command requests

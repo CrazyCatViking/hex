@@ -16,6 +16,8 @@ type workspaceShareRow struct {
 	// Modes lists the workspace-shared connection modes of an action.
 	Modes      []string
 	definition *ActionDefinition
+	// versions holds every registered version of an event, oldest first.
+	versions []EventType
 }
 
 func workspaceGrantID(kind, resource string) string {
@@ -58,10 +60,11 @@ func (s *Server) workspaceShareRows(ctx context.Context, site string, access Sit
 					mode = "workspace"
 				}
 				// Sharing is by name and applies to every declared version.
-				if slices.ContainsFunc(rows, func(row workspaceShareRow) bool { return row.Kind == "event" && row.Name == topic.Name }) {
+				if index := slices.IndexFunc(rows, func(row workspaceShareRow) bool { return row.Kind == "event" && row.Name == topic.Name }); index >= 0 {
+					rows[index].versions = append(rows[index].versions, topic.EventType)
 					continue
 				}
-				rows = append(rows, workspaceShareRow{Name: topic.Name, Description: topic.Description, Kind: "event", Mode: mode, GrantID: workspaceGrantID("event", topic.Name), Detail: "Other sites can subscribe and trigger their automations or workflows when this event happens. Publishing events remains separately controlled."})
+				rows = append(rows, workspaceShareRow{Name: topic.Name, Description: topic.Description, Kind: "event", Mode: mode, versions: []EventType{topic.EventType}, GrantID: workspaceGrantID("event", topic.Name), Detail: "Other sites can subscribe and trigger their automations or workflows when this event happens. Publishing events remains separately controlled."})
 			}
 			if len(documents) < 100 {
 				break
@@ -71,6 +74,7 @@ func (s *Server) workspaceShareRows(ctx context.Context, site string, access Sit
 	}
 	slices.SortFunc(rows, func(a, b workspaceShareRow) int { return strings.Compare(a.Kind+"/"+a.Name, b.Kind+"/"+b.Name) })
 	for i := range rows {
+		slices.SortFunc(rows[i].versions, func(a, b EventType) int { return a.Version - b.Version })
 		rows[i].Choices = choices(rows[i].Mode, [2]string{"restricted", "Restricted · existing permissions only"}, [2]string{"workspace", "Everyone in this workspace · all sites"})
 	}
 	return rows, nil

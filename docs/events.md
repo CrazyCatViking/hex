@@ -87,8 +87,30 @@ Replay selects the current subscription generation/revision and rechecks grants;
 it preserves the event ID, so downstream deduplication still works.
 
 HTTP equivalents live beneath `/api/sites/<site>/events`:
-`PUT types/<name>`, `PUT subscriptions/<id>`, `POST publish/<name>`,
-`GET records/<id>`, `POST records/<id>/replay/<subscription>`.
+`PUT types/<name>`, `GET types`, `PUT subscriptions/<id>`, `GET subscriptions`,
+`POST publish/<name>`, `GET records`, `GET records/<id>`,
+`POST records/<id>/replay/<subscription>`.
+
+`GET subscriptions` lists the consumer's own subscriptions across producers,
+each with `allowed` (the producer still grants `event/subscribe`) and `stale`
+(the handler automation was redeployed since subscribing, so deliveries fail
+until the subscription is refreshed).
+
+The CLI wraps these routes; `--site` defaults to the project:
+
+```sh
+hex events define order-approved --input @event.json
+hex events types
+hex events subscribe orders --producer sales --event order-approved --version 1 --automation process-order [--where @filter.json] [--disabled]
+hex events subscriptions
+hex events publish order-approved --version 1 --input @data.json --idempotency-key approved-order-123
+hex events list
+hex events inspect <event-id>
+hex events replay <event-id> <subscription-id>
+```
+
+`hex actions catalog` lists events other sites share, with every registered
+version and its payload schema.
 Bodies match the SDK arguments. Schemas and subscriptions are owner-managed;
 ordinary publishers do not need management authority.
 

@@ -65,6 +65,8 @@ func (s *Server) workspaceAPIsHTTP(w http.ResponseWriter, r *http.Request) {
 		ReadOnly       bool            `json:"readOnly,omitempty"`
 		InputSchema    json.RawMessage `json:"inputSchema,omitempty"`
 		OutputSchema   json.RawMessage `json:"outputSchema,omitempty"`
+		// Versions lists an event's registered versions and payload schemas.
+		Versions []EventType `json:"versions,omitzero"`
 	}
 	result := make([]workspaceAPI, 0, len(entries))
 	for _, entry := range entries {
@@ -75,6 +77,7 @@ func (s *Server) workspaceAPIsHTTP(w http.ResponseWriter, r *http.Request) {
 		if definition := entry.definition; definition != nil {
 			api.ReadOnly, api.InputSchema, api.OutputSchema = definition.ReadOnly, definition.InputSchema, definition.OutputSchema
 		}
+		api.Versions = entry.versions
 		result = append(result, api)
 	}
 	writeJSON(w, http.StatusOK, result)

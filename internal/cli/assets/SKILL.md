@@ -78,7 +78,7 @@ await api.call('reserve-stock', { productId: 'p123', quantity: 2 }, { idempotenc
 
 Browser calls always act as the person; automations call `await hex.sites.call('inventory', 'reserve-stock', input, { version: 1, idempotencyKey })` as the site. Mutations require an idempotency key that is stable for the business operation; a reused key with different input returns 409. Handle 403 (not connected or not permitted) in the UI. Generated wrappers use `typedSiteAPI(hex.sites)`; regenerate after the target publishes a new version, and use `--check --out` in CI.
 
-To offer an action to other apps, add `"exported": true, "version": 1` to a declared action and republish. Declarative reads use `"operation": "get"` or `"list"` with an `output` schema and `select` (top-level data fields to return). An exported version's schemas and read/write kind are frozen: publish a new version or action name for breaking changes. The owner then chooses which apps may connect in the portal dialog above, or **All workspace apps**. Events are defined with `hex.events.define(name, { version, schema })`, published with `hex.events.publish`, and consumed by subscribing an automation with `hex.events.subscribe`; handlers run with the consumer automation's own permissions.
+To offer an action to other apps, add `"exported": true, "version": 1` to a declared action and republish. Declarative reads use `"operation": "get"` or `"list"` with an `output` schema and `select` (top-level data fields to return). An exported version's schemas and read/write kind are frozen: publish a new version or action name for breaking changes. The owner then chooses which apps may connect in the portal dialog above, or **All workspace apps**. To be notified when something happens in another app, subscribe to its events instead; see Events below.
 
 ## Building an app
 
@@ -232,39 +232,93 @@ The HTTP API is `GET /api/sites/<site>/ai/models`, `POST /api/sites/<site>/ai/st
 
 ## Automations
 
-Automations run work on a schedule or on demand without server code, as the site itself rather than a person. Declare them in hex.json under `automations`, or one per file as `automations/<name>.json` (the name defaults to the file name). `hex publish` deploys them and never publishes the `automations/` folder; `hex automations deploy` deploys them without republishing. A project that declares no automations leaves deployed ones unchanged; `"automations": []` removes them all.
+Automations run work on a schedule, on demand, when an event arrives or as a workflow, without server code. Each one is a JavaScript module plus metadata. Put metadata in `automations/<name>.json` (the name defaults to the file name) or the `automations` array of hex.json, referencing the script with `"script": { "file": "<name>.js" }`. `steps`, `if`, `forEach` and `{{ }}` templates are no longer supported and are rejected; write the logic in JavaScript. `hex publish` deploys them and never publishes the scripts as site files; `hex automations deploy` deploys without republishing. A project that declares no automations leaves deployed ones unchanged; `"automations": []` removes them all.
+
+`automations/weekly-defects.json`:
 
 ```json
-{
-  "name": "weekly-defects",
-  "description": "Post the weekly defect summary",
-  "schedule": "0 8 * * MON",
-  "timezone": "Europe/Oslo",
-  "steps": [
-    { "id": "counts", "call": "sentry.issue-counts", "input": { "statsPeriod": "7d" } },
-    { "id": "summary", "ai": { "model": "<id>", "prompt": "Summarize: {{ steps.counts.output | json }}" } },
-    { "id": "post", "if": "steps.counts.output.total | gt(0)", "call": "slack.post-message",
-      "input": { "channel": "#dev", "text": "Week {{ now.week }}: {{ steps.summary.output.text }}" } },
-    { "id": "archive", "save": { "collection": "reports", "id": "week-{{ now.week }}", "data": { "total": "{{ steps.counts.output.total }}" } } }
-  ]
+{ "description": "Post the weekly defect summary", "schedule": "0 8 * * MON", "timezone": "Europe/Oslo", "script": { "file": "weekly-defects.js" } }
+```
+
+`automations/weekly-defects.js`:
+
+```js
+// @ts-check
+/** @param {import("@crazycatviking/hex/automations").AutomationContext} hex */
+export default async function run(hex) {
+  const counts = await hex.call("sentry.issue-counts", { statsPeriod: "7d" });
+  if (counts.total === 0) return { skipped: true };
+  const summary = await hex.ai.complete({ model: "<id>", prompt: `Summarize: ${JSON.stringify(counts)}` });
+  await hex.call("slack.post-message", { channel: "#dev", text: `Week ${hex.now.week}: ${summary.text}` });
+  await hex.db.save("reports", { total: counts.total }, { id: `week-${hex.now.week}` });
+  return { total: counts.total };
 }
 ```
 
 - `schedule` is a five-field cron expression or `@daily`/`@weekly`/`@hourly`, at most every 5 minutes, in `timezone` (IANA, default UTC). Without a schedule the automation only runs when triggered. `"disabled": true` pauses it.
-- Each step has a unique `id` and exactly one of `call` (`<integration>.<endpoint>` with `input`), `action` (a site action with `input`), `ai` (`model`, `prompt`, optional `system`, `maxTokens`, `thinking`, `tools`), `query` (`collection`, `where` equality on top-level fields, `limit` up to 1000; output is `[{ id, data }]`) or `save` (`collection`, optional `id`, `data` object). `if` skips a step when falsy; `forEach` repeats it for each item of a list, exposing `item` and `index`, and its output is the list of outputs. A step stops the run when it fails.
-- Templates: any string may contain `{{ expression }}`. A string that is exactly one placeholder becomes the JSON value; otherwise the text is inserted. Values are paths (`steps.<id>.output...`, `item`, `index`, `site`, `automation`, `run.trigger`, `run.dryRun`, `now.date|time|iso|year|month|day|monthDay|weekday|week|yesterday|weekStart|previousWeekStart|previousWeekEnd|unix`) or literals, followed by filters: `length`, `json`, `join(", ")`, `default("x")`, `first`, `last`, `limit(n)`, `upper`, `lower`, `truncate(n)`, `map("field")`, `where("field", value)`, `sum("field")`, `round(n)`, `eq(v)`, `ne(v)`, `gt(n)`, `lt(n)`, `not`, `date("DD.MM.YYYY")`. Missing paths are null; steps may only refer to earlier steps.
-- Automations need integration permissions granted to `site:<name>` by platform administrators, and site approval where required. They cannot use connected-account integrations. Saved documents have `createdBy` `automation:<name>`.
+- The default export receives the frozen `hex` context: `site`, `automation`, `run` (`id`, `trigger`, `dryRun`), `now` (`iso`, `date`, `time`, `year`, `month`, `day`, `weekday`, `week`, `yesterday`, `weekStart`, `previousWeekStart`, `previousWeekEnd`, `unix`, …), `input`, `event` (for event deliveries) and `workflowId` (for workflows). Its return value is the run output.
+- APIs: `hex.call("<integration>.<endpoint>", input)`, `hex.action(name, input)` (a local action), `hex.sites.call(target, action, input, { version, idempotencyKey })` (another app's exported action, as this site), `hex.events.publish(name, data, { version, idempotencyKey })`, `hex.ai.complete({ model, prompt, system?, maxTokens?, thinking?, tools? })`, `hex.db.query(collection, { where?, limit? })` (equality on top-level fields, limit up to 1000, returns `[{ id, data }]`), `hex.db.save(collection, data, { id? })`, `hex.log(message, data?)` and the `hex.workflow` helpers below. Calls run sequentially, even inside `Promise.all`; failures throw catchable errors, and an uncaught error fails the run without rolling back completed effects.
+- The sandbox has no imports, network, filesystem or packages. Limits: 128 KiB source, five seconds of computation, 100 API calls and 32 KiB of logs per run, 32 automations per site. Install `@crazycatviking/hex` for the JSDoc types shown above; no transpilation is involved.
+- Automations act as the site, never as the deploying or triggering person. Integrations need permissions granted to `site:<name>` by platform administrators, and site approval where required; connected-account integrations are unavailable. In a v2 policy, grant `automation:<name>` the collection and action permissions the script uses. Saved documents have `createdBy` `automation:<name>`.
 
 ```sh
 hex automations list
-hex automations test weekly-defects          # runs the local definition as a dry run: writes, actions and saves are skipped
+hex automations test weekly-defects          # runs the local script as a dry run: integration writes, actions, saves and publications are skipped
 hex automations test weekly-defects --live   # performs them
 hex automations deploy
 hex automations run weekly-defects [--dry-run]
 hex automations runs weekly-defects --limit 5
 ```
 
-Always dry-run with `hex automations test` before deploying or running live, and ask the user before running automations that post messages or change data.
+Always dry-run with `hex automations test` before deploying or running live, and ask the user before running automations that post messages or change data. Dry runs return previews such as `{ wouldSave, id, data }` instead of real results; branch on `hex.run.dryRun` when that matters.
+
+## Events
+
+Events are versioned, schema-validated messages from one site, delivered to automations that other sites (or the same site) subscribe. Use them when something that happens in one app should trigger work elsewhere; use an exported action when the caller needs an answer. Find events other apps offer with `hex actions catalog` (entries with `kind: "event"` list every version and its payload `schema`). The `--site` of these commands defaults to the project; all except `publish` need site ownership.
+
+```sh
+hex events define order-approved --input @event.json        # {"version":1,"description":"...","schema":{...}}
+hex events publish order-approved --version 1 --input '{"orderId":"o-123"}' --idempotency-key approved-o-123
+hex events types                                            # this site's event types and who subscribes
+hex events subscribe orders --producer sales --event order-approved --version 1 --automation process-order [--where @filter.json]
+hex events subscriptions                                    # this site's subscriptions: allowed, stale
+hex events list                                             # events this site published
+hex events inspect <event-id>                               # deliveries: status, attempts, last error
+hex events replay <event-id> orders                         # requeue a dead delivery after a fix
+```
+
+- Producer: an event version's schema is immutable; publish a new version for changes. Grant `event`/`publish` on the name to the users or `automation:<name>` that publish. Browser apps publish with `await hex.events.publish(name, data, { version, idempotencyKey })` and automations the same way through `hex.events.publish`; payloads are limited to 64 KiB, and reusing a key with the same payload returns the original event (different payload: 409).
+- Subscribing needs the producer's consent: an `event`/`subscribe` grant to the consumer site, which the producer's owners give in the portal (**Overview → Actions & events → the event → Details & access → Other apps**) or by sharing it with all workspace apps. If the catalog shows `sharing: "restricted"`, tell the user which `owners` to ask; never edit another site's policy.
+- Deploy the handler automation (no schedule needed) before subscribing. It reads `hex.event` (`id`, `site`, `name`, `version`, `actor`, `data`, `createdAt`) and runs with its own grants, not the publisher's. A subscription pins the automation's deployed revision: after every redeploy of the handler, run `hex events subscribe` again with the same ID; otherwise deliveries fail until they are dead, and must be replayed after the refresh. `hex events subscriptions` reports `stale: true` when that is needed and `allowed: false` when the producer revoked access.
+- Delivery is at least once and unordered, retried with backoff up to eight attempts. Make handlers idempotent: derive document IDs and downstream idempotency keys from `hex.event.id`. `where` filters on `data.*` fields with the record condition syntax. A topic takes 32 subscriptions; `--disabled` pauses one.
+- Publishing is not atomic with separate saves or action calls. Prefer publishing the event as the source of truth and doing the state change in an idempotent subscriber.
+
+## Workflows
+
+A workflow is a durable run of one of the site's deployed automations: it checkpoints named steps, can sleep, and can start and wait for child workflows, surviving restarts. Workflows belong to one site and are not shared with other apps; combine them with exported actions (to call other apps) and events (to be triggered by them, for example an event handler that starts a workflow).
+
+```js
+export default async function (hex) {
+  const reservation = await hex.workflow.step("reserve", () =>
+    hex.sites.call("inventory", "reserve-stock", hex.input, { version: 1, idempotencyKey: `${hex.workflowId}-reserve` }));
+  await hex.workflow.sleep("follow-up-delay", 60_000);
+  const child = await hex.workflow.start("notify", { reservation }, { idempotencyKey: `${hex.workflowId}-notify` });
+  await hex.workflow.wait(child.id);
+  return { reservation };
+}
+```
+
+- The script restarts from the beginning on every wake or retry. A completed `hex.workflow.step(name, callback)` returns its stored output without running again, so put every side effect inside a step and give steps stable, unique names (include IDs in loops). Code outside steps must be deterministic. `hex.input` and `hex.workflowId` are frozen.
+- An optional `inputSchema` in the automation metadata validates workflow input. Grant `workflow`/`run` on the automation name to the users or `automation:<name>` that start it.
+- Start from a browser with `await hex.workflows.start(name, input, { idempotencyKey })`, from another automation with `hex.workflow.start`, or from the CLI:
+
+```sh
+hex workflows start fulfil-order --input @order.json --idempotency-key order-123
+hex workflows get <workflow-id>          # status, steps, output, error
+hex workflows list                       # owners
+hex workflows retry <workflow-id>        # owners
+hex workflows cancel <workflow-id>       # owners
+```
 
 ## Errors and publishing
 
