@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/signal"
 	"syscall"
@@ -42,7 +43,17 @@ func run() error {
 	if err := files.WriteSiteFile(ctx, "demo", "index.html", 4, bytes.NewBufferString("demo")); err != nil {
 		return err
 	}
+	declared := `[{"name":"list-expenses","description":"Read expense records","operation":"list","collection":"expenses","version":1,"exported":true,"select":["amount"],"input":{"type":"object"},"output":{"type":"object"}}]`
+	if err := files.WriteSiteFile(ctx, "demo", ".hex-actions.json", int64(len(declared)), bytes.NewBufferString(declared)); err != nil {
+		return err
+	}
+	if err := files.WriteSiteFile(ctx, "consumer", "index.html", 8, bytes.NewBufferString("consumer")); err != nil {
+		return err
+	}
 	policies := memory.NewAccessStore()
+	if err := policies.PutSiteAccess(ctx, "consumer", hex.SiteAccess{Version: 2, Owners: []string{"user:owner"}, Admission: hex.Subjects{Owners: true}}); err != nil {
+		return err
+	}
 	policy := hex.SiteAccess{Version: 2, Owners: []string{"user:owner"}, Admission: hex.Subjects{Owners: true}, Roles: map[string]hex.ApplicationRole{"reviewers": {Description: "Review project expenses"}}, Bindings: map[string]hex.RoleBinding{"alex-a": {Principal: "user:alex", Role: "reviewers", Scope: &hex.RoleScope{Kind: "project", ID: "A"}}}, Grants: map[string]hex.PermissionGrant{
 		"pages":            {Kind: "path", Resource: "*", Except: []string{"/admin/"}, Operations: []string{"read"}, Subjects: hex.Subjects{Owners: true}},
 		"admin":            {Kind: "path", Resource: "/admin/", Operations: []string{"read"}, Subjects: hex.Subjects{Owners: true}},
@@ -61,6 +72,12 @@ func run() error {
 	if err := policies.PutSiteAccess(ctx, "demo", policy); err != nil {
 		return err
 	}
+	if err := files.WriteSiteFile(ctx, "conversion", "index.html", 4, bytes.NewBufferString("demo")); err != nil {
+		return err
+	}
+	if err := policies.PutSiteAccess(ctx, "conversion", hex.CloneSiteAccess(policy)); err != nil {
+		return err
+	}
 	people := memory.NewPeopleStore()
 	for _, person := range []hex.Person{{ID: "owner", Name: "Site Owner", Email: "owner@example.test"}, {ID: "alex", Name: "Alex Andersen", Email: "alex@example.test"}, {ID: "bea", Name: "Bea <img src=x onerror=alert(1)>", Email: "bea@example.test"}} {
 		if err := people.RememberPerson(ctx, person); err != nil {
@@ -76,7 +93,15 @@ func run() error {
 	if err := actions.Register("demo", hex.Action{Definition: hex.ActionDefinition{Name: "expense-summary", Description: "Read the expense summary", Version: 1, Exported: true, ReadOnly: true, InputSchema: json.RawMessage(`{"type":"object"}`), OutputSchema: json.RawMessage(`{"type":"object"}`)}, Handler: func(context.Context, hex.ActionContext, json.RawMessage) (any, error) { return map[string]any{}, nil }}); err != nil {
 		return err
 	}
-	platform := hex.New(hex.Config{Actions: actions, Identity: hex.StaticIdentity{Identity: hex.Identity{ID: "owner", Name: "Site Owner"}}, Access: policies, Database: memory.NewDatabase(), Sites: files, Publisher: files, Files: files, People: people, Groups: []hex.NamedGroup{{ID: "finance", Name: "Finance"}}, SiteBaseURL: baseURL})
+	platform := hex.New(hex.Config{Actions: actions, Automations: memory.NewAutomationStore(), Identity: hex.StaticIdentity{Identity: hex.Identity{ID: "owner", Name: "Site Owner"}}, Access: policies, Database: memory.NewDatabase(), Sites: files, Publisher: files, Files: files, People: people, Groups: []hex.NamedGroup{{ID: "finance", Name: "Finance"}}, SiteBaseURL: baseURL})
+	eventRequest := httptest.NewRequest(http.MethodPut, baseURL+"/api/sites/demo/events/types/expense-approved", bytes.NewBufferString(`{"name":"expense-approved","description":"An expense was approved","version":1,"schema":{"type":"object"}}`))
+	eventRequest.Header.Set("Content-Type", "application/json")
+	eventRequest.Header.Set("X-Hex-Request", "1")
+	eventResponse := httptest.NewRecorder()
+	platform.ServeHTTP(eventResponse, eventRequest)
+	if eventResponse.Code != http.StatusOK {
+		return fmt.Errorf("define fixture event: %s", eventResponse.Body.String())
+	}
 	server := &http.Server{Handler: platform, ReadHeaderTimeout: 5 * time.Second}
 	errorsCh := make(chan error, 1)
 	go func() { errorsCh <- server.Serve(listener) }()

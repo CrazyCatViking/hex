@@ -225,6 +225,11 @@
   color: var(--text-muted);
   font-size: 11px;
 }
+
+[data-action-card] .integration-card-bottom button {
+  position: relative;
+  z-index: 1;
+}
 .integration-card-bottom span:last-child {
   color: var(--accent-strong);
   font-weight: 650;

@@ -35,6 +35,7 @@ func (s *Server) siteIconReader() siteFileReader {
 
 func (s *Server) cardForSite(name, siteURL string, metadata *SiteMetadata, now time.Time) siteCard {
 	card := cardFromMetadata(name, siteURL, metadata, now)
+	card.Actions = card.Kind != "File" && s.manageEnabled() && s.siteAPIEnabled()
 	if card.Kind != "File" && s.siteIconReader() != nil {
 		card.IconURL = "/api/hex/sites/" + name + "/icon"
 	}

@@ -1416,32 +1416,79 @@ try {
   await designPage.close();
   await page.goto(`${url}/manage/demo?tab=sharing`);
   await page.locator('#permission-manager[data-ready="true"]').waitFor();
-  const workspaceSharing = page.locator(
-    '[data-workspace-sharing][data-resource="expense-summary"]',
+  await page.goto(`${url}/manage/demo`);
+  const actionCard = page.locator(
+    '[data-action-card][data-name="list-expenses"]',
   );
+  await actionCard.getByRole("button", { name: "Details & access ↗" }).click();
+  const actionDialog = page.locator("[data-action-dialog]");
+  await actionDialog
+    .getByLabel("Available to", { exact: true })
+    .selectOption("selected");
+  await actionDialog.getByLabel("Add an app", { exact: true }).fill("consumer");
+  await actionDialog
+    .getByRole("button", { name: "consumer", exact: true })
+    .click();
+  await actionDialog
+    .getByLabel("As the calling site · enables automations", { exact: true })
+    .check();
+  await actionDialog
+    .getByText("Site-mode data restrictions", { exact: true })
+    .click();
+  await actionDialog
+    .getByLabel("Existing record condition (JSON)", { exact: true })
+    .fill('{"field":"data.project","op":"eq","value":"A"}');
   const beforeSharing = await policy();
-  await workspaceSharing.selectOption("workspace");
   assert.deepEqual(
     await policy(),
     beforeSharing,
-    "workspace access must remain staged",
+    "action access must remain staged",
   );
-  await save();
+  await actionDialog
+    .getByRole("button", { name: "Save access", exact: true })
+    .click();
+  await actionDialog
+    .getByText("Action access saved.", { exact: true })
+    .waitFor();
   assert.equal(
     Object.values((await policy()).grants).filter(
-      (grant) => grant.subjects.workspace,
+      (grant) =>
+        grant.kind === "action-consumer" && grant.operations.includes("site"),
     ).length,
-    2,
+    1,
   );
+  const appGrant = Object.values((await policy()).grants).find(
+    (grant) =>
+      grant.kind === "action-consumer" && grant.operations.includes("site"),
+  );
+  assert.deepEqual(appGrant.where, {
+    field: "data.project",
+    op: "eq",
+    value: "A",
+  });
   await page.reload();
-  await page.locator('#permission-manager[data-ready="true"]').waitFor();
-  assert.equal(await workspaceSharing.inputValue(), "workspace");
-  await page.goto(`${url}/workspace-apis`);
-  assert.match(await page.locator("main").innerText(), /expense-summary/);
-  assert.match(
-    await page.locator("main").innerText(),
-    /Everyone in this workspace/,
+  await actionCard.getByRole("button", { name: "Details & access ↗" }).click();
+  assert.equal(
+    await actionDialog.getByLabel("Available to", { exact: true }).inputValue(),
+    "selected",
   );
+  await actionDialog
+    .getByLabel("Available to", { exact: true })
+    .selectOption("all");
+  await actionDialog
+    .getByRole("button", { name: "Save access", exact: true })
+    .click();
+  await actionDialog
+    .getByText("Action access saved.", { exact: true })
+    .waitFor();
+  assert.equal(
+    Object.values((await policy()).roles).some((role) => role.workspace),
+    true,
+  );
+  await actionDialog
+    .getByRole("button", { name: "Close action details", exact: true })
+    .click();
+  await page.goto(`${url}/apps/demo/actions`);
   for (const colorScheme of ["light", "dark"]) {
     await page.emulateMedia({ colorScheme });
     await page.setViewportSize({ width: 390, height: 844 });
@@ -1450,19 +1497,99 @@ try {
         () => document.documentElement.scrollWidth > innerWidth,
       ),
       false,
-      "workspace catalog must fit mobile screens",
+      "app action catalog must fit mobile screens",
     );
-    await screenshot(`workspace-catalog-${colorScheme}`);
+    await screenshot(`app-actions-${colorScheme}`);
   }
-  await page.goto(`${url}/manage/demo?tab=sharing`);
-  await page.locator('#permission-manager[data-ready="true"]').waitFor();
-  await workspaceSharing.selectOption("restricted");
-  await save();
+  await page
+    .locator('[data-action-card][data-name="list-expenses"]')
+    .getByRole("button", { name: "Details & access ↗" })
+    .click();
+  await actionDialog
+    .getByLabel("Available to", { exact: true })
+    .selectOption("none");
+  await actionDialog
+    .getByRole("button", { name: "Save access", exact: true })
+    .click();
+  await actionDialog
+    .getByText("Action access saved.", { exact: true })
+    .waitFor();
   assert.equal(
     Object.values((await policy()).grants).filter(
-      (grant) => grant.subjects.workspace,
+      (grant) => grant.kind === "action-consumer",
     ).length,
     0,
+  );
+  assert.deepEqual(errors, []);
+  await actionDialog
+    .getByRole("button", { name: "Close action details", exact: true })
+    .click();
+  await page
+    .locator('[data-action-card][data-kind="event"]')
+    .getByRole("button", { name: "Details & access ↗" })
+    .click();
+  await actionDialog
+    .getByLabel("Available to", { exact: true })
+    .selectOption("all");
+  await actionDialog
+    .getByRole("button", { name: "Save access", exact: true })
+    .click();
+  await actionDialog
+    .getByText("Subscription access saved.", { exact: true })
+    .waitFor();
+  const subscriptionGrants = Object.values((await policy()).grants).filter(
+    (grant) => grant.kind === "event",
+  );
+  assert.equal(subscriptionGrants.length, 1);
+  assert.deepEqual(subscriptionGrants[0].operations, ["subscribe"]);
+  await actionDialog
+    .getByLabel("Available to", { exact: true })
+    .selectOption("none");
+  await actionDialog
+    .getByRole("button", { name: "Save access", exact: true })
+    .click();
+  await page.waitForFunction(async () => {
+    const policy = await (await fetch("/api/hex/sites/demo/access")).json();
+    return !Object.values(policy.grants).some(
+      (grant) => grant.kind === "event",
+    );
+  });
+  await page.goto(`${url}/manage/conversion?tab=sharing`);
+  await page.locator('#permission-manager[data-ready="true"]').waitFor();
+  const conversionPolicy = async () =>
+    (await page.request.get(`${url}/api/hex/sites/conversion/access`)).json();
+  const beforeConversion = await conversionPolicy();
+  await page.locator("[data-additional-access] > summary").click();
+  await page
+    .getByRole("button", { name: "Move into a permission group", exact: true })
+    .click();
+  assert.deepEqual(
+    await conversionPolicy(),
+    beforeConversion,
+    "organizing groups must stay staged",
+  );
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await page.getByText("All changes saved", { exact: true }).waitFor();
+  const converted = await conversionPolicy();
+  const ownerGroup = Object.entries(converted.roles).find(
+    ([, role]) => role.owners,
+  )?.[0];
+  assert.ok(
+    ownerGroup,
+    "automatic owner audience must be preserved, not snapshotted",
+  );
+  for (const [id, rule] of Object.entries(beforeConversion.grants)) {
+    assert.deepEqual(
+      converted.grants[id],
+      id.startsWith("existing-owner-")
+        ? { ...rule, subjects: { roles: [ownerGroup] } }
+        : rule,
+    );
+  }
+  assert.deepEqual(converted.admission, beforeConversion.admission);
+  assert.equal(
+    await page.locator("[data-additional-access]").isVisible(),
+    false,
   );
   assert.deepEqual(errors, []);
   console.log(

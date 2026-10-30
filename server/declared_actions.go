@@ -205,6 +205,8 @@ func compileDeclaredAction(action DeclaredAction) (*registeredAction, error) {
 
 func (action DeclaredAction) effect() string {
 	switch action.Operation {
+	case "get", "list":
+		return "Reads records in " + action.Collection
 	case OperationCreate:
 		return "Adds a record to " + action.Collection
 	case OperationUpdate:

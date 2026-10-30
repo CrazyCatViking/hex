@@ -32,72 +32,9 @@
   ></p>
   <p data-permission-status role="status" aria-live="polite"></p>
 
-  <section
-    id="workspace-apis"
-    class="panel permission-surface workspace-api-sharing"
-    aria-labelledby="workspace-apis-heading"
-  >
-    <div class="permission-heading">
-      <div>
-        <p class="eyebrow">CONNECT WITH OTHER SITES</p>
-        <h3 id="workspace-apis-heading">Workspace APIs</h3>
-        <p class="permission-description">
-          Choose what other sites can use. Share an action or event with every
-          site in this workspace, or keep access limited to your existing rules.
-        </p>
-      </div>
-      <span class="tag">Workspace only</span>
-    </div>
-    {{range .WorkspaceAPIs}}
-    <article class="workspace-api-card">
-      <div class="workspace-api-heading">
-        <div>
-          <p class="eyebrow">
-            {{if eq .Kind "action"}}ACTION · v{{.Version}}{{else}}EVENT · ALL
-            VERSIONS{{end}}
-          </p>
-          <h4>{{.Name}}</h4>
-        </div>
-        <span class="tag" data-workspace-status="{{.GrantID}}"
-          >{{if eq .Mode "workspace"}}Shared with workspace{{else}}Access by
-          permission{{end}}</span
-        >
-      </div>
-      <p>{{.Description}}</p>
-      <label class="field"
-        ><span class="field-label"
-          >Who can {{if eq .Kind "action"}}call this action{{else}}subscribe to
-          this event{{end}}?</span
-        >
-        <select
-          data-workspace-sharing
-          data-kind="{{.Kind}}"
-          data-resource="{{.Name}}"
-          data-grant-id="{{.GrantID}}"
-          data-consumer-id="{{.ConsumerID}}"
-          data-original-mode="{{.Mode}}"
-        >
-          {{range .Choices}}
-          <option value="{{.Value}}" {{.Attr}}>{{.Label}}</option>
-          {{end}}
-        </select>
-        <span class="field-hint">{{.Detail}}</span>
-      </label>
-    </article>
-    {{else}}
-    <div class="empty-state">
-      <h4>No workspace APIs yet</h4>
-      <p>
-        Publish an exported action or register an event to choose who can use it
-        here.
-      </p>
-    </div>
-    {{end}}
-    <p class="field-hint">
-      These settings do not open the site's pages. Restricted consumers should
-      ask a site owner for access. Changes are saved with the permissions below.
-    </p>
-  </section>
+  <p class="field-hint">
+    <a href="/apps/{{.Site}}/actions">Actions &amp; other-app access</a>
+  </p>
 
   <section
     id="site-access"
@@ -201,11 +138,11 @@
     hidden
   >
     <summary id="additional-access-heading">
-      Access granted outside this table <span data-additional-summary></span>
+      Existing permissions to organize <span data-additional-summary></span>
     </summary>
     <p class="field-hint">
-      These people have permissions from existing rules, not from the checkboxes
-      above. Changing a checkbox will not remove this access.
+      These published rules still apply. Move them into permission groups to
+      manage their assignments in the table, preserving their current access.
     </p>
     <div data-independent-rules></div>
   </details>
@@ -221,7 +158,7 @@
       For custom policies. Routine sharing and group rules do not need JSON.
       Save or discard table changes before using this separate editor.
     </p>
-    <button type="button" class="link-button" data-add-direct-rule>
+    <button type="button" class="link-button" data-add-direct-rule hidden>
       Add a rule outside permission groups
     </button>
     <form

@@ -1,0 +1,152 @@
+{{define "app-actions-page"}} <!doctype html>
+<html lang="en">
+  <head>
+    {{template "head" (printf "%s · Actions" .Catalog.Site)}}
+    <link rel="stylesheet" href="/api/hex/integrations.css" />
+    <script src="/api/hex/action-access.js" defer></script>
+  </head>
+  <body>
+    {{template "header" .Chrome}}
+    <main class="page">
+      <nav class="breadcrumbs">
+        <a href="/">Apps</a><span>/</span><span>{{.Catalog.Site}}</span>
+      </nav>
+      <h1>{{.Catalog.Site}}</h1>
+      {{template "app-action-catalog" .Catalog}}
+    </main>
+    {{template "footer" .Chrome}}
+  </body>
+</html>
+{{end}} {{define "app-action-catalog"}}
+<section
+  data-action-catalog
+  data-site="{{.Site}}"
+  data-owner="{{.Owner}}"
+  data-layout="grid"
+  aria-labelledby="app-actions-heading"
+>
+  <div class="panel-heading">
+    <h2 id="app-actions-heading">Actions &amp; events</h2>
+    {{if .Owner}}<a href="/manage/{{.Site}}?tab=sharing">Permission groups</a
+    >{{end}}
+  </div>
+  <div class="integration-toolbar">
+    <label class="field"
+      ><span class="visually-hidden">Search actions and events</span
+      ><input
+        type="search"
+        data-action-search
+        placeholder="Search actions and events"
+    /></label>
+    <div
+      class="integration-view-switch"
+      role="group"
+      aria-label="Action layout"
+    >
+      <button
+        type="button"
+        data-action-layout="grid"
+        aria-label="Cards"
+        aria-pressed="true"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="3" y="3" width="7" height="7" rx="1" />
+          <rect x="14" y="3" width="7" height="7" rx="1" />
+          <rect x="3" y="14" width="7" height="7" rx="1" />
+          <rect x="14" y="14" width="7" height="7" rx="1" />
+        </svg></button
+      ><button
+        type="button"
+        data-action-layout="list"
+        aria-label="Rows"
+        aria-pressed="false"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M9 5h12M9 12h12M9 19h12M3 5h1M3 12h1M3 19h1" />
+        </svg>
+      </button>
+    </div>
+  </div>
+  <div class="integration-grid">
+    {{range .Actions}}
+    <article
+      class="integration-card"
+      data-action-card
+      data-name="{{.Name}}"
+      data-kind="{{.Kind}}"
+      data-exported="{{.Exported}}"
+    >
+      <div class="integration-card-heading">
+        <span class="integration-mark" aria-hidden="true">↗</span>
+        <div>
+          <h2>
+            <a
+              href="/apps/{{$.Site}}/actions#{{if eq .Kind `event`}}event:{{end}}{{.Name}}"
+              class="integration-card-link"
+              data-action-open
+              >{{.Name}}</a
+            >
+          </h2>
+          <span class="integration-key"
+            >{{if eq .Kind "event"}}EVENT{{else}}ACTION{{end}}{{if .Version}} ·
+            v{{.Version}}{{end}}</span
+          >
+        </div>
+      </div>
+      <p class="integration-card-description">{{.Description}}</p>
+      <dl class="integration-facts">
+        <div>
+          <dt>Operation</dt>
+          <dd>{{.Effect}}</dd>
+        </div>
+        <div>
+          <dt>Callers</dt>
+          <dd>{{.Callers}}</dd>
+        </div>
+        <div>
+          <dt>Your access</dt>
+          <dd>
+            <span class="integration-status integration-tone-{{.Tone}}"
+              >{{.Access}}</span
+            >
+          </dd>
+        </div>
+      </dl>
+      <div class="integration-card-bottom">
+        <span
+          >{{if eq .Kind "event"}}Subscription access{{else if
+          .SiteMode}}Declared operation{{else}}Platform handler{{end}}</span
+        ><button type="button" class="link-button" data-action-open>
+          Details &amp; access ↗
+        </button>
+      </div>
+    </article>
+    {{else}}
+    <p class="muted">This app has no actions or events.</p>
+    {{end}}
+  </div>
+  <p class="muted" data-action-empty hidden>No matching actions.</p>
+  <dialog
+    class="dialog integration-dialog"
+    data-action-dialog
+    aria-labelledby="action-access-title"
+  >
+    <div class="integration-detail-topline">
+      <p class="eyebrow">{{.Site}}</p>
+      <button
+        class="integration-close"
+        type="button"
+        data-action-close
+        aria-label="Close action details"
+      >
+        ×
+      </button>
+    </div>
+    <div class="integration-detail-header">
+      <h2 id="action-access-title"></h2>
+      <p data-action-description class="integration-detail-description"></p>
+    </div>
+    <div class="integration-detail-body" data-action-body></div>
+  </dialog>
+</section>
+{{end}}

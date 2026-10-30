@@ -51,6 +51,7 @@ type sitePageView struct {
 	Files           bool
 	Publishing      bool
 	Actions         []actionSummary
+	ActionCatalog   appActionCatalog
 	Analytics       *AnalyticsView
 	AI              *siteAIView
 	TemporaryAccess []AdminAccessGrant
@@ -104,6 +105,15 @@ func (s *Server) registerManageRoutes() {
 	s.mux.HandleFunc("GET /manage/{site}", s.manageSitePage)
 	s.mux.HandleFunc("GET /api/hex/my-sites", s.mySites)
 	s.mux.HandleFunc("PUT /api/hex/manage/sites/{site}/sharing", s.manageUpdateSharing)
+	if s.siteAPIEnabled() {
+		s.mux.HandleFunc("GET /apps/{site}/actions", s.appActionsPage)
+		s.mux.HandleFunc("GET /api/hex/manage/sites/{site}/actions/{action}/access", s.manageActionAccess)
+		s.mux.HandleFunc("PUT /api/hex/manage/sites/{site}/actions/{action}/access", s.manageActionAccess)
+	}
+	if s.eventsEnabled() {
+		s.mux.HandleFunc("GET /api/hex/manage/sites/{site}/events/{event}/access", s.manageActionAccess)
+		s.mux.HandleFunc("PUT /api/hex/manage/sites/{site}/events/{event}/access", s.manageActionAccess)
+	}
 	if s.config.Publisher != nil {
 		s.mux.HandleFunc("POST /api/hex/manage/sites/{site}/unpublish", s.manageUnpublish)
 	}
@@ -287,6 +297,11 @@ func (s *Server) manageSitePage(w http.ResponseWriter, r *http.Request) {
 	if view.Tab == "overview" {
 		view.Facts = factsFrom(metadata, view.History)
 		view.Actions = s.actionSummaries(r.Context(), site)
+		view.ActionCatalog, err = s.appActionCatalog(r.Context(), site, identity, access, true)
+		if err != nil {
+			writeServerError(w, err)
+			return
+		}
 	}
 	if view.Tab == "overview" || view.Tab == "sharing" {
 		view.Sharing = s.sharingView(r.Context(), site, access, exists)
