@@ -177,12 +177,8 @@ func quotedIdentity(identity *Identity) string {
 }
 
 func (a siteAuthorization) readFilter(collection string) (*RecordCondition, bool) {
-	return a.resourceReadFilter("collection", collection, "read")
-}
-
-func (a siteAuthorization) resourceReadFilter(kind, resource, operation string) (*RecordCondition, bool) {
 	var any []RecordCondition
-	for _, grant := range a.matchingGrants(kind, resource, operation) {
+	for _, grant := range a.matchingGrants("collection", collection, "read") {
 		condition, matches := a.grantCondition(grant)
 		if !matches {
 			continue
