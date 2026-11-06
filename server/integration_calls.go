@@ -48,6 +48,9 @@ type SiteIntegration struct {
 	Approval         string                    `json:"approval,omitempty"`
 	Connection       *connectionStatus         `json:"connection,omitempty"`
 	Endpoints        []IntegrationEndpointInfo `json:"endpoints"`
+	// Events lists what the site's automations can subscribe to; Allowed
+	// reports the platform permission and approval for the site.
+	Events []IntegrationEventInfo `json:"events,omitempty"`
 }
 
 // IntegrationEndpointInfo is an endpoint's discoverable contract.
@@ -102,6 +105,9 @@ func (s *Server) siteIntegrations(ctx context.Context, caller integrationCaller)
 			allowed := approved && s.integrationAccess(caller, endpoint) == nil
 			described.Endpoints = append(described.Endpoints, endpointInfo(endpoint, allowed))
 		}
+		for _, event := range integration.sortedEvents() {
+			described.Events = append(described.Events, eventInfo(event, s.eventAllowedForSite(caller.site, approved, event)))
+		}
 		result = append(result, described)
 	}
 	return result, nil
@@ -130,6 +136,7 @@ func (s *Server) integrationCatalog(w http.ResponseWriter, r *http.Request) {
 		RequiresApproval bool                      `json:"requiresApproval"`
 		Connector        string                    `json:"connector,omitempty"`
 		Endpoints        []IntegrationEndpointInfo `json:"endpoints"`
+		Events           []IntegrationEventInfo    `json:"events,omitempty"`
 	}
 	caller := integrationCaller{identity: identity, role: roleEditor}
 	result := make([]catalogEntry, 0)
@@ -142,6 +149,11 @@ func (s *Server) integrationCatalog(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, endpoint := range integration.sortedEndpoints() {
 			entry.Endpoints = append(entry.Endpoints, endpointInfo(endpoint, s.granted(caller, endpoint.permission())))
+		}
+		for _, event := range integration.sortedEvents() {
+			// Events are granted to sites, never to people, so the catalog
+			// only describes them.
+			entry.Events = append(entry.Events, eventInfo(event, false))
 		}
 		result = append(result, entry)
 	}

@@ -47,6 +47,9 @@ type Integration struct {
 	// when the record cannot be written.
 	Audit     bool
 	Endpoints []IntegrationEndpoint
+	// Events are what automations can subscribe to from the third-party
+	// system; the host publishes them with Server.PublishIntegrationEvent.
+	Events []IntegrationEvent
 }
 
 // IntegrationEndpoint is one typed operation of an integration. Both
@@ -138,6 +141,7 @@ const maxIntegrationDescriptionSize = 500
 type registeredIntegration struct {
 	integration Integration
 	endpoints   map[string]*registeredEndpoint
+	events      map[string]*registeredEvent
 }
 
 type registeredEndpoint struct {
@@ -205,13 +209,14 @@ func (r *IntegrationRegistry) Register(integration Integration) error {
 	if strings.TrimSpace(integration.Title) == "" {
 		return fmt.Errorf("%s needs a title", label)
 	}
-	if len(integration.Endpoints) == 0 {
-		return fmt.Errorf("%s needs at least one endpoint", label)
+	if len(integration.Endpoints) == 0 && len(integration.Events) == 0 {
+		return fmt.Errorf("%s needs at least one endpoint or event", label)
 	}
 
 	registered := &registeredIntegration{
 		integration: integration,
 		endpoints:   make(map[string]*registeredEndpoint, len(integration.Endpoints)),
+		events:      make(map[string]*registeredEvent, len(integration.Events)),
 	}
 	for _, endpoint := range integration.Endpoints {
 		compiled, err := compileEndpoint(registered, endpoint)
@@ -223,7 +228,22 @@ func (r *IntegrationRegistry) Register(integration Integration) error {
 		}
 		registered.endpoints[endpoint.Name] = compiled
 	}
+	for _, event := range integration.Events {
+		compiled, err := compileIntegrationEvent(registered, event)
+		if err != nil {
+			return fmt.Errorf("%s: %w", label, err)
+		}
+		if _, exists := registered.endpoints[event.Name]; exists {
+			return fmt.Errorf("%s: event %s has the same name as an endpoint", label, event.Name)
+		}
+		key := eventKey(event.Name, event.Version)
+		if _, exists := registered.events[key]; exists {
+			return fmt.Errorf("%s: event %s version %d is registered twice", label, event.Name, event.Version)
+		}
+		registered.events[key] = compiled
+	}
 	registered.integration.Endpoints = slices.Clone(integration.Endpoints)
+	registered.integration.Events = slices.Clone(integration.Events)
 
 	r.mu.Lock()
 	defer r.mu.Unlock()

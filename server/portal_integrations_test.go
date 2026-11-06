@@ -38,6 +38,8 @@ func setupPortalIntegrations(t *testing.T, withStore bool, configure ...func(*he
 		}},
 		{Name: "chat", Title: "Team chat", Description: "Registered messaging operations.", Endpoints: []hex.IntegrationEndpoint{
 			{Name: "channels", Description: "Read channels.", InputSchema: objectSchema, OutputSchema: objectSchema, Handler: handler},
+		}, Events: []hex.IntegrationEvent{
+			{Name: "message", Version: 1, Description: "A message was posted.", Schema: objectSchema},
 		}},
 		{Name: "archive", Title: "Team archive", Connector: "archive-account", Endpoints: []hex.IntegrationEndpoint{
 			{Name: "pages", Description: "Read archive pages.", InputSchema: objectSchema, OutputSchema: objectSchema, Handler: handler},
@@ -458,5 +460,18 @@ func TestPortalIntegrationFormsRequireRequestMarkerAndSameOrigin(t *testing.T) {
 	}
 	if approvals, err := store.ListIntegrationApprovals(context.Background()); err != nil || len(approvals) != 0 {
 		t.Fatalf("unsafe form requests mutated approvals: %+v %v", approvals, err)
+	}
+}
+
+func TestPortalIntegrationDetailsListEvents(t *testing.T) {
+	server, _ := setupPortalIntegrations(t, true)
+	page := requestAs(t, server, integrationFormHeaders("owner", false), "GET", "/integrations/chat", nil, 200).Body.String()
+	for _, want := range []string{"Events for automations", "A message was posted.", "integration:chat", "chat.events.message", "integration read on chat.message", "--producer integration:chat --event message --version 1"} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("missing %q in %s", want, page)
+		}
+	}
+	if ledger := requestAs(t, server, integrationFormHeaders("owner", false), "GET", "/integrations/ledger", nil, 200).Body.String(); strings.Contains(ledger, "Events for automations") {
+		t.Fatal("events section shown for an integration without events")
 	}
 }

@@ -192,3 +192,39 @@ config.Integrations = registry
 ```
 
 Both schemas are required. Describe results precisely, including the properties of list items: they become the app's generated types. Descriptions are shown to app developers and to models as tool descriptions, so say what the endpoint returns and when to use it. Return slim, purpose-built results rather than raw third-party payloads, and keep personal data to what the endpoint is for. `hex.DoJSON` maps third-party 400/404/409/422/429 to statuses the app sees and 401/403 to "refused access"; return `*hex.IntegrationError` for other app-visible failures. Connector-backed handlers use `call.HTTPClient(ctx)`; register the connector first with `registry.RegisterConnector`. Tests can build calls with `hex.NewIntegrationCall`.
+
+## Integration events
+
+Integrations can declare events that automations subscribe to through the
+ordinary [durable event](events.md) pipeline, under the producer
+`integration:<name>`:
+
+```go
+Events: []hex.IntegrationEvent{{
+    Name: "message", Version: 1,
+    Description: "A message posted in a channel the bot is a member of.",
+    Schema: json.RawMessage(`{"type":"object","required":["channel","ts","text"],...}`),
+    // Optional: which subscribing sites may see this particular event.
+    Visible: func(site string, data json.RawMessage) bool { return allowlist.Allows(site, data) },
+}},
+```
+
+The host publishes events, typically after verifying a provider webhook:
+`server.PublishIntegrationEvent(ctx, "slack", "message", 1, providerEventID, payload)`.
+The payload is validated against the schema; the idempotency key
+deduplicates provider retries; events no subscriber may receive are not
+stored. There is no HTTP publish route for integration events.
+
+A subscribing automation needs the event's permission (default
+`<integration>.events.<name>`, so `<integration>.*` grants include it)
+granted to `site:<name>` or `*`, site approval when the integration
+`RequiresApproval`, and under version 2 policies an `integration` read grant
+on `<integration>.<event>` for `automation:<name>`. Event names share that
+resource namespace with endpoint names and must differ from them. All
+checks are repeated on every delivery, so revoking a grant stops later
+deliveries (they become dead and can be replayed after access is restored).
+Schemas are immutable per version: changing one without a new version makes
+publishing fail. The portal's integration detail pages list each event with its
+producer, permission, site policy grant, payload schema and the subscribe
+command, and `hex integrations list` / `catalog` include them.
+

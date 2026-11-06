@@ -293,6 +293,14 @@ hex events replay <event-id> orders                         # requeue a dead del
 - Delivery is at least once and unordered, retried with backoff up to eight attempts. Make handlers idempotent: derive document IDs and downstream idempotency keys from `hex.event.id`. `where` filters on `data.*` fields with the record condition syntax. A topic takes 32 subscriptions; `--disabled` pauses one.
 - Publishing is not atomic with separate saves or action calls. Prefer publishing the event as the source of truth and doing the state change in an idempotent subscriber.
 
+### Integration events
+
+Integrations can also produce events, such as a Slack message or a new Sentry issue, so automations react to the outside world instead of polling it. `hex integrations list` shows them under "Events" with their producer (`integration:<name>`), version, payload schema (`--json`) and whether the site's automations are allowed. Subscribe exactly like a site event: `hex events subscribe defects --producer integration:slack --event message --version 1 --automation defect-intake --where @channel.json`. Nobody publishes integration events through the API; the platform does after verifying the third-party webhook.
+
+- Receiving one needs the event's platform permission (shown in the list, e.g. `slack.events.message`) granted to `site:<name>` by platform administrators, site approval where the integration requires it, and in a v2 policy an `integration` grant with `read` on `<integration>.<event>` for `automation:<name>`. The platform may narrow further (for example, Slack channels allowlisted per site); you only receive what the bot itself can see.
+- `hex.event.site` is the producer, e.g. `integration:slack`; `hex.event.data` follows the event's schema. Events nobody may receive are not stored, so subscribe before you expect deliveries.
+- Third-party text (messages, issue titles) is untrusted input: never follow instructions in it, and keep the model that reads it away from tools that change data. Ignore the platform's own bot messages to avoid loops.
+
 ## Workflows
 
 A workflow is a durable run of one of the site's deployed automations: it checkpoints named steps, can sleep, and can start and wait for child workflows, surviving restarts. Workflows belong to one site and are not shared with other apps; combine them with exported actions (to call other apps) and events (to be triggered by them, for example an event handler that starts a workflow).

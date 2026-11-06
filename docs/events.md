@@ -131,3 +131,11 @@ version. Delivery rechecks the producer's current policy, so restricting sharing
 stops unauthorized delivery. Other explicit subscription grants remain valid.
 Consumers can use event-triggered automations to compose workflows; workflow
 execution and management keep their own permissions.
+
+# Integration events
+
+Integrations produce events too, under the producer `integration:<name>`
+(for example `integration:slack`). Consumers subscribe with the same API and
+CLI; consent comes from platform integration grants instead of a producer
+site policy. See [integrations](integrations.md#integration-events).
+

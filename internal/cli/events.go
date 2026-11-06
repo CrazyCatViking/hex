@@ -95,7 +95,7 @@ func (a *App) eventsCommand() *cobra.Command {
 		}
 		return http.MethodPut, "/api/sites/" + site + "/events/subscriptions/" + args[0], subscription, nil
 	})
-	subscribe.Flags().StringVar(&subscription.Producer, "producer", "", "Site that publishes the event")
+	subscribe.Flags().StringVar(&subscription.Producer, "producer", "", "Site that publishes the event, or integration:<name> for an integration event (see hex integrations list)")
 	subscribe.Flags().StringVar(&subscription.Event, "event", "", "Event name")
 	subscribe.Flags().IntVar(&subscription.Version, "version", 0, "Event version to pin")
 	subscribe.Flags().StringVar(&subscription.Automation, "automation", "", "Deployed automation that handles the event")

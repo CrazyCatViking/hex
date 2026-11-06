@@ -107,6 +107,9 @@ func (s *Server) eventSubscriberAllowed(ctx context.Context, subscription EventS
 	if principal.ID != subscription.Principal {
 		return ErrForbidden
 	}
+	if integration, ok := integrationProducerName(subscription.Producer); ok {
+		return s.integrationSubscriberAllowed(ctx, integration, subscription)
+	}
 	access, exists, err := s.sitePolicy(ctx, subscription.Producer)
 	if err != nil {
 		return err
@@ -144,9 +147,20 @@ func (s *Server) publishEvent(ctx context.Context, site, name string, authorizat
 	if err := s.admitSiteOperation(ctx, site, "event"); err != nil {
 		return DurableEvent{}, err
 	}
-	record := eventRecord{DurableEvent: event, Fingerprint: internalKey(string(request.Data)), Deliveries: map[string]EventDelivery{}}
+	return s.fanOutEvent(ctx, topic, event, false, nil)
+}
+
+// fanOutEvent stores the event with a pending delivery for every enabled,
+// matching and permitted subscription. include can narrow the recipients
+// further. With skipUnreceived, an event nobody receives is not stored and
+// is returned without an ID.
+func (s *Server) fanOutEvent(ctx context.Context, topic eventTopic, event DurableEvent, skipUnreceived bool, include func(EventSubscription) bool) (DurableEvent, error) {
+	record := eventRecord{DurableEvent: event, Fingerprint: internalKey(string(event.Data)), Deliveries: map[string]EventDelivery{}}
 	for key, subscription := range topic.Subscriptions {
-		if subscription.Disabled || !subscription.Where.Matches(Document{Data: request.Data}) {
+		if subscription.Disabled || !subscription.Where.Matches(Document{Data: event.Data}) {
+			continue
+		}
+		if include != nil && !include(subscription) {
 			continue
 		}
 		if err := s.eventSubscriberAllowed(ctx, subscription); errors.Is(err, ErrForbidden) {
@@ -157,7 +171,11 @@ func (s *Server) publishEvent(ctx context.Context, site, name string, authorizat
 		record.Deliveries[key] = EventDelivery{Subscription: subscription, Status: "pending", NextAttempt: event.CreatedAt}
 	}
 	record.Pending = len(record.Deliveries) > 0
-	_, err = s.mutateSystem(ctx, "events", id, func(current *Document) (json.RawMessage, error) {
+	if skipUnreceived && !record.Pending {
+		event.ID = ""
+		return event, nil
+	}
+	_, err := s.mutateSystem(ctx, "events", event.ID, func(current *Document) (json.RawMessage, error) {
 		if current != nil {
 			var previous eventRecord
 			if err := json.Unmarshal(current.Data, &previous); err != nil {
@@ -255,7 +273,7 @@ func (s *Server) eventSubscriptionHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	site, id := r.PathValue("site"), r.PathValue("id")
-	if !siteNamePattern.MatchString(request.Producer) || !namePattern.MatchString(request.Event) || !namePattern.MatchString(id) || request.Version < 1 {
+	if !validEventProducer(request.Producer) || !namePattern.MatchString(request.Event) || !namePattern.MatchString(id) || request.Version < 1 {
 		writeError(w, 400, "invalid subscription")
 		return
 	}
@@ -288,8 +306,26 @@ func (s *Server) eventSubscriptionHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	subscription := EventSubscription{ID: id, Site: site, Principal: principal.ID, Producer: request.Producer, Event: request.Event, Version: request.Version, Automation: request.Automation, Revision: revision, Generation: generation, Disabled: request.Disabled, Where: request.Where}
+	if integration, ok := integrationProducerName(request.Producer); ok {
+		// Integration event types exist in code; their topic is stored on
+		// first use so it can hold subscriptions.
+		event := s.config.Integrations.event(integration, request.Event, request.Version)
+		if event == nil {
+			writeError(w, 404, fmt.Sprintf("integration %s has no event %s version %d", integration, request.Event, request.Version))
+			return
+		}
+		if _, err := s.ensureIntegrationTopic(r.Context(), event); err != nil {
+			writeServerError(w, err)
+			return
+		}
+	}
 	if !subscription.Disabled {
 		if err := s.eventSubscriberAllowed(r.Context(), subscription); err != nil {
+			var denied *forbiddenError
+			if errors.As(err, &denied) {
+				writeError(w, 403, denied.Error())
+				return
+			}
 			writeSiteCallError(w, err)
 			return
 		}

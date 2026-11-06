@@ -90,6 +90,24 @@ func printIntegrations(a *App, integrations []hex.SiteIntegration) error {
 				yesNo(endpoint.Allowed), yesNo(endpoint.Write), endpoint.Permission, notes)
 		}
 	}
+	if err := table.Flush(); err != nil {
+		return err
+	}
+	var events []string
+	for _, integration := range integrations {
+		for _, event := range integration.Events {
+			events = append(events, fmt.Sprintf("%s\t%s\t%d\t%s\t%s", event.Producer, event.Name, event.Version, yesNo(event.Allowed), event.Permission))
+		}
+	}
+	if len(events) == 0 {
+		return nil
+	}
+	fmt.Fprintln(a.Out, "\nEvents your automations can subscribe to (hex events subscribe <id> --producer <producer> --event <event> --version <v> --automation <name>):")
+	table = tabwriter.NewWriter(a.Out, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(table, "PRODUCER\tEVENT\tVERSION\tALLOWED\tPERMISSION")
+	for _, line := range events {
+		fmt.Fprintln(table, line)
+	}
 	return table.Flush()
 }
 

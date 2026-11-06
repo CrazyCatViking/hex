@@ -357,6 +357,54 @@
     {{else}}
     <p class="muted">No features are registered for this integration.</p>
     {{end}}
+    {{if .Events}}
+    <div class="integration-features-heading">
+      <h3>Events for automations</h3>
+      <span>{{len .Events}} event types</span>
+    </div>
+    <p class="integration-features-caption">
+      Automations subscribe to these to react when something happens. A site
+      needs the event permission granted to its automations by a platform
+      administrator, any required approval, and an integration read grant in
+      its own policy. Expand an event for its payload schema.
+    </p>
+    {{range .Events}}
+    <details class="integration-endpoint">
+      <summary>
+        <div class="integration-endpoint-identity">
+          <div class="integration-endpoint-name">
+            <strong>{{.Name}}</strong
+            ><span class="integration-effect">Event v{{.Version}}</span>
+          </div>
+          <p>{{.Description}}</p>
+        </div>
+        <div class="integration-endpoint-status">
+          <small>Granted to sites</small>
+        </div>
+      </summary>
+      <div class="integration-endpoint-contract">
+        <p><strong>Producer</strong><br /><code>{{.Producer}}</code></p>
+        <p>
+          <strong>Required platform permission</strong><br /><code
+            >{{.Permission}}</code
+          >
+        </p>
+        <p>
+          <strong>Site policy grant</strong><br /><code
+            >integration read on {{.QualifiedName}}</code
+          >
+        </p>
+        <p><strong>Subscribe</strong><br /><code>{{.Subscribe}}</code></p>
+        <div class="integration-contract-grid">
+          <div>
+            <h4>Payload schema</h4>
+            <pre>{{.SchemaText}}</pre>
+          </div>
+        </div>
+      </div>
+    </details>
+    {{end}}
+    {{end}}
     <p class="integration-detail-footnote">
       {{if .Integration.Audit}}Calls to this integration are audited.
       {{end}}Write features change data in the connected system. {{if

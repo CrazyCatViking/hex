@@ -45,6 +45,17 @@ type integrationDetailView struct {
 	Chrome
 	Integration portalIntegrationCard
 	Endpoints   []portalIntegrationEndpoint
+	Events      []portalIntegrationEvent
+}
+
+// portalIntegrationEvent describes an event automations can subscribe to.
+// Events are granted to sites, never to people, so there is no personal
+// access status.
+type portalIntegrationEvent struct {
+	IntegrationEventInfo
+	QualifiedName string
+	Subscribe     string
+	SchemaText    string
 }
 
 type portalIntegrationEndpoint struct {
@@ -94,6 +105,20 @@ func (s *Server) renderIntegrationDetail(w http.ResponseWriter, r *http.Request,
 			return
 		}
 		view.Endpoints = append(view.Endpoints, feature)
+	}
+	for _, event := range registered.sortedEvents() {
+		info := eventInfo(event, false)
+		schema, err := json.MarshalIndent(info.Schema, "", "  ")
+		if err != nil {
+			writeServerError(w, err)
+			return
+		}
+		view.Events = append(view.Events, portalIntegrationEvent{
+			IntegrationEventInfo: info,
+			QualifiedName:        event.qualifiedName(),
+			Subscribe:            fmt.Sprintf("hex events subscribe <id> --producer %s --event %s --version %d --automation <name>", info.Producer, info.Name, info.Version),
+			SchemaText:           string(schema),
+		})
 	}
 	s.writePortalPage(w, template, view)
 }
