@@ -22,10 +22,10 @@ import (
 //
 // Nobody can publish an integration event through the API. Subscribing
 // needs the event's platform permission granted to "site:<name>" (or "*")
-// in Config.IntegrationGrants, a site approval when the integration
-// RequiresApproval, and, under version 2 site policies, an "integration"
-// read grant on "<integration>.<event>" for the subscribing automation.
-// Every delivery checks all three again, and Visible can narrow further
+// in Config.IntegrationGrants and a site approval when the integration
+// RequiresApproval. The site's own policy needs no grant: the site's
+// owners write its automations. Every delivery checks both again, and
+// Visible can narrow further
 // which sites see which events (for example, only channels one of the
 // site's owners can read).
 
@@ -155,8 +155,7 @@ func (e *forbiddenError) Error() string        { return e.message }
 func (e *forbiddenError) Is(target error) bool { return target == ErrForbidden }
 
 // integrationSubscriberAllowed checks that a subscription's automation may
-// receive an integration event: the platform grant, the site approval and,
-// for version 2 policies, the site's own integration grant.
+// receive an integration event: the platform grant and the site approval.
 func (s *Server) integrationSubscriberAllowed(ctx context.Context, integration string, subscription EventSubscription) error {
 	event := s.config.Integrations.event(integration, subscription.Event, subscription.Version)
 	if event == nil {
@@ -169,9 +168,6 @@ func (s *Server) integrationSubscriberAllowed(ctx context.Context, integration s
 	caller := integrationCaller{site: subscription.Site, automation: subscription.Automation, authorization: &authorization}
 	if !s.granted(caller, event.permission()) {
 		return &forbiddenError{fmt.Sprintf("site:%s needs the %s platform permission; ask a platform admin", subscription.Site, event.permission())}
-	}
-	if authorization.access.Version == 2 && !authorization.permits("integration", event.qualifiedName(), "read") {
-		return &forbiddenError{fmt.Sprintf("the site's permission policy must grant automation:%s integration read on %s", subscription.Automation, event.qualifiedName())}
 	}
 	if event.integration.integration.RequiresApproval {
 		status, err := s.approvalStatus(ctx, subscription.Site, integration)

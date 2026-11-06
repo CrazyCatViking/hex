@@ -76,7 +76,7 @@ func setupAutomations(t *testing.T, grants ...hex.IntegrationGrant) (*hex.Server
 	policy := hex.MigrateSiteAccess(hex.SiteAccess{Owners: []string{"user:owner"}})
 	policy.Grants["test-automation-data"] = hex.PermissionGrant{Kind: "collection", Resource: "*", Operations: []string{"read", "create", "update", "delete"}, Subjects: hex.Subjects{Principals: []string{"automation:action-contract", "automation:weekly-report", "automation:birthdays"}}}
 	policy.Grants["test-automation-actions"] = hex.PermissionGrant{Kind: "action", Resource: "*", Operations: []string{"run"}, Subjects: hex.Subjects{Principals: []string{"automation:action-contract", "automation:weekly-report"}}}
-	policy.Grants["test-automation-integrations"] = hex.PermissionGrant{Kind: "integration", Resource: "*", Operations: []string{"read", "write"}, Subjects: hex.Subjects{Principals: []string{"automation:action-contract", "automation:weekly-report", "automation:birthdays", "automation:post"}}}
+	// No integration grants: automations need only the platform grant.
 	if err := access.PutSiteAccess(context.Background(), "demo", policy); err != nil {
 		t.Fatal(err)
 	}

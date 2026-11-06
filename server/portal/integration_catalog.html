@@ -365,8 +365,8 @@
     <p class="integration-features-caption">
       Automations subscribe to these to react when something happens. A site
       needs the event permission granted to its automations by a platform
-      administrator, any required approval, and an integration read grant in
-      its own policy. Expand an event for its payload schema.
+      administrator and any required approval. Expand an event for its payload
+      schema.
     </p>
     {{range .Events}}
     <details class="integration-endpoint">
@@ -387,11 +387,6 @@
         <p>
           <strong>Required platform permission</strong><br /><code
             >{{.Permission}}</code
-          >
-        </p>
-        <p>
-          <strong>Site policy grant</strong><br /><code
-            >integration read on {{.QualifiedName}}</code
           >
         </p>
         <p><strong>Subscribe</strong><br /><code>{{.Subscribe}}</code></p>

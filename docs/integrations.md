@@ -225,9 +225,10 @@ stored. There is no HTTP publish route for integration events.
 
 A subscribing automation needs the event's permission (default
 `<integration>.events.<name>`, so `<integration>.*` grants include it)
-granted to `site:<name>` or `*`, site approval when the integration
-`RequiresApproval`, and under version 2 policies an `integration` read grant
-on `<integration>.<event>` for `automation:<name>`. Event names share that
+granted to `site:<name>` or `*` and site approval when the integration
+`RequiresApproval`; the site's own policy needs no grant, because the site's
+owners write its automations (the same holds for automations calling
+endpoints). Event names share that
 resource namespace with endpoint names and must differ from them. All
 checks are repeated on every delivery, so revoking a grant stops later
 deliveries (they become dead and can be replayed after access is restored).

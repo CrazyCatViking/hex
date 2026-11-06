@@ -466,10 +466,13 @@ func TestPortalIntegrationFormsRequireRequestMarkerAndSameOrigin(t *testing.T) {
 func TestPortalIntegrationDetailsListEvents(t *testing.T) {
 	server, _ := setupPortalIntegrations(t, true)
 	page := requestAs(t, server, integrationFormHeaders("owner", false), "GET", "/integrations/chat", nil, 200).Body.String()
-	for _, want := range []string{"Events for automations", "A message was posted.", "integration:chat", "chat.events.message", "integration read on chat.message", "--producer integration:chat --event message --version 1"} {
+	for _, want := range []string{"Events for automations", "A message was posted.", "integration:chat", "chat.events.message", "--producer integration:chat --event message --version 1"} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("missing %q in %s", want, page)
 		}
+	}
+	if strings.Contains(page, "integration read on") {
+		t.Fatal("events still ask for a site policy grant")
 	}
 	if ledger := requestAs(t, server, integrationFormHeaders("owner", false), "GET", "/integrations/ledger", nil, 200).Body.String(); strings.Contains(ledger, "Events for automations") {
 		t.Fatal("events section shown for an integration without events")

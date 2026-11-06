@@ -211,9 +211,17 @@ func (s *Server) writeIntegrationError(w http.ResponseWriter, endpoint *register
 
 // integrationAccess checks the caller's grant and site role for an
 // endpoint. Site approval is checked separately because it needs the store.
+// Automations need only the platform grant: the site's owners write them, so
+// the site's own policy does not have to grant them integrations as well.
 func (s *Server) integrationAccess(caller integrationCaller, endpoint *registeredEndpoint) error {
 	if !s.granted(caller, endpoint.permission()) {
 		return &IntegrationError{Status: http.StatusForbidden, Message: "you do not have the " + endpoint.permission() + " permission"}
+	}
+	if caller.isAutomation() {
+		if endpoint.integration.integration.Connector != "" {
+			return &IntegrationError{Status: http.StatusForbidden, Message: "automations cannot use integrations that call with a person's connected account"}
+		}
+		return nil
 	}
 	if caller.authorization != nil && caller.authorization.access.Version == 2 {
 		operation := "read"
@@ -223,11 +231,8 @@ func (s *Server) integrationAccess(caller integrationCaller, endpoint *registere
 		if !caller.authorization.permits("integration", endpoint.qualifiedName(), operation) {
 			return &IntegrationError{Status: http.StatusForbidden, Message: "the site's permission policy does not allow this integration operation"}
 		}
-	} else if endpoint.endpoint.Write && !caller.isAutomation() && caller.role < roleEditor {
+	} else if endpoint.endpoint.Write && caller.role < roleEditor {
 		return &IntegrationError{Status: http.StatusForbidden, Message: "changing data through integrations needs the site's editor role"}
-	}
-	if endpoint.integration.integration.Connector != "" && caller.isAutomation() {
-		return &IntegrationError{Status: http.StatusForbidden, Message: "automations cannot use integrations that call with a person's connected account"}
 	}
 	return nil
 }

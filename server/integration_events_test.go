@@ -126,18 +126,12 @@ func TestIntegrationEventsReachPermittedSubscribers(t *testing.T) {
 	}
 
 	subscription := []byte(`{"producer":"integration:chat","event":"message","version":1,"automation":"on-message"}`)
-	// The receiver's v2 policy lacks the integration grant.
-	response := requestAs(t, server, headers, "PUT", "/api/sites/receiver/events/subscriptions/chat", subscription, 403)
-	if !strings.Contains(response.Body.String(), "chat.message") {
-		t.Fatal(response.Body.String())
-	}
-	if err := access.PutSiteAccess(ctx, "receiver", receiverPolicy(true, "user:member", "group:team")); err != nil {
-		t.Fatal(err)
-	}
+	// The receiver's v2 policy grants its automation no integration: the
+	// platform grant is enough.
 	requestAs(t, server, headers, "PUT", "/api/sites/receiver/events/subscriptions/chat", subscription, 200)
 	requestAs(t, server, headers, "PUT", "/api/sites/outsider/events/subscriptions/chat", subscription, 200)
 	// No platform grant for this site.
-	response = requestAs(t, server, headers, "PUT", "/api/sites/ungranted/events/subscriptions/chat", subscription, 403)
+	response := requestAs(t, server, headers, "PUT", "/api/sites/ungranted/events/subscriptions/chat", subscription, 403)
 	if !strings.Contains(response.Body.String(), "chat.events.message") {
 		t.Fatal(response.Body.String())
 	}
