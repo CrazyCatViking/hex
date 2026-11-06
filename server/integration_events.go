@@ -26,21 +26,24 @@ import (
 // RequiresApproval, and, under version 2 site policies, an "integration"
 // read grant on "<integration>.<event>" for the subscribing automation.
 // Every delivery checks all three again, and Visible can narrow further
-// which sites see which events (for example, a channel allowlist).
+// which sites see which events (for example, only channels one of the
+// site's owners can read).
 
 // IntegrationEvent is one versioned event type an integration produces.
 // Schema validates every published payload and is immutable per version:
 // publish breaking changes as a new version. Permission defaults to
 // "<integration>.events.<name>". Visible, when set, reports whether a
-// subscribing site may receive a particular event; it must be fast and
-// must not block, because it runs inside the publish fan-out.
+// subscribing automation may receive a particular event. Its call names the
+// site and automation, with no Identity, and SiteOwners returns the site's
+// owners. It runs once per matching subscription before the event is
+// stored, so it should answer quickly (cache lookups) and fail closed.
 type IntegrationEvent struct {
 	Name        string
 	Version     int
 	Description string
 	Permission  string
 	Schema      json.RawMessage
-	Visible     func(site string, data json.RawMessage) bool
+	Visible     func(ctx context.Context, call IntegrationCall, data json.RawMessage) bool
 }
 
 // IntegrationEventInfo is an event type's discoverable contract.
@@ -276,7 +279,7 @@ func (s *Server) PublishIntegrationEvent(ctx context.Context, integration, name 
 	}
 	visible := event.event.Visible
 	return s.fanOutEvent(ctx, topic, published, true, func(subscription EventSubscription) bool {
-		return visible == nil || visible(subscription.Site, payload)
+		return visible == nil || visible(ctx, s.integrationCall(subscription.Site, nil, subscription.Automation), payload)
 	})
 }
 

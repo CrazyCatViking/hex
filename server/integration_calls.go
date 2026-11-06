@@ -285,7 +285,7 @@ func (s *Server) callIntegration(ctx context.Context, caller integrationCaller, 
 		return nil, false, unauditedError(integration)
 	}
 
-	call := IntegrationCall{Site: caller.site, Identity: caller.identity, Automation: caller.automation}
+	call := s.integrationCall(caller.site, caller.identity, caller.automation)
 	cacheOwner := ""
 	connectionGeneration := ""
 	if integration.Connector != "" {

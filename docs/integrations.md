@@ -141,6 +141,8 @@ Connections unused for `Config.ConnectionIdleExpiry` (90 days by default) count 
 
 ### Custom-store upgrade contract
 
+A connector whose provider does not return a standard OAuth 2.0 token response sets `Exchange` to redeem the authorization code itself; Slack, for example, returns a person's token under `authed_user`. Refreshing still uses the standard flow, so such tokens should either not expire or carry a standard refresh token.
+
 Connector `APIOrigins` explicitly lists origins allowed to receive account tokens, for example `[]string{"https://api.atlassian.com"}`. Omitting it allows only the OAuth token endpoint's origin. Distinct API hosts must be configured; redirects may stay on the original origin only, even when multiple origins are listed. HTTPS is required except for loopback development. The restriction covers both integration requests and the connector's `Account` callback.
 
 `IntegrationStore.WithdrawIntegrationApproval` atomically removes only `requested` records, returning `ErrForbidden` for approved/other states and succeeding for missing records. Owner withdrawals use this operation; administrator revocations use unconditional deletion. Custom stores must enforce the status condition within the mutation, rather than a separate read.
@@ -191,7 +193,7 @@ err := registry.Register(hex.Integration{
 config.Integrations = registry
 ```
 
-Both schemas are required. Describe results precisely, including the properties of list items: they become the app's generated types. Descriptions are shown to app developers and to models as tool descriptions, so say what the endpoint returns and when to use it. Return slim, purpose-built results rather than raw third-party payloads, and keep personal data to what the endpoint is for. `hex.DoJSON` maps third-party 400/404/409/422/429 to statuses the app sees and 401/403 to "refused access"; return `*hex.IntegrationError` for other app-visible failures. Connector-backed handlers use `call.HTTPClient(ctx)`; register the connector first with `registry.RegisterConnector`. Tests can build calls with `hex.NewIntegrationCall`.
+Both schemas are required. Describe results precisely, including the properties of list items: they become the app's generated types. Descriptions are shown to app developers and to models as tool descriptions, so say what the endpoint returns and when to use it. Return slim, purpose-built results rather than raw third-party payloads, and keep personal data to what the endpoint is for. `hex.DoJSON` maps third-party 400/404/409/422/429 to statuses the app sees and 401/403 to "refused access"; return `*hex.IntegrationError` for other app-visible failures. Connector-backed handlers use `call.HTTPClient(ctx)`; register the connector first with `registry.RegisterConnector`. `call.SiteOwners(ctx)` returns the people who own the calling site, with the email remembered from their last sign-in, so an integration can limit an automation to what one of the people controlling it could see themselves. Tests can build calls with `hex.NewIntegrationCall` and `WithSiteOwners`.
 
 ## Integration events
 
@@ -204,10 +206,16 @@ Events: []hex.IntegrationEvent{{
     Name: "message", Version: 1,
     Description: "A message posted in a channel the bot is a member of.",
     Schema: json.RawMessage(`{"type":"object","required":["channel","ts","text"],...}`),
-    // Optional: which subscribing sites may see this particular event.
-    Visible: func(site string, data json.RawMessage) bool { return allowlist.Allows(site, data) },
+    // Optional: whether a subscribing automation may see this event. The
+    // call names the site and automation; SiteOwners returns its owners.
+    Visible: func(ctx context.Context, call hex.IntegrationCall, data json.RawMessage) bool {
+        return ownerCanReadChannel(ctx, call, data)
+    },
 }},
 ```
+
+`Visible` runs once per matching subscription before the event is stored, so
+it should answer from caches and fail closed.
 
 The host publishes events, typically after verifying a provider webhook:
 `server.PublishIntegrationEvent(ctx, "slack", "message", 1, providerEventID, payload)`.

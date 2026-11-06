@@ -385,3 +385,66 @@ func TestConnectedAccountFlow(t *testing.T) {
 		t.Fatal("the background cleanup kept an idle connection")
 	}
 }
+
+func TestConnectorCustomExchange(t *testing.T) {
+	fake := newFakeAuthorizationServer(t)
+	registry := new(hex.IntegrationRegistry)
+	var exchanged struct {
+		code, redirect string
+		options        int
+	}
+	if err := registry.RegisterConnector(hex.Connector{
+		Name: "chat", Title: "Chat",
+		OAuth2: oauth2.Config{ClientID: "client", ClientSecret: "secret", Endpoint: oauth2.Endpoint{
+			AuthURL: fake.server.URL + "/authorize", TokenURL: fake.server.URL + "/token",
+		}},
+		// The provider nests the person's token in a non-standard response.
+		Exchange: func(_ context.Context, config *oauth2.Config, code string, options ...oauth2.AuthCodeOption) (*oauth2.Token, error) {
+			exchanged.code, exchanged.redirect, exchanged.options = code, config.RedirectURL, len(options)
+			return &oauth2.Token{AccessToken: "nested", TokenType: "Bearer"}, nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Register(hex.Integration{
+		Name: "chat", Title: "Chat", Connector: "chat",
+		Endpoints: []hex.IntegrationEndpoint{{
+			Name: "me", Description: "Who the connected account is.", OutputSchema: anyResult, InputSchema: objectSchema,
+			Handler: func(ctx context.Context, call hex.IntegrationCall, _ json.RawMessage) (any, error) {
+				client, err := call.HTTPClient(ctx)
+				if err != nil {
+					return nil, err
+				}
+				request, err := hex.NewJSONRequest(ctx, "GET", fake.server.URL+"/me", nil)
+				if err != nil {
+					return nil, err
+				}
+				var result map[string]string
+				return result, hex.DoJSON(client, request, "Chat", &result)
+			},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	server := hex.New(hex.Config{
+		Identity: easyauth.Resolver{}, Access: memory.NewAccessStore(), SiteBaseURL: "https://hex.example.com",
+		Integrations: registry, IntegrationGrants: []hex.IntegrationGrant{{Principal: "*", Permissions: []string{"*"}}},
+		IntegrationStore: memory.NewIntegrationStore(), CredentialKey: make([]byte, 32),
+	})
+	start := requestAs(t, server, roleHeaders("person"), "GET", "/api/hex/connections/chat/start", nil, 302)
+	location, err := url.Parse(start.Header().Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie := start.Result().Cookies()[0]
+	headers := roleHeaders("person")
+	headers.Set("Cookie", cookie.Name+"="+cookie.Value)
+	requestAs(t, server, headers, "GET", "/api/hex/connections/chat/callback?code=the-code&state="+url.QueryEscape(location.Query().Get("state")), nil, 200)
+	if exchanged.code != "the-code" || exchanged.redirect != "https://hex.example.com/api/hex/connections/chat/callback" || exchanged.options != 1 {
+		t.Fatalf("exchange: %+v", exchanged)
+	}
+	result := requestAs(t, server, roleHeaders("person"), "POST", "/api/sites/demo/integrations/chat/me", nil, 200)
+	if !strings.Contains(result.Body.String(), `"token":"nested"`) || fake.refreshes.Load() != 0 {
+		t.Fatal(result.Body.String())
+	}
+}

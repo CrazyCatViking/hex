@@ -80,12 +80,33 @@ type IntegrationEndpoint struct {
 // IntegrationCall describes who an endpoint runs for. Identity is nil when
 // an automation calls; Automation then names it. HTTPClient returns a client
 // authorized as the caller's connected account for connector-backed
-// integrations.
+// integrations. SiteOwners returns the people who own the calling site.
 type IntegrationCall struct {
 	Site       string
 	Identity   *Identity
 	Automation string
 	connection func(context.Context) (*http.Client, error)
+	owners     func(context.Context) ([]Person, error)
+}
+
+// SiteOwners returns the people named as owners of the calling site, with
+// the name and email remembered from their last sign-in. Owners who never
+// signed in are returned with only their ID, and group owners are left out.
+// Integrations use it to limit what an automation may see to what one of
+// the people controlling it could see themselves.
+func (c IntegrationCall) SiteOwners(ctx context.Context) ([]Person, error) {
+	if c.owners == nil {
+		return nil, nil
+	}
+	return c.owners(ctx)
+}
+
+// WithSiteOwners returns a copy of the call whose SiteOwners returns owners,
+// for tests and for hosts that invoke handlers directly.
+func (c IntegrationCall) WithSiteOwners(owners []Person) IntegrationCall {
+	owners = slices.Clone(owners)
+	c.owners = func(context.Context) ([]Person, error) { return owners, nil }
+	return c
 }
 
 // NewIntegrationCall describes a call for tests and for hosts that invoke
@@ -501,4 +522,51 @@ func (s *Server) grantApplies(principal string, caller integrationCaller) bool {
 		return false
 	}
 	return caller.identity.matches(principal)
+}
+
+// siteOwnerPeople resolves a site's user owners to remembered people.
+func (s *Server) siteOwnerPeople(ctx context.Context, site string) ([]Person, error) {
+	access, exists, err := s.sitePolicy(ctx, site)
+	if err != nil || !exists {
+		return nil, err
+	}
+	var ids []string
+	for _, principal := range access.Owners {
+		if kind, value, _ := splitPrincipal(principal); kind == "user" && value != "" {
+			ids = append(ids, value)
+		}
+	}
+	slices.Sort(ids)
+	ids = slices.Compact(ids)
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	remembered := map[string]Person{}
+	if s.config.People != nil {
+		found, err := s.config.People.GetPeople(ctx, ids)
+		if err != nil {
+			return nil, fmt.Errorf("look up the owners of %s: %w", site, err)
+		}
+		for _, person := range found {
+			remembered[person.ID] = person
+		}
+	}
+	people := make([]Person, 0, len(ids))
+	for _, id := range ids {
+		if person, ok := remembered[id]; ok {
+			people = append(people, person)
+		} else {
+			people = append(people, Person{ID: id})
+		}
+	}
+	return people, nil
+}
+
+// integrationCall describes a call for an integration handler or an event
+// visibility check.
+func (s *Server) integrationCall(site string, identity *Identity, automation string) IntegrationCall {
+	return IntegrationCall{
+		Site: site, Identity: identity, Automation: automation,
+		owners: func(ctx context.Context) ([]Person, error) { return s.siteOwnerPeople(ctx, site) },
+	}
 }

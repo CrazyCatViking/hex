@@ -41,6 +41,14 @@ func accountRejection(err error) string {
 // example its email address, using a client authorized as that account; an
 // error rejects the connection, so it can also enforce which accounts may
 // connect (return an IntegrationError to explain why).
+//
+// Exchange replaces the standard authorization code exchange for providers
+// whose token response is not standard OAuth 2.0, such as Slack, which
+// returns a person's token under authed_user. It receives the platform's
+// configuration (with the redirect URL set) and the options the platform
+// would send, including the PKCE verifier. Refreshing still uses the
+// standard flow, so tokens it returns should either not expire or carry a
+// standard refresh token.
 type Connector struct {
 	Name        string
 	Title       string
@@ -51,6 +59,7 @@ type Connector struct {
 	APIOrigins      []string
 	AuthCodeOptions []oauth2.AuthCodeOption
 	Account         func(ctx context.Context, client *http.Client) (string, error)
+	Exchange        func(ctx context.Context, config *oauth2.Config, code string, options ...oauth2.AuthCodeOption) (*oauth2.Token, error)
 }
 
 // IntegrationApproval records a site's request to use an integration that
@@ -370,7 +379,13 @@ func (s *Server) completeConnection(w http.ResponseWriter, r *http.Request) {
 		writeServerError(w, err)
 		return
 	}
-	token, err := config.Exchange(r.Context(), code, oauth2.VerifierOption(state.Verifier))
+	exchange := config.Exchange
+	if connector.Exchange != nil {
+		exchange = func(ctx context.Context, code string, options ...oauth2.AuthCodeOption) (*oauth2.Token, error) {
+			return connector.Exchange(ctx, &config, code, options...)
+		}
+	}
+	token, err := exchange(r.Context(), code, oauth2.VerifierOption(state.Verifier))
 	if err != nil {
 		slog.Warn("connect account", "connector", connector.Name, "error", err)
 		writeError(w, http.StatusBadGateway, "could not complete the connection with "+connector.Title)

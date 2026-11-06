@@ -10,6 +10,7 @@ import (
 
 	hex "github.com/crazycatviking/hex/server"
 	"github.com/crazycatviking/hex/server/providers/easyauth"
+	"github.com/crazycatviking/hex/server/providers/memory"
 )
 
 const chatMessageSchemaText = `{
@@ -28,9 +29,24 @@ func chatEventIntegration(t *testing.T) *hex.IntegrationRegistry {
 		Name: "chat", Title: "Chat",
 		Events: []hex.IntegrationEvent{{
 			Name: "message", Version: 1, Description: "A message in a channel.", Schema: chatMessageSchema,
-			// Only the receiver site may see messages in the secret channel.
-			Visible: func(site string, data json.RawMessage) bool {
-				return !strings.Contains(string(data), `"secret"`) || site == "receiver"
+			// Only sites owned by a member of the secret channel see it.
+			Visible: func(ctx context.Context, call hex.IntegrationCall, data json.RawMessage) bool {
+				if call.Identity != nil || call.Automation != "on-message" {
+					return false
+				}
+				if !strings.Contains(string(data), `"secret"`) {
+					return true
+				}
+				owners, err := call.SiteOwners(ctx)
+				if err != nil {
+					return false
+				}
+				for _, owner := range owners {
+					if owner.Email == "member@example.com" {
+						return true
+					}
+				}
+				return false
 			},
 		}},
 	})
@@ -66,9 +82,13 @@ func TestIntegrationEventRegistration(t *testing.T) {
 func TestIntegrationEventsReachPermittedSubscribers(t *testing.T) {
 	ctx := context.Background()
 	database, access, automations := durableTestStores(t)
+	people := memory.NewPeopleStore()
+	if err := people.RememberPerson(ctx, hex.Person{ID: "member", Name: "Member", Email: "member@example.com"}); err != nil {
+		t.Fatal(err)
+	}
 	config := hex.Config{
 		Database: database, Access: access, Automations: automations, Actions: &hex.ActionRegistry{}, Identity: easyauth.Resolver{},
-		Integrations: chatEventIntegration(t),
+		People: people, Integrations: chatEventIntegration(t),
 		IntegrationGrants: []hex.IntegrationGrant{
 			{Principal: "site:receiver", Permissions: []string{"chat.events.message"}},
 			{Principal: "site:outsider", Permissions: []string{"chat.*"}},
@@ -77,8 +97,9 @@ func TestIntegrationEventsReachPermittedSubscribers(t *testing.T) {
 	server := hex.New(config)
 	headers := roleHeaders("owner")
 
-	receiverPolicy := func(withIntegrationGrant bool) hex.SiteAccess {
-		policy := hex.SiteAccess{Version: 2, Owners: []string{"user:owner"}, Admission: hex.Subjects{Owners: true}, Grants: map[string]hex.PermissionGrant{
+	// The receiver is co-owned by a member of the secret channel.
+	receiverPolicy := func(withIntegrationGrant bool, owners ...string) hex.SiteAccess {
+		policy := hex.SiteAccess{Version: 2, Owners: append([]string{"user:owner"}, owners...), Admission: hex.Subjects{Owners: true}, Grants: map[string]hex.PermissionGrant{
 			"save": {Kind: "collection", Resource: "messages", Operations: []string{"create", "update"}, Subjects: hex.Subjects{Principals: []string{"automation:on-message"}}},
 		}}
 		if withIntegrationGrant {
@@ -86,7 +107,7 @@ func TestIntegrationEventsReachPermittedSubscribers(t *testing.T) {
 		}
 		return policy
 	}
-	sites := map[string]hex.SiteAccess{"receiver": receiverPolicy(false), "outsider": receiverPolicy(true), "ungranted": receiverPolicy(true)}
+	sites := map[string]hex.SiteAccess{"receiver": receiverPolicy(false, "user:member", "group:team"), "outsider": receiverPolicy(true), "ungranted": receiverPolicy(true)}
 	script := `export default async hex => { await hex.db.save("messages", {site: hex.event.site, text: hex.event.data.text}, {id: hex.event.id}); }`
 	for site, policy := range sites {
 		if err := access.PutSiteAccess(ctx, site, policy); err != nil {
@@ -110,7 +131,7 @@ func TestIntegrationEventsReachPermittedSubscribers(t *testing.T) {
 	if !strings.Contains(response.Body.String(), "chat.message") {
 		t.Fatal(response.Body.String())
 	}
-	if err := access.PutSiteAccess(ctx, "receiver", receiverPolicy(true)); err != nil {
+	if err := access.PutSiteAccess(ctx, "receiver", receiverPolicy(true, "user:member", "group:team")); err != nil {
 		t.Fatal(err)
 	}
 	requestAs(t, server, headers, "PUT", "/api/sites/receiver/events/subscriptions/chat", subscription, 200)
